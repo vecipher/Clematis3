@@ -10,3 +10,8 @@ python3 scripts/run_demo.py
 ```
 
 Logs are written to `.logs/` at the repo root.
+
+## T1:
+	•	pops = PQ pops
+	•	iters = layers beyond seeds visited
+	•	propagations = relaxations (edge traversals)
