@@ -1,0 +1,16 @@
+import os, sys
+from clematis.io.config import load_config
+from clematis.world.scenario import run_one_turn
+
+def main():
+    cfg = load_config(os.path.join(os.path.dirname(__file__), "..", "configs", "config.yaml"))
+    state = {}
+    line = run_one_turn("AgentA", state, "hello world", cfg)
+    print("Utterance:", line)
+    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    print("Logs written to:", os.path.join(repo_root, ".logs"))
+
+if __name__ == "__main__":
+    # Add repo root to sys.path to simplify running without install
+    sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+    main()

@@ -1,0 +1,22 @@
+k_surface: 32
+surface_method: PCA
+t1:
+  decay:
+    mode: exp_floor
+    rate: 0.6
+    floor: 0.05
+  edge_type_mult: {supports: 1.0, associates: 0.6, contradicts: 0.8}
+  iter_cap: 50
+  node_budget: 1.5
+  queue_budget: 10000
+  radius_cap: 4
+t2:
+  k_retrieval: 64
+  sim_threshold: 0.3
+  tiers: [exact_semantic, cluster_semantic, archive]
+  ranking: {alpha_sim: 0.75, beta_recency: 0.2, gamma_importance: 0.05}
+  clusters_top_m: 3
+t3: {max_rag_loops: 1, tokens: 512, temp: 0.7}
+t4: {delta_norm_cap: 2.0, novelty_cap: 1.0, churn_cap: 64, cooldown_s: 60}
+budgets: {time_ms: 1000, ops: 1000, tokens: 1024, time_ms_reflection: 6000}
+flags: {enable_world_memory: true, allow_reflection: true}
