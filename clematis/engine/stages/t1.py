@@ -46,6 +46,8 @@ def t1_propagate(ctx, state, text: str) -> T1Result:
     store = state.get("store")
     active_graphs = state.get("active_graphs", [])
     total_pops = 0
+    total_iters = 0
+    total_propagations = 0
     radius_hits = 0
     node_hits = 0
     max_delta = 0.0
@@ -69,12 +71,16 @@ def t1_propagate(ctx, state, text: str) -> T1Result:
         if hit is not None:
             all_deltas.extend(hit["deltas"])
             total_pops += hit["metrics"]["pops"]
+            total_iters += hit["metrics"].get("iters", 0)
+            total_propagations += hit["metrics"].get("propagations", 0)
             continue
 
         csr = store.csr(gid)  # dict[src] -> list[(dst, Edge)]
         acc = defaultdict(float)     # accumulated contribution per node
         dist = {}                    # hop distance per node
         pops = 0
+        iters = 0
+        propagations = 0
 
         # max-heap by remaining magnitude (use negative for heapq)
         pq: List[Tuple[float, str, str, float]] = []
@@ -84,9 +90,18 @@ def t1_propagate(ctx, state, text: str) -> T1Result:
             dist[nid] = 0
             max_delta = max(max_delta, abs(w))
 
-        while pq and pops < queue_budget and pops < iter_cap:
+        current_layer = 0  # baseline: seed layer
+        while pq and pops < queue_budget:
             _, node_key, u, w = heapq.heappop(pq)
             pops += 1
+            layer = dist.get(u, 0)
+            if layer != current_layer:
+                # entering a new layer; only count layers beyond seeds
+                if layer > 0:
+                    if iters + 1 > iter_cap:
+                        break
+                    iters += 1
+                current_layer = layer
             if abs(acc[u]) >= node_budget:
                 node_hits += 1
                 continue
@@ -102,6 +117,7 @@ def t1_propagate(ctx, state, text: str) -> T1Result:
                 if abs(contrib) < EPS:
                     continue
                 acc[v] += contrib
+                propagations += 1
                 max_delta = max(max_delta, abs(contrib))
                 if (v not in dist) or (d < dist[v]):
                     dist[v] = d
@@ -114,13 +130,17 @@ def t1_propagate(ctx, state, text: str) -> T1Result:
             if abs(val) < EPS:
                 continue
             deltas_for_gid.append({"op": "upsert_node", "id": nid})
-        result = {"deltas": deltas_for_gid, "metrics": {"pops": pops}}
+        result = {"deltas": deltas_for_gid, "metrics": {"pops": pops, "iters": iters, "propagations": propagations}}
         _T1_CACHE.put(ckey, result)
         all_deltas.extend(deltas_for_gid)
         total_pops += pops
+        total_iters += iters
+        total_propagations += propagations
 
     metrics = {
         "pops": total_pops,
+        "iters": total_iters,
+        "propagations": total_propagations,
         "radius_cap_hits": radius_hits,
         "node_budget_hits": node_hits,
         "max_delta": max_delta,
