@@ -13,11 +13,15 @@ _T1_CACHE = LRUCache(max_entries=512, ttl_s=300)
 EPS = 1e-6
 
 def _match_keywords(text: str, labels: List[Tuple[str, str]]) -> Dict[str, float]:
-    """Very simple seed matcher: if label appears in text → seed weight 1.0."""
+    """
+    Seed matcher: case-insensitive, deterministic.
+    Iterates labels sorted by their lowercase form to ensure stable seeding order.
+    """
     t = text.lower()
     seeds: Dict[str, float] = {}
-    for node_id, label in labels:
+    for node_id, label in sorted(labels, key=lambda x: (x[1] or "").lower()):
         if label and label.lower() in t:
+            # Use max to keep idempotent accumulation if the same node matches multiple phrases
             seeds[node_id] = max(seeds.get(node_id, 0.0), 1.0)
     return seeds
 
@@ -73,15 +77,15 @@ def t1_propagate(ctx, state, text: str) -> T1Result:
         pops = 0
 
         # max-heap by remaining magnitude (use negative for heapq)
-        pq: List[Tuple[float, str, float]] = []
+        pq: List[Tuple[float, str, str, float]] = []
         for nid, w in seeds.items():
-            heapq.heappush(pq, (-abs(w), nid, float(w)))
+            heapq.heappush(pq, (-abs(w), nid, nid, float(w)))
             acc[nid] += w
             dist[nid] = 0
             max_delta = max(max_delta, abs(w))
 
         while pq and pops < queue_budget and pops < iter_cap:
-            _, u, w = heapq.heappop(pq)
+            _, node_key, u, w = heapq.heappop(pq)
             pops += 1
             if abs(acc[u]) >= node_budget:
                 node_hits += 1
@@ -102,7 +106,7 @@ def t1_propagate(ctx, state, text: str) -> T1Result:
                 if (v not in dist) or (d < dist[v]):
                     dist[v] = d
                 if abs(acc[v]) < node_budget:
-                    heapq.heappush(pq, (-abs(contrib), v, contrib))
+                    heapq.heappush(pq, (-abs(contrib), v, v, contrib))
 
         # Convert accumulators to per-graph deltas and cache the result
         deltas_for_gid: List[Dict[str, Any]] = []
