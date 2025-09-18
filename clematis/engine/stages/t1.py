@@ -3,6 +3,12 @@ from collections import defaultdict
 import heapq
 from typing import Dict, Any, List, Tuple
 from ..types import T1Result
+from ..cache import LRUCache, stable_key
+
+# module-level (OK for pure stage since it only caches)
+_T1_CACHE = LRUCache(max_entries=512, ttl_s=300)
+
+
 
 EPS = 1e-6
 
@@ -49,6 +55,17 @@ def t1_propagate(ctx, state, text: str) -> T1Result:
         seeds = _match_keywords(text, labels)
         if not seeds:
             continue
+        # ---- T1 cache pre-check ----
+        etag = store.version_etag(gid)
+        decay_cfg = cfg_t1.get("decay", {})
+        # edge_mult is already computed above; include its shape in the key
+        seed_ids = sorted(seeds.keys())
+        ckey = ("t1", gid, etag, stable_key(decay_cfg), stable_key(edge_mult), tuple(seed_ids))
+        hit = _T1_CACHE.get(ckey)
+        if hit is not None:
+            all_deltas.extend(hit["deltas"])
+            total_pops += hit["metrics"]["pops"]
+            continue
 
         csr = store.csr(gid)  # dict[src] -> list[(dst, Edge)]
         acc = defaultdict(float)     # accumulated contribution per node
@@ -87,13 +104,15 @@ def t1_propagate(ctx, state, text: str) -> T1Result:
                 if abs(acc[v]) < node_budget:
                     heapq.heappush(pq, (-abs(contrib), v, contrib))
 
-        # Convert accumulators to deltas (edges toward nodes with positive mass)
-        # For demo, we emit upserts that increase edge weight toward nodes with mass
+        # Convert accumulators to per-graph deltas and cache the result
+        deltas_for_gid: List[Dict[str, Any]] = []
         for nid, val in acc.items():
             if abs(val) < EPS:
                 continue
-            all_deltas.append({"op":"upsert_node","id":nid})
-            # Simple illustrative edge to itself parent (could be refined per design)
+            deltas_for_gid.append({"op": "upsert_node", "id": nid})
+        result = {"deltas": deltas_for_gid, "metrics": {"pops": pops}}
+        _T1_CACHE.put(ckey, result)
+        all_deltas.extend(deltas_for_gid)
         total_pops += pops
 
     metrics = {
