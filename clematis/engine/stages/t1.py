@@ -5,10 +5,26 @@ from typing import Dict, Any, List, Tuple
 from ..types import T1Result
 from ..cache import LRUCache, stable_key
 
-# module-level (OK for pure stage since it only caches)
-_T1_CACHE = LRUCache(max_entries=512, ttl_s=300)
+# module-level cache holder configured via Config.t1.cache
+_T1_CACHE = None
+_T1_CACHE_CFG = None
 
-
+def _get_cache(cfg_t1: dict):
+    """
+    Return an LRUCache configured by cfg_t1['cache'] or None if disabled.
+    Recreate the cache if max_entries/ttl_s changed since last call.
+    """
+    c = cfg_t1.get("cache", {})
+    enabled = bool(c.get("enabled", True))
+    if not enabled:
+        return None
+    max_entries = int(c.get("max_entries", 512))
+    ttl_s = int(c.get("ttl_s", 300))
+    global _T1_CACHE, _T1_CACHE_CFG
+    if _T1_CACHE is None or _T1_CACHE_CFG != (max_entries, ttl_s):
+        _T1_CACHE = LRUCache(max_entries=max_entries, ttl_s=ttl_s)
+        _T1_CACHE_CFG = (max_entries, ttl_s)
+    return _T1_CACHE
 
 EPS = 1e-6
 
@@ -37,11 +53,19 @@ def _compute_decay(distance: int, cfg_t1: dict) -> float:
 
 def t1_propagate(ctx, state, text: str) -> T1Result:
     cfg_t1 = ctx.cfg.t1
+    cache = _get_cache(cfg_t1)
     edge_mult = cfg_t1.get("edge_type_mult", {"supports": 1.0, "associates": 0.6, "contradicts": 0.8})
     queue_budget = int(cfg_t1.get("queue_budget", 10_000))
     node_budget = float(cfg_t1.get("node_budget", 1.5))
     radius_cap  = int(cfg_t1.get("radius_cap", 4))
     iter_cap    = int(cfg_t1.get("iter_cap", 50))
+
+    # iter_cap applies to layers beyond seeds; allow override via iter_cap_layers
+    iter_cap_layers = int(cfg_t1.get("iter_cap_layers", iter_cap))
+    # Optional hard cap on number of relaxations (edge traversals)
+    relax_cap = cfg_t1.get("relax_cap", None)
+    if relax_cap is not None:
+        relax_cap = int(relax_cap)
 
     store = state.get("store")
     active_graphs = state.get("active_graphs", [])
@@ -49,6 +73,7 @@ def t1_propagate(ctx, state, text: str) -> T1Result:
     total_iters = 0
     total_propagations = 0
     radius_hits = 0
+    layer_hits = 0  # times we skipped due to iter_cap_layers
     node_hits = 0
     max_delta = 0.0
     cache_hits = 0
@@ -68,24 +93,35 @@ def t1_propagate(ctx, state, text: str) -> T1Result:
         decay_cfg = cfg_t1.get("decay", {})
         # edge_mult is already computed above; include its shape in the key
         seed_ids = sorted(seeds.keys())
-        ckey = ("t1", gid, etag, stable_key(decay_cfg), stable_key(edge_mult), tuple(seed_ids))
-        hit = _T1_CACHE.get(ckey)
-        if hit is not None:
-            all_deltas.extend(hit["deltas"])
-            total_pops += hit["metrics"]["pops"]
-            total_iters += hit["metrics"].get("iters", 0)
-            total_propagations += hit["metrics"].get("propagations", 0)
-            cache_hits += 1
-            continue
-        cache_misses += 1
+        policy_caps = {
+            "radius_cap": radius_cap,
+            "iter_cap_layers": iter_cap_layers,
+            "relax_cap": relax_cap,
+            "queue_budget": queue_budget,
+            "node_budget": node_budget,
+        }
+        ckey = ("t1", gid, etag, stable_key(decay_cfg), stable_key(edge_mult), stable_key(policy_caps), tuple(seed_ids))
+        if cache is not None:
+            hit = cache.get(ckey)
+            if hit is not None:
+                all_deltas.extend(hit["deltas"])
+                total_pops += hit["metrics"]["pops"]
+                total_iters += hit["metrics"].get("iters", 0)
+                total_propagations += hit["metrics"].get("propagations", 0)
+                total_layer_hits = hit["metrics"].get("layer_cap_hits", 0)
+                layer_hits += total_layer_hits
+                cache_hits += 1
+                continue
+            cache_misses += 1
 
         csr = store.csr(gid)  # dict[src] -> list[(dst, Edge)]
         acc = defaultdict(float)     # accumulated contribution per node
         dist = {}                    # hop distance per node
         pops = 0
-        iters = 0
-        propagations = 0
 
+        layers_processed = 0    # unique layers beyond seeds we actually explored
+        propagations = 0
+        
         # max-heap by remaining magnitude (use negative for heapq)
         pq: List[Tuple[float, str, str, float]] = []
         for nid, w in seeds.items():
@@ -93,33 +129,40 @@ def t1_propagate(ctx, state, text: str) -> T1Result:
             acc[nid] += w
             dist[nid] = 0
             max_delta = max(max_delta, abs(w))
-
-        current_layer = 0  # baseline: seed layer
+        
         while pq and pops < queue_budget:
             _, node_key, u, w = heapq.heappop(pq)
             pops += 1
-            layer = dist.get(u, 0)
-            if layer != current_layer:
-                # entering a new layer; only count layers beyond seeds
-                if layer > 0:
-                    if iters + 1 > iter_cap:
-                        break
-                    iters += 1
-                current_layer = layer
+            layer = dist.get(u, 0)  # 0 for seeds, 1 for first neighbors, etc.
+        
+            # Update layers_processed (count each depth beyond seeds once)
+            if layer > 0 and layer > layers_processed:
+                layers_processed = layer
+                if layers_processed > iter_cap_layers:
+                    # Do not expand this or deeper layers; skip expansion but keep popping remaining PQ
+                    continue
+        
             if abs(acc[u]) >= node_budget:
                 node_hits += 1
                 continue
             if u not in csr:
                 continue
+        
+            stop_relax = False
             for (v, e) in csr[u]:
                 d = dist[u] + 1
                 if d > radius_cap:
                     radius_hits += 1
                     continue
+                if d > iter_cap_layers:
+                    layer_hits += 1
+                    continue
+        
                 decay = _compute_decay(d, cfg_t1)
                 contrib = w * float(e.weight) * float(edge_mult.get(e.rel, 0.6)) * decay
                 if abs(contrib) < EPS:
                     continue
+        
                 acc[v] += contrib
                 propagations += 1
                 max_delta = max(max_delta, abs(contrib))
@@ -127,6 +170,13 @@ def t1_propagate(ctx, state, text: str) -> T1Result:
                     dist[v] = d
                 if abs(acc[v]) < node_budget:
                     heapq.heappush(pq, (-abs(contrib), v, v, contrib))
+        
+                if relax_cap is not None and propagations >= relax_cap:
+                    stop_relax = True
+                    break
+        
+            if stop_relax:
+                break
 
         # Convert accumulators to per-graph deltas and cache the result
         deltas_for_gid: List[Dict[str, Any]] = []
@@ -134,11 +184,18 @@ def t1_propagate(ctx, state, text: str) -> T1Result:
             if abs(val) < EPS:
                 continue
             deltas_for_gid.append({"op": "upsert_node", "id": nid})
-        result = {"deltas": deltas_for_gid, "metrics": {"pops": pops, "iters": iters, "propagations": propagations}}
-        _T1_CACHE.put(ckey, result)
+        result_metrics = {
+            "pops": pops,
+            "iters": min(layers_processed, iter_cap_layers),  # layers beyond seeds actually explored
+            "propagations": propagations,
+            "layer_cap_hits": layer_hits,  # local increments already tracked globally
+        }
+        result = {"deltas": deltas_for_gid, "metrics": result_metrics}
+        if cache is not None:
+            cache.put(ckey, result)
         all_deltas.extend(deltas_for_gid)
         total_pops += pops
-        total_iters += iters
+        total_iters += result_metrics["iters"]
         total_propagations += propagations
 
     metrics = {
@@ -146,11 +203,13 @@ def t1_propagate(ctx, state, text: str) -> T1Result:
         "iters": total_iters,
         "propagations": total_propagations,
         "radius_cap_hits": radius_hits,
+        "layer_cap_hits": layer_hits,
         "node_budget_hits": node_hits,
         "max_delta": max_delta,
         "graphs_touched": len(active_graphs),
         "cache_hits": cache_hits,
         "cache_misses": cache_misses,
         "cache_used": cache_hits > 0,
+        "cache_enabled": cache is not None,
     }
     return T1Result(graph_deltas=all_deltas, metrics=metrics)

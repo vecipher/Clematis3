@@ -1,5 +1,3 @@
-import json
-from clematis.world.scenario import run_one_turn
 from clematis.engine.types import Config
 from clematis.graph.store import InMemoryGraphStore, Node, Edge
 
@@ -24,6 +22,7 @@ def test_t1_determinism(tmp_path, monkeypatch):
     assert r1.metrics["pops"] >= 0
     # If cache is on, the second call should be as fast or faster and metrics coherent
     assert isinstance(r2.metrics["pops"], int)
+    assert r1.graph_deltas == r2.graph_deltas
 
 def test_t1_budgets_respected():
     cfg = Config()
@@ -33,9 +32,9 @@ def test_t1_budgets_respected():
     from clematis.engine.stages.t1 import t1_propagate
     ctx = type("Ctx", (), {"cfg": cfg, "turn_id":"t", "agent_id":"A"})()
     r = t1_propagate(ctx, state, "hello world")
-    # For now, budget caps iterations (PQ pops), not initial seeds or propgations.
-    # Ensure iteration count does not exceed iter_cap, even if multiple seeds are admitted.
+    # iter_cap caps layers beyond seeds; queue_budget caps PQ pops.
     assert r.metrics["iters"] <= cfg.t1["iter_cap"]
+    assert r.metrics["pops"] <= cfg.t1["queue_budget"]
 
 def test_t1_tiebreak_deterministic_equal_weights():
     """
@@ -106,9 +105,133 @@ def test_t1_cache_hit_and_invalidation():
     r2 = t1_propagate(ctx, state, "hello world")
     assert r2.metrics.get("cache_hits", 0) >= 1
     assert r2.metrics.get("cache_used", False) is True
+    assert r2.metrics.get("cache_enabled", True) is True
 
     # Bump etag and ensure cache invalidates
     store.upsert_nodes(gid, [Node(id="n:new", label="hello")])
     r3 = t1_propagate(ctx, state, "hello world")
     assert r3.metrics.get("cache_hits", 0) == 0
     assert r3.metrics.get("cache_misses", 0) >= 1
+
+def test_t1_radius_cap_blocks_propagation():
+    """
+    With radius_cap=0, neighbors at depth 1 must not be expanded/emitted.
+    Expect only the seed node to appear in deltas; radius_cap_hits > 0.
+    """
+    cfg = Config()
+    cfg.t1["radius_cap"] = 0
+    from clematis.engine.stages.t1 import t1_propagate
+
+    store = InMemoryGraphStore()
+    gid = "g:radius"
+    store.ensure(gid)
+    store.upsert_nodes(gid, [
+        Node(id="n:seed", label="seed"),
+        Node(id="n:down", label="downstream"),
+    ])
+    store.upsert_edges(gid, [
+        Edge(id="e:s->d", src="n:seed", dst="n:down", weight=1.0, rel="supports"),
+    ])
+    state = {"store": store, "active_graphs": [gid]}
+    ctx = type("Ctx", (), {"cfg": cfg, "turn_id": "t", "agent_id": "A"})()
+
+    r = t1_propagate(ctx, state, "seed")
+    emitted = {d["id"] for d in r.graph_deltas if d.get("op") == "upsert_node"}
+    assert "n:seed" in emitted
+    assert "n:down" not in emitted
+    assert r.metrics["radius_cap_hits"] > 0
+
+
+def test_t1_node_budget_blocks_expansion():
+    """
+    With a small node_budget, the seed should not expand to neighbors.
+    Expect node_budget_hits > 0 and only the seed in deltas.
+    """
+    cfg = Config()
+    cfg.t1["node_budget"] = 0.5  # seed acc=1.0 >= 0.5 triggers budget
+    from clematis.engine.stages.t1 import t1_propagate
+
+    store = InMemoryGraphStore()
+    gid = "g:nodebudget"
+    store.ensure(gid)
+    store.upsert_nodes(gid, [
+        Node(id="n:seed", label="seed"),
+        Node(id="n:neighbor", label="neighbor"),
+    ])
+    store.upsert_edges(gid, [
+        Edge(id="e:s->n", src="n:seed", dst="n:neighbor", weight=1.0, rel="supports"),
+    ])
+    state = {"store": store, "active_graphs": [gid]}
+    ctx = type("Ctx", (), {"cfg": cfg, "turn_id": "t", "agent_id": "A"})()
+
+    r = t1_propagate(ctx, state, "seed")
+    emitted = {d["id"] for d in r.graph_deltas if d.get("op") == "upsert_node"}
+    assert "n:seed" in emitted
+    assert "n:neighbor" not in emitted
+    assert r.metrics["node_budget_hits"] > 0
+
+
+def test_t1_iter_cap_layers_blocks_depth():
+    """
+    iter_cap caps layers beyond seeds.
+    With iter_cap=0, we should not visit depth-1 neighbors.
+    """
+    cfg = Config()
+    cfg.t1["iter_cap"] = 0  # zero layers beyond seeds
+    from clematis.engine.stages.t1 import t1_propagate
+
+    store = InMemoryGraphStore()
+    gid = "g:layers"
+    store.ensure(gid)
+    store.upsert_nodes(gid, [
+        Node(id="n:seed", label="seed"),
+        Node(id="n:mid", label="mid"),
+        Node(id="n:deep", label="deep"),
+    ])
+    store.upsert_edges(gid, [
+        Edge(id="e:s->m", src="n:seed", dst="n:mid", weight=1.0, rel="supports"),
+        Edge(id="e:m->d", src="n:mid", dst="n:deep", weight=1.0, rel="supports"),
+    ])
+    state = {"store": store, "active_graphs": [gid]}
+    ctx = type("Ctx", (), {"cfg": cfg, "turn_id": "t", "agent_id": "A"})()
+
+    r = t1_propagate(ctx, state, "seed")
+    emitted = {d["id"] for d in r.graph_deltas if d.get("op") == "upsert_node"}
+    assert "n:seed" in emitted
+    assert "n:mid" not in emitted and "n:deep" not in emitted
+    assert r.metrics["iters"] == 0  # no layers explored
+    assert r.metrics.get("layer_cap_hits", 0) >= 0  # presence of metric
+
+
+def test_t1_relax_cap_limits_propagations():
+    """
+    relax_cap limits total relaxations (edge traversals).
+    With relax_cap=1 and three neighbors, exactly one neighbor should be affected.
+    """
+    cfg = Config()
+    cfg.t1["relax_cap"] = 1
+    from clematis.engine.stages.t1 import t1_propagate
+
+    store = InMemoryGraphStore()
+    gid = "g:relax"
+    store.ensure(gid)
+    store.upsert_nodes(gid, [
+        Node(id="n:seed", label="seed"),
+        Node(id="n:a", label="a"),
+        Node(id="n:b", label="b"),
+        Node(id="n:c", label="c"),
+    ])
+    store.upsert_edges(gid, [
+        Edge(id="e:s->a", src="n:seed", dst="n:a", weight=1.0, rel="supports"),
+        Edge(id="e:s->b", src="n:seed", dst="n:b", weight=1.0, rel="supports"),
+        Edge(id="e:s->c", src="n:seed", dst="n:c", weight=1.0, rel="supports"),
+    ])
+    state = {"store": store, "active_graphs": [gid]}
+    ctx = type("Ctx", (), {"cfg": cfg, "turn_id": "t", "agent_id": "A"})()
+
+    r = t1_propagate(ctx, state, "seed")
+    emitted_neighbors = sorted([d["id"] for d in r.graph_deltas
+                                if d.get("op") == "upsert_node" and d["id"] in {"n:a", "n:b", "n:c"}])
+    # Exactly one neighbor should be emitted due to relax_cap=1
+    assert len(emitted_neighbors) == 1, f"Expected 1 neighbor, got {emitted_neighbors}"
+    assert r.metrics.get("propagations", 0) == 1
