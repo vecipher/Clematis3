@@ -51,6 +51,8 @@ def t1_propagate(ctx, state, text: str) -> T1Result:
     radius_hits = 0
     node_hits = 0
     max_delta = 0.0
+    cache_hits = 0
+    cache_misses = 0
 
     all_deltas: List[Dict[str, Any]] = []
 
@@ -73,7 +75,9 @@ def t1_propagate(ctx, state, text: str) -> T1Result:
             total_pops += hit["metrics"]["pops"]
             total_iters += hit["metrics"].get("iters", 0)
             total_propagations += hit["metrics"].get("propagations", 0)
+            cache_hits += 1
             continue
+        cache_misses += 1
 
         csr = store.csr(gid)  # dict[src] -> list[(dst, Edge)]
         acc = defaultdict(float)     # accumulated contribution per node
@@ -126,7 +130,7 @@ def t1_propagate(ctx, state, text: str) -> T1Result:
 
         # Convert accumulators to per-graph deltas and cache the result
         deltas_for_gid: List[Dict[str, Any]] = []
-        for nid, val in acc.items():
+        for nid, val in sorted(acc.items(), key=lambda kv: kv[0]):
             if abs(val) < EPS:
                 continue
             deltas_for_gid.append({"op": "upsert_node", "id": nid})
@@ -145,5 +149,8 @@ def t1_propagate(ctx, state, text: str) -> T1Result:
         "node_budget_hits": node_hits,
         "max_delta": max_delta,
         "graphs_touched": len(active_graphs),
+        "cache_hits": cache_hits,
+        "cache_misses": cache_misses,
+        "cache_used": cache_hits > 0,
     }
     return T1Result(graph_deltas=all_deltas, metrics=metrics)

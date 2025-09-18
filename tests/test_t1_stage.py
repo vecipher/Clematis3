@@ -76,3 +76,39 @@ def test_t1_tiebreak_deterministic_equal_weights():
 
     # And (by design) alphabetical by node id due to heap tie-breaker
     assert order1 == ["n:a", "n:b"]
+
+def test_t1_cache_hit_and_invalidation():
+    cfg = Config()
+    from clematis.engine.stages.t1 import t1_propagate
+
+    # Build a unique graph so the cache is guaranteed cold for this test
+    store = InMemoryGraphStore()
+    gid = "g:cachetest"
+    store.ensure(gid)
+    store.upsert_nodes(gid, [
+        Node(id="n:hello", label="hello"),
+        Node(id="n:world", label="world"),
+        Node(id="n:reply", label="reply"),
+    ])
+    store.upsert_edges(gid, [
+        Edge(id="e:h->w", src="n:hello", dst="n:world", weight=0.8, rel="supports"),
+        Edge(id="e:w->r", src="n:world", dst="n:reply", weight=0.5, rel="associates"),
+    ])
+    state = {"store": store, "active_graphs": [gid]}
+    ctx = type("Ctx", (), {"cfg": cfg, "turn_id": "t", "agent_id": "A"})()
+
+    # First call should MISS cache
+    r1 = t1_propagate(ctx, state, "hello world")
+    assert r1.metrics.get("cache_hits", 0) == 0
+    assert r1.metrics.get("cache_misses", 0) >= 1
+
+    # Second identical call should HIT cache
+    r2 = t1_propagate(ctx, state, "hello world")
+    assert r2.metrics.get("cache_hits", 0) >= 1
+    assert r2.metrics.get("cache_used", False) is True
+
+    # Bump etag and ensure cache invalidates
+    store.upsert_nodes(gid, [Node(id="n:new", label="hello")])
+    r3 = t1_propagate(ctx, state, "hello world")
+    assert r3.metrics.get("cache_hits", 0) == 0
+    assert r3.metrics.get("cache_misses", 0) >= 1
