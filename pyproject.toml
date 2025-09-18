@@ -4,8 +4,16 @@ version = "0.0.1"
 description = "Clematis v2 scaffold (turn-based, graph-only, multi-agent)."
 readme = "README.md"
 requires-python = ">=3.10"
-authors = [{name="Clematis Dev"}]
+authors = [{ name = "Clematis Dev" }]
 dependencies = []
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["clematis*"]
