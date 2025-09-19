@@ -14,6 +14,14 @@ t1:
     enabled: true
     max_entries: 512
     ttl_s: 300
+  lancedb:
+    uri: ./.data/lancedb
+    table: episodes
+    meta_table: meta
+    index:
+      metric: cosine
+      ef_search: 64
+      m: 16
 t2:
   backend: inmemory
   k_retrieval: 64

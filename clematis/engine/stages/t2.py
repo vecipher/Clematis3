@@ -76,11 +76,58 @@ def _owner_for_query(ctx, cfg_t2: dict):
       return "world"
   return None  # any
 
+class _EpRefShim:
+    __slots__ = ("id", "text", "score")
+    def __init__(self, d: Dict[str, Any]):
+        self.id = str(d.get("id"))
+        self.text = d.get("text", "")
+        s = d.get("score", d.get("_score", 0.0))
+        try:
+            self.score = float(s)
+        except Exception:
+            self.score = 0.0
+
+
+def _init_index_from_cfg(state: dict, cfg_t2: dict):
+    """Instantiate and cache the memory index based on t2.backend with safe fallback.
+    Returns: (index, backend_selected:str, fallback_reason:str|None)
+    """
+    idx = state.get("mem_index")
+    if idx is not None:
+        return idx, state.get("mem_backend", str(cfg_t2.get("backend", "inmemory")).lower()), state.get("mem_backend_fallback_reason")
+
+    backend = str(cfg_t2.get("backend", "inmemory")).lower()
+    fallback_reason = None
+
+    if backend == "lancedb":
+        try:
+            from ...memory.lance_index import LanceIndex  # deferred import; adapter defers lancedb
+            lcfg = cfg_t2.get("lancedb", {}) or {}
+            idx = LanceIndex(
+                uri=str(lcfg.get("uri", "./.data/lancedb")),
+                table=str(lcfg.get("table", "episodes")),
+                meta_table=str(lcfg.get("meta_table", "meta")),
+            )
+        except Exception as e:
+            # Fallback to in-memory index, record reason
+            idx = InMemoryIndex()
+            fallback_reason = f"{type(e).__name__}: {e}"
+            backend = "inmemory"
+    else:
+        idx = InMemoryIndex()
+        backend = "inmemory"
+
+    state["mem_index"] = idx
+    state["mem_backend"] = backend
+    if fallback_reason:
+        state["mem_backend_fallback_reason"] = fallback_reason
+    return idx, backend, fallback_reason
+
 def t2_semantic(ctx, state, text: str, t1) -> T2Result:
     cfg = ctx.cfg
     cfg_t2 = cfg.t2
-    # Ensure a memory index exists in state
-    index: InMemoryIndex = state.setdefault("mem_index", InMemoryIndex())
+    # Ensure a memory index exists in state, honoring backend selection with safe fallback
+    index, backend_selected, backend_fallback_reason = _init_index_from_cfg(state, cfg_t2)
     # Query text = user text + labels changed by T1
     t1_labels = _gather_changed_labels(state, t1)
     q_text = (text or "").strip()
@@ -129,6 +176,7 @@ def t2_semantic(ctx, state, text: str, t1) -> T2Result:
             return hit
         else:
             cache_misses += 1
+    raw_hits_by_id: Dict[str, Any] = {}
     # Execute tiers with dedupe
     retrieved = []  # List[EpisodeRef]
     seen_ids = set()
@@ -150,10 +198,16 @@ def t2_semantic(ctx, state, text: str, t1) -> T2Result:
             hints["now"] = now_str
         hits = index.search_tiered(owner=owner_query, q_vec=q_vec, k=k_retrieval, tier=tier, hints=hints)
         for h in hits:
-            if h.id in seen_ids:
+            if isinstance(h, dict):
+                hid = str(h.get("id"))
+                raw_hits_by_id[hid] = h
+                ref = _EpRefShim(h)
+            else:
+                ref = h
+            if ref.id in seen_ids:
                 continue
-            retrieved.append(h)
-            seen_ids.add(h.id)
+            retrieved.append(ref)
+            seen_ids.add(ref.id)
             if len(retrieved) >= k_retrieval:
                 break
         if len(retrieved) >= k_retrieval:
@@ -166,7 +220,9 @@ def t2_semantic(ctx, state, text: str, t1) -> T2Result:
 
     # Build episode lookup (id -> full dict) for recency/importance
     eps = getattr(index, "_eps", [])
-    ep_by_id = {str(e.get("id")): e for e in eps}
+    ep_by_id = {str(e.get("id")): e for e in eps} if isinstance(eps, list) else {}
+    if not ep_by_id and raw_hits_by_id:
+        ep_by_id = dict(raw_hits_by_id)
 
     # Reference 'now' from ctx if available
     now_str = getattr(ctx, "now", None)
@@ -239,7 +295,11 @@ def t2_semantic(ctx, state, text: str, t1) -> T2Result:
         "cache_used": cache_used,
         "cache_hits": cache_hits,
         "cache_misses": cache_misses,
+        "backend": backend_selected,
+        "backend_fallback": bool(backend_fallback_reason),
     }
+    if backend_fallback_reason:
+        metrics["backend_fallback_reason"] = str(backend_fallback_reason)
     result = T2Result(retrieved=retrieved, graph_deltas_residual=graph_deltas_residual, metrics=metrics)
     if cache is not None:
         cache.put(ckey, result)

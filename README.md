@@ -66,7 +66,7 @@ t1:
   cache: {enabled: true, max_entries: 512, ttl_s: 300}
 
 t2:
-  backend: inmemory
+  backend: inmemory        # or "lancedb"
   k_retrieval: 64
   sim_threshold: 0.3
   tiers: [exact_semantic, cluster_semantic, archive]
@@ -75,6 +75,52 @@ t2:
   clusters_top_m: 3
   residual_cap_per_turn: 32
   cache: {enabled: true, max_entries: 512, ttl_s: 300}
+  lancedb:
+    uri: ./.data/lancedb
+    table: episodes
+    meta_table: meta
+    index:
+      metric: cosine
+      ef_search: 64
+      m: 16
+```
+
+### Switching to LanceDB (optional, guarded)
+
+The T2 retrieval stage can use a LanceDB-backed index with API parity to the in‑memory index. It’s fully optional and guarded: if LanceDB isn’t available or the DB can’t be opened, the system falls back to the in‑memory index and records the reason in metrics.
+
+**Enable LanceDB**
+1) Install the extras locally (optional):
+```bash
+pip install lancedb pyarrow
+```
+2) In `configs/config.yaml`, set:
+```yaml
+t2:
+  backend: lancedb
+  lancedb:
+    uri: ./.data/lancedb
+    table: episodes
+    meta_table: meta
+```
+
+**Fallback behavior**
+- If import/open fails, T2 uses the in‑memory index automatically.
+- Metrics include:
+  - `backend`: `inmemory` or `lancedb`
+  - `backend_fallback`: true if a fallback occurred
+  - `backend_fallback_reason`: short reason string (when present)
+
+**Determinism & parity**
+- Cosine scoring is computed on the Python side for parity with in‑memory behavior.
+- Ties are broken by `id` ascending.
+- Tier semantics (`exact_semantic`, `cluster_semantic`, `archive`) are identical to the in‑memory path.
+
+**Optional tests**
+- Lance tests are skipped automatically if `lancedb`/`pyarrow` aren’t installed.
+- To run just the Lance adapter test:
+```bash
+pytest -q tests/test_lance_index_optional.py
 ```
 
 ## Stage semantics

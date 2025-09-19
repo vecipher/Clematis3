@@ -100,6 +100,7 @@ class ConceptGraphStore(Protocol):
 class MemoryIndex(Protocol):
     def add(self, ep: Dict[str, Any]) -> None: ...
     def search_tiered(self, owner: Optional[str], q_vec: NDArray[np.float32], k: int, tier: Literal["exact_semantic","cluster_semantic","archive"], hints: Dict[str, Any]) -> List[EpisodeRef]: ...
+    def index_version(self) -> int: ...
 
 class EmbeddingAdapter(Protocol):
     def encode(self, texts: List[str]) -> List[NDArray[np.float32]]: ...
@@ -131,7 +132,7 @@ class Config:
         "cache": {"enabled": True, "max_entries": 512, "ttl_s": 300},
     })
     t2: Dict[str, Any] = field(default_factory=lambda: {
-        "backend": "inmemory",                      # or "lancedb" later
+        "backend": "inmemory",                      # or "lancedb"
         "k_retrieval": 64,
         "sim_threshold": 0.3,
         "tiers": ["exact_semantic", "cluster_semantic", "archive"],
@@ -141,6 +142,12 @@ class Config:
         "owner_scope": "any",
         "residual_cap_per_turn": 32,
         "cache": {"enabled": True, "max_entries": 512, "ttl_s": 300},
+        "lancedb": {
+            "uri": "./.data/lancedb",
+            "table": "episodes",
+            "meta_table": "meta",
+            "index": {"metric": "cosine", "ef_search": 64, "m": 16},
+        },
     })
     t3: Dict[str, Any] = field(default_factory=lambda: {"max_rag_loops":1,"tokens":512,"temp":0.7})
     t4: Dict[str, Any] = field(default_factory=lambda: {"delta_norm_cap":2.0,"novelty_cap":1.0,"churn_cap":64,"cooldown_s":60})
