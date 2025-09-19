@@ -1,6 +1,7 @@
 from __future__ import annotations
 from typing import Dict, Any, List, Tuple
 from datetime import datetime, timezone
+from ..types import Plan, SpeakOp, EditGraphOp, RequestRetrieveOp
 
 # PR4: Pure T3 bundle assembly (no policy/RAG/dialogue yet)
 # Deterministic: all lists sorted; explicit caps; empty defaults when absent.
@@ -242,3 +243,112 @@ def make_dialog_bundle(ctx, state, t1, t2, plan=None) -> Dict[str, Any]:
             "ops": int(len(getattr(plan, "ops", []) or [])),
         },
     }
+
+# --- PR5: Rule-based policy (no RAG) ---
+# Deterministic `deliberate(bundle) -> Plan` using explicit thresholds and caps.
+
+_DEFAULT_TAU_HIGH = 0.8
+_DEFAULT_TAU_LOW = 0.4
+_DEFAULT_EPS_EDIT = 0.10
+
+
+def _policy_thresholds(bundle: Dict[str, Any]) -> Dict[str, float]:
+    t3cfg = (bundle.get("cfg", {}).get("t3", {}) if isinstance(bundle.get("cfg", {}), dict) else {})
+    pol = t3cfg.get("policy", {}) if isinstance(t3cfg, dict) else {}
+    return {
+        "tau_high": float(pol.get("tau_high", _DEFAULT_TAU_HIGH)),
+        "tau_low": float(pol.get("tau_low", _DEFAULT_TAU_LOW)),
+        "eps_edit": float(pol.get("epsilon_edit", _DEFAULT_EPS_EDIT)),
+    }
+
+
+def _topic_labels_from_bundle(bundle: Dict[str, Any], cap: int = 5) -> List[str]:
+    labels = list(bundle.get("text", {}).get("labels_from_t1", []) or [])
+    if not labels:
+        # Fallback to labels from touched nodes
+        labels = [str(n.get("label", n.get("id"))) for n in bundle.get("t1", {}).get("touched_nodes", [])]
+    # Deterministic: dedupe + sort + cap
+    labels = sorted({str(x) for x in labels})
+    return labels[: max(int(cap), 0)]
+
+
+def _edit_nodes_from_bundle(bundle: Dict[str, Any], eps_edit: float, cap_nodes: int) -> List[Dict[str, Any]]:
+    """Select nodes with |delta| >= eps_edit; return deterministic edits.
+    Returns a list of {op:"upsert_node", id: <node_id>} sorted by id asc, capped to cap_nodes.
+    """
+    nodes = bundle.get("t1", {}).get("touched_nodes", []) or []
+    selected = []
+    for n in nodes:
+        try:
+            if abs(float(n.get("delta", 0.0))) >= float(eps_edit):
+                selected.append({"id": str(n.get("id"))})
+        except Exception:
+            continue
+    selected.sort(key=lambda e: e["id"])  # id asc
+    selected = selected[: max(int(cap_nodes), 0)]
+    return [{"op": "upsert_node", "id": e["id"]} for e in selected]
+
+
+def deliberate(bundle: Dict[str, Any]) -> Plan:
+    """Deterministic rule-based policy.
+    Inputs: PR4 bundle. Outputs: Plan with whitelisted ops, capped by config.
+    No RAG here (PR6 will add it). Pure; no I/O.
+    """
+    cfg_t3 = bundle.get("cfg", {}).get("t3", {})
+    cfg_t2 = bundle.get("cfg", {}).get("t2", {})
+
+    caps_ops = int(bundle.get("agent", {}).get("caps", {}).get("ops", 3))
+    tokens = int(cfg_t3.get("tokens", 256))
+
+    thresholds = _policy_thresholds(bundle)
+    tau_high = thresholds["tau_high"]
+    tau_low = thresholds["tau_low"]
+    eps_edit = thresholds["eps_edit"]
+
+    sim_stats = bundle.get("t2", {}).get("metrics", {}).get("sim_stats", {}) or {}
+    s_max = float(sim_stats.get("max", 0.0))
+
+    # Decide intent deterministically based on s_max
+    labels = _topic_labels_from_bundle(bundle)
+    if s_max >= tau_high:
+        intent = "summary"
+    elif s_max >= tau_low:
+        intent = "assertion" if labels else "ack"
+    else:
+        intent = "question"
+
+    ops: List[Any] = []
+    # Always include a Speak op first (intent + labels)
+    ops.append(
+        SpeakOp(kind="Speak", intent=intent, topic_labels=labels, max_tokens=tokens)
+    )
+
+    # Optionally include a small EditGraph op if evidence is not too weak
+    if s_max >= tau_low and len(ops) < caps_ops:
+        remaining = max(caps_ops - len(ops), 0)
+        edits = _edit_nodes_from_bundle(bundle, eps_edit=eps_edit, cap_nodes=remaining * 4)
+        # Only emit if we have edits and stay within ops cap
+        if edits:
+            ops.append(EditGraphOp(kind="EditGraph", edits=edits, cap=min(len(edits), remaining * 4)))
+
+    # Optionally include a RequestRetrieve op for low evidence (executed in PR6)
+    if s_max < tau_low and len(ops) < caps_ops:
+        owner = str(cfg_t2.get("owner_scope", "any"))
+        k_all = int(cfg_t2.get("k_retrieval", 64))
+        k = max(1, k_all // 2)
+        ops.append(
+            RequestRetrieveOp(
+                kind="RequestRetrieve",
+                query=bundle.get("text", {}).get("input", ""),
+                owner=owner if owner in ("agent", "world", "any") else "any",
+                k=k,
+                tier_pref="cluster_semantic",
+                hints={"now": bundle.get("now", ""), "sim_threshold": float(cfg_t2.get("sim_threshold", 0.3))},
+            )
+        )
+
+    # Enforce ops cap deterministically (keep first N)
+    if len(ops) > caps_ops:
+        ops = ops[:caps_ops]
+
+    return Plan(version="t3-plan-v1", reflection=False, ops=ops, request_retrieve=None)

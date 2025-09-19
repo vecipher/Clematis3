@@ -46,6 +46,10 @@ t3:
   dialogue:
     template: "style_prefix| summary: {labels}. next: {intent}"
     include_top_k_snippets: 2
+  policy:
+    tau_high: 0.8
+    tau_low: 0.4
+    epsilon_edit: 0.10
 t4: {delta_norm_cap: 2.0, novelty_cap: 1.0, churn_cap: 64, cooldown_s: 60}
 budgets: {time_ms: 1000, ops: 1000, tokens: 1024, time_ms_reflection: 6000}
 flags: {enable_world_memory: true, allow_reflection: true}

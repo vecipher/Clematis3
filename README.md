@@ -191,6 +191,38 @@ t3:
     include_top_k_snippets: 2
 ```
 
+## T3 — Rule‑based Policy (PR5)
+
+Deterministic policy that maps the T3 bundle to a `Plan` with a small, whitelisted set of ops. No RAG loop yet (that lands in PR6).
+
+**Inputs:** `make_plan_bundle(ctx, state, t1, t2)` output.
+
+**Outputs:** `Plan{version: "t3-plan-v1", reflection: false, ops: [Op], request_retrieve: null}`
+
+**Decision logic (deterministic):**
+- Let `s_max = t2.metrics.sim_stats.max`.
+- Thresholds (configurable under `t3.policy`): `tau_high=0.8`, `tau_low=0.4`, `epsilon_edit=0.10`.
+- Choose `Speak.intent`:
+  - `s_max ≥ tau_high` → `summary`
+  - `tau_low ≤ s_max < tau_high` → `assertion` (or `ack` if no labels)
+  - `s_max < tau_low` → `question`
+- `topic_labels`: from `text.labels_from_t1`, deduped + sorted (fallback to `t1.touched_nodes[].label`).
+- Optionally add a small `EditGraph` op when `s_max ≥ tau_low`, including a few `upsert_node` edits for nodes with `|delta| ≥ epsilon_edit` (ids sorted asc).  
+- Optionally add a `RequestRetrieve` op **only** when `s_max < tau_low` (owner/k/tier from `cfg.t2`); it’s emitted but not executed until PR6.
+- Enforce `len(ops) ≤ t3.max_ops_per_turn`.
+
+**Config (already in `configs/config.yaml`):**
+```yaml
+t3:
+  ...
+  policy:
+    tau_high: 0.8
+    tau_low: 0.4
+    epsilon_edit: 0.10
+```
+
+**Determinism guardrails:** sort labels and node ids; fixed thresholds; no RNG; pure function.
+
 ## Stage semantics
 
 ### T1 (propagation)
