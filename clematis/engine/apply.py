@@ -1,11 +1,9 @@
 from __future__ import annotations
 from typing import Dict, Any, Optional, List
-from dataclasses import asdict
-import os
-import json
 import time
 
 from .types import ApplyResult, T4Result, ProposedDelta
+from .snapshot import write_snapshot, load_latest_snapshot as _load_latest_snapshot
 
 
 # -------- helpers: state access (dict or attr style) --------
@@ -65,10 +63,6 @@ def _bump_version_etag(state: Any) -> str:
     return new_val
 
 
-def _ensure_dir(path: str) -> None:
-    os.makedirs(path, exist_ok=True)
-
-
 def _should_snapshot(ctx, cfg) -> bool:
     try:
         turn = int(getattr(ctx, "turn_id", 0))
@@ -77,38 +71,6 @@ def _should_snapshot(ctx, cfg) -> bool:
     every = max(1, int(cfg.get("snapshot_every_n_turns", 1)))
     # Snapshot on every Nth turn. Define turn 0 as a snapshot turn for simplicity.
     return (turn % every) == 0
-
-
-def _snapshot_path(cfg: Dict[str, Any], ctx) -> str:
-    agent = getattr(ctx, "agent_id", "agent")
-    turn = getattr(ctx, "turn_id", 0)
-    dir_ = cfg["snapshot_dir"]
-    _ensure_dir(dir_)
-    fname = f"state_{agent}.json"
-    # Turn IDs may be non-numeric (e.g., "demo-1"); store as string
-    return os.path.join(dir_, fname), str(turn)
-
-
-def _serialize_deltas(deltas: List[ProposedDelta]) -> List[Dict[str, Any]]:
-    out: List[Dict[str, Any]] = []
-    for d in deltas:
-        # dataclass or dataclass-like; use safe dict
-        try:
-            out.append({
-                "target_kind": d.target_kind,
-                "target_id": d.target_id,
-                "attr": d.attr,
-                "delta": float(d.delta),
-                "op_idx": d.op_idx,
-                "idx": d.idx,
-            })
-        except Exception:
-            # Fall back to asdict if available
-            try:
-                out.append(asdict(d))
-            except Exception:
-                pass
-    return out
 
 
 # -------- main API --------
@@ -129,13 +91,7 @@ def apply_changes(ctx, state, t4: T4Result) -> ApplyResult:
         should_snap = _should_snapshot(ctx, cfg)
         snap_path = None
         if should_snap:
-            snap_path, turn = _snapshot_path(cfg, ctx)
-            with open(snap_path, "w", encoding="utf-8") as f:
-                json.dump(
-                    {"turn": turn, "agent": getattr(ctx, "agent_id", "agent"),
-                     "version_etag": version_etag, "applied": 0, "deltas": []},
-                    f,
-                )
+            snap_path = write_snapshot(ctx, state, version_etag, 0, [])
         return ApplyResult(
             applied=0,
             clamps=0,
@@ -173,13 +129,7 @@ def apply_changes(ctx, state, t4: T4Result) -> ApplyResult:
         should_snap = _should_snapshot(ctx, cfg)
         snap_path = None
         if should_snap:
-            snap_path, turn = _snapshot_path(cfg, ctx)
-            with open(snap_path, "w", encoding="utf-8") as f:
-                json.dump(
-                    {"turn": turn, "agent": getattr(ctx, "agent_id", "agent"),
-                     "version_etag": version_etag, "applied": 0, "deltas": _serialize_deltas(deltas)},
-                    f,
-                )
+            snap_path = write_snapshot(ctx, state, version_etag, 0, deltas)
         return ApplyResult(
             applied=0,
             clamps=0,
@@ -194,18 +144,7 @@ def apply_changes(ctx, state, t4: T4Result) -> ApplyResult:
     # Snapshot cadence
     snap_path = None
     if _should_snapshot(ctx, cfg):
-        snap_path, turn = _snapshot_path(cfg, ctx)
-        with open(snap_path, "w", encoding="utf-8") as f:
-            json.dump(
-                {
-                    "turn": turn,
-                    "agent": getattr(ctx, "agent_id", "agent"),
-                    "version_etag": version_etag,
-                    "applied": applied_count,
-                    "deltas": _serialize_deltas(deltas),
-                },
-                f,
-            )
+        snap_path = write_snapshot(ctx, state, version_etag, applied_count, deltas)
 
     metrics = {
         "ms": _now_ms() - started,
@@ -228,3 +167,7 @@ def _safe_get(maybe_mapping: Any, key: str, default=0):
         return maybe_mapping.get(key, default)
     except Exception:
         return default
+
+
+# Re-export snapshot loader for backward-compat orchestrator import
+load_latest_snapshot = _load_latest_snapshot

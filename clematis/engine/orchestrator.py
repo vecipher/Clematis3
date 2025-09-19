@@ -7,7 +7,7 @@ from .stages.t1 import t1_propagate
 from .stages.t2 import t2_semantic
 from .stages.t3 import make_plan_bundle, make_dialog_bundle, deliberate, rag_once, speak, llm_speak
 from .stages.t4 import t4_filter
-from .apply import apply_changes
+from .apply import apply_changes, load_latest_snapshot
 from ..io.log import append_jsonl
 
 
@@ -24,6 +24,20 @@ class Orchestrator:
         now = getattr(ctx, "now", None)
 
         total_t0 = time.perf_counter()
+
+        # --- Boot hook: load latest snapshot once per process ---
+        boot_loaded = state.get("_boot_loaded", False) if isinstance(state, dict) else getattr(state, "_boot_loaded", False)
+        if not boot_loaded:
+            try:
+                load_latest_snapshot(ctx, state)
+            except Exception:
+                # Loader must never crash the turn; continue cleanly.
+                pass
+            finally:
+                if isinstance(state, dict):
+                    state["_boot_loaded"] = True
+                else:
+                    setattr(state, "_boot_loaded", True)
 
         # --- T1 ---
         t0 = time.perf_counter()
