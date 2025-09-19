@@ -477,3 +477,102 @@ JSONL files are written to `.logs/`:
 **Optional follow-ups (not required for M4):**
 - CLI: inspect latest snapshot (P3 tooling)
 - Cache consolidation (single layer) in a future milestone
+
+# HS1:
+
+## PR17 — Config validation & hygiene
+
+This sprint hardens configuration while keeping runtime behavior deterministic and unchanged.
+
+### Validator CLI
+
+```bash
+python3 scripts/validate_config.py            # validate configs/config.yaml
+python3 scripts/validate_config.py --strict   # fail on warnings
+python3 scripts/validate_config.py path/to/other.yaml
+cat configs/config.yaml | python3 scripts/validate_config.py -
+```
+
+**Exit codes**
+- `0` — OK
+- `1` — validation errors (or warnings when `--strict`)
+- `2` — load/parse errors or bad usage
+
+**Typical success output**
+```text
+OK
+t4.cache: ttl_sec=600 namespaces=['t2:semantic'] cache_bust_mode=on-apply
+```
+
+### Canonical keys & TTL aliases
+The validator accepts common aliases and normalizes them:
+
+- **Stage caches (T1, T2)**: canonical key is `ttl_s` (seconds). Aliases accepted: `ttl_sec` → normalized to `ttl_s`.
+- **Orchestrator cache (T4)**: canonical key is `ttl_sec` (seconds). Alias accepted: `ttl_s` → normalized to `ttl_sec`.
+
+Use either key in your YAML; the validator will normalize to the canonical form above.
+
+### Allowed keys (practical subset)
+
+| Section | Key | Type | Notes |
+|---|---|---|---|
+| `t1.cache` | `enabled` | bool | optional; defaults to `true` in shipped config |
+|  | `max_entries` | int ≥ 0 |  |
+|  | `ttl_s` | int ≥ 0 | `ttl_sec` alias accepted |
+| `t1` | `iter_cap`, `queue_budget`, `node_budget` | int | optional knobs |
+|  | `decay`, `edge_type_mult` | number | optional knobs |
+|  | `radius_cap` | int | optional |
+| `t2.cache` | `enabled` | bool | optional; defaults true in shipped config |
+|  | `max_entries` | int ≥ 0 |  |
+|  | `ttl_s` | int ≥ 0 | `ttl_sec` alias accepted |
+| `t2` | `backend` | `inmemory`\|`lancedb` | `lancedb` path remains optional/guarded |
+|  | `k_retrieval` | int ≥ 1 |  |
+|  | `sim_threshold` | −1.0 … 1.0 | inclusive bounds |
+|  | `tiers`, `exact_recent_days`, `clusters_top_m`, `owner_scope`, `residual_cap_per_turn`, `ranking` | mixed | recognized and validated where applicable |
+| `t3` | `max_rag_loops`, `max_ops_per_turn` | int ≥ 0 |  |
+|  | `backend` | `rulebased`\|`llm` | default rule-based; LLM path optional/guarded |
+|  | `tokens`, `temp`, `allow_reflection`, `dialogue`, `policy`, `llm` | mixed | accepted keys; kept deterministic by default |
+| `t4.cache` | `enabled` | bool |  |
+|  | `namespaces` | list[str] | **allowed:** `"t2:semantic"` only |
+|  | `max_entries` | int ≥ 0 |  |
+|  | `ttl_sec` | int ≥ 0 | `ttl_s` alias accepted |
+| `t4` | `enabled` | bool | kill switch (bypasses T4+Apply) |
+|  | `delta_norm_cap_l2` | number 
+> 0 |  |
+|  | `novelty_cap_per_node` | number 
+> 0 |  |
+|  | `churn_cap_edges` | int ≥ 0 |  |
+|  | `cooldowns` | map[str→int ≥ 0] | keys like `EditGraph`, `CreateGraph` |
+|  | `weight_min`, `weight_max` | −1.0 … 1.0 and `min < max` | clamped in Apply |
+|  | `snapshot_every_n_turns` | int ≥ 1 | cadence for snapshotting |
+|  | `snapshot_dir` | path | directory for snapshots |
+|  | `cache_bust_mode` | `on-apply`\|`none` | orchestrator cache behavior |
+
+> The validator also accepts other benign keys present in the shipped configs and treats unrecognized keys as warnings in the verbose path.
+
+### Warnings & `--strict`
+- **Duplicate cache namespace overlap** (informational):
+  - When `t2.cache.enabled=true` **and** `"t2:semantic" ∈ t4.cache.namespaces`, you’ll see:
+    ```text
+    W[t4.cache.namespaces]: duplicate-cache-namespace 't2:semantic' overlaps with stage cache (t2.cache.enabled=true); deterministic but TTLs may be confusing.
+    ```
+  - With `--strict`, warnings cause a non-zero exit to keep CI tight.
+
+### Error examples (deterministic messages)
+```text
+# Unknown key with suggestion
+CONFIG INVALID
+t2.backnd unknown key (did you mean 'backend')
+
+# Out-of-range and consistency
+CONFIG INVALID
+t4.weight_min/weight_max must satisfy weight_min < weight_max
+t2.sim_threshold must be between -1.0 and 1.0 (inclusive)
+
+t4.cache.namespaces[t2:semantics] unknown namespace (allowed: ['t2:semantic'])
+```
+
+### Tips
+- Keep `configs/config.yaml` canonical (use `ttl_s` for T1/T2 caches, `ttl_sec` for T4 cache).
+- Use `python3 scripts/validate_config.py --strict` in CI to fail fast on hygiene regressions.
+- If you add new config fields, update the validator and this section in the same PR.

@@ -5,13 +5,13 @@
 Validate a Clematis3 config file.
 
 Usage:
-  python3 scripts/validate_config.py [path/to/config.yaml]
+  python3 scripts/validate_config.py [--strict] [path/to/config.yaml]
   # If omitted, defaults to configs/config.yaml
   # Use '-' to read from STDIN
 
 Exit codes:
   0 = OK
-  1 = Validation errors
+  1 = Validation errors (or warnings when --strict)
   2 = Load/parse errors or bad usage
 """
 from __future__ import annotations
@@ -19,6 +19,7 @@ import sys
 import os
 import json
 from typing import Any, Dict
+import argparse
 
 try:
     import yaml  # type: ignore
@@ -27,13 +28,22 @@ except Exception:  # PyYAML optional
 
 # Ensure the project root (parent of scripts/) is importable when run directly
 try:
-    from configs.validate import validate_config  # type: ignore
+    from configs.validate import validate_config_verbose, validate_config  # type: ignore
 except ModuleNotFoundError:
     HERE = os.path.abspath(os.path.dirname(__file__))
     ROOT = os.path.abspath(os.path.join(HERE, ".."))
     if ROOT not in sys.path:
         sys.path.insert(0, ROOT)
+    try:
+        from configs.validate import validate_config_verbose, validate_config  # type: ignore
+    except ImportError:
+        # Older versions may not have the verbose API
+        from configs.validate import validate_config  # type: ignore
+        validate_config_verbose = None  # type: ignore
+except ImportError:
+    # Older versions may not have the verbose API
     from configs.validate import validate_config  # type: ignore
+    validate_config_verbose = None  # type: ignore
 
 
 def _eprint(*args: Any) -> None:
@@ -41,7 +51,7 @@ def _eprint(*args: Any) -> None:
 
 
 USAGE = (
-    "usage: python3 scripts/validate_config.py [config.yaml | -]  \n"
+    "usage: python3 scripts/validate_config.py [--strict] [config.yaml | -]\n"
     "       (defaults to configs/config.yaml)"
 )
 
@@ -74,11 +84,17 @@ def _load_config(path: str) -> Dict[str, Any]:
 
 
 def main(argv: list[str]) -> int:
-    if len(argv) >= 2 and argv[1] in {"-h", "--help"}:
-        print(USAGE)
-        return 0
+    ap = argparse.ArgumentParser(
+        prog="validate_config.py",
+        description="Validate Clematis3 configuration",
+    )
+    ap.add_argument("path", nargs="?", default=os.path.join("configs", "config.yaml"),
+                    help="Path to config file (YAML preferred). Use '-' for STDIN.")
+    ap.add_argument("--strict", action="store_true",
+                    help="Treat warnings as errors (non-zero exit if warnings present).")
+    args = ap.parse_args(argv[1:])
 
-    path = argv[1] if len(argv) >= 2 else os.path.join("configs", "config.yaml")
+    path = args.path
 
     try:
         cfg = _load_config(path)
@@ -91,9 +107,20 @@ def main(argv: list[str]) -> int:
         return 2
 
     try:
-        normalized = validate_config(cfg)
+        if 'validate_config_verbose' in globals() and validate_config_verbose is not None:  # type: ignore
+            normalized, warnings = validate_config_verbose(cfg)  # type: ignore
+        else:
+            normalized = validate_config(cfg)
+            warnings = []
     except ValueError as ve:
         print("CONFIG INVALID\n" + str(ve))
+        return 1
+
+    # --strict: treat warnings as errors
+    if args.strict and warnings:
+        print("CONFIG WARNINGS (treated as errors due to --strict)")
+        for w in sorted(warnings):
+            print(w)
         return 1
 
     # Success summary (non-verbose)
@@ -105,6 +132,9 @@ def main(argv: list[str]) -> int:
             ttl=cache.get("ttl_sec"), ns=cache.get("namespaces"), mode=t4.get("cache_bust_mode")
         )
     )
+    # Print warnings (if any) without failing the run
+    for w in sorted(warnings):
+        print(w)
     return 0
 
 

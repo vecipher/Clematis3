@@ -11,7 +11,7 @@ Public API:
 from __future__ import annotations
 from typing import Any, Dict, List
 
-__all__ = ["validate_config"]
+__all__ = ["validate_config", "validate_config_verbose"]
 
 
 # ------------------------------
@@ -113,6 +113,53 @@ DEFAULTS: Dict[str, Any] = {
 
 
 # ------------------------------
+# Allowed keys, namespaces, and suggestion helpers (for PR17)
+# ------------------------------
+
+# Known cache namespaces for orchestrator-level cache coherence
+KNOWN_CACHE_NAMESPACES = {"t2:semantic"}
+
+# Allowed key sets per section
+ALLOWED_TOP = {"t1", "t2", "t3", "t4", "k_surface", "surface_method", "budgets", "flags"}
+ALLOWED_T1 = {"cache", "iter_cap", "queue_budget", "node_budget", "decay", "edge_type_mult", "radius_cap"}
+ALLOWED_T2 = {"backend", "k_retrieval", "sim_threshold", "cache", "ranking",
+              "tiers", "exact_recent_days", "clusters_top_m", "owner_scope",
+              "residual_cap_per_turn", "lancedb", "archive"}
+ALLOWED_T3 = {"max_rag_loops", "max_ops_per_turn", "backend",
+              "tokens", "temp", "allow_reflection", "dialogue", "policy", "llm"}
+ALLOWED_T4 = {
+    "enabled", "delta_norm_cap_l2", "novelty_cap_per_node", "churn_cap_edges",
+    "cooldowns", "weight_min", "weight_max", "snapshot_every_n_turns", "snapshot_dir",
+    "cache_bust_mode", "cache"
+}
+ALLOWED_CACHE_FIELDS = {"enabled", "namespaces", "max_entries", "ttl_sec", "ttl_s"}
+ALLOWED_RANKING_FIELDS = {"alpha_sim", "beta_recency", "gamma_importance"}
+
+def _lev(a: str, b: str) -> int:
+    """Tiny Levenshtein distance (edit distance) for did-you-mean suggestions."""
+    la, lb = len(a), len(b)
+    dp = list(range(lb + 1))
+    for i, ca in enumerate(a, 1):
+        prev = dp[0]
+        dp[0] = i
+        for j, cb in enumerate(b, 1):
+            ins = dp[j] + 1
+            dele = dp[j - 1] + 1
+            sub = prev + (0 if ca == cb else 1)
+            prev, dp[j] = dp[j], min(ins, dele, sub)
+    return dp[-1]
+
+def _suggest_key(bad: str, allowed: set[str]) -> str | None:
+    """Return closest allowed key within distance ≤2, else None."""
+    best_key, best_dist = None, 99
+    for k in allowed:
+        d = _lev(bad, k)
+        if d < best_dist:
+            best_key, best_dist = k, d
+    return best_key if best_dist <= 2 else None
+
+
+# ------------------------------
 # Validation helpers
 # ------------------------------
 
@@ -140,20 +187,93 @@ def validate_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
     """
     # Normalize top-level shape and merge defaults non-destructively
     cfg_in = _ensure_dict(cfg)
+
+    errors: List[str] = []
+
+    # Capture raw sections for precedence/suggestions (user-provided view)
+    raw_t1 = _ensure_dict(cfg_in.get("t1"))
+    raw_t2 = _ensure_dict(cfg_in.get("t2"))
+    raw_t3 = _ensure_dict(cfg_in.get("t3"))
+    raw_t4 = _ensure_dict(cfg_in.get("t4"))
+    raw_t1_cache = _ensure_dict(raw_t1.get("cache"))
+    raw_t2_cache = _ensure_dict(raw_t2.get("cache"))
+    raw_t2_ranking = _ensure_dict(raw_t2.get("ranking"))
+    raw_t4_cache = _ensure_dict(raw_t4.get("cache"))
+
+    # Unknown key detection (top-level and per-section), with suggestions
+    for k in cfg_in.keys():
+        if k not in ALLOWED_TOP:
+            sug = _suggest_key(k, ALLOWED_TOP)
+            if sug:
+                _err(errors, k, f"unknown top-level key (did you mean '{sug}')")
+            else:
+                _err(errors, k, "unknown top-level key")
+
+    for k in raw_t1.keys():
+        if k not in ALLOWED_T1:
+            sug = _suggest_key(k, ALLOWED_T1)
+            hint = f" (did you mean '{sug}')" if sug else ""
+            _err(errors, f"t1.{k}", f"unknown key{hint}")
+
+    for k in raw_t2.keys():
+        if k not in ALLOWED_T2:
+            sug = _suggest_key(k, ALLOWED_T2)
+            hint = f" (did you mean '{sug}')" if sug else ""
+            _err(errors, f"t2.{k}", f"unknown key{hint}")
+
+    for k in raw_t3.keys():
+        if k not in ALLOWED_T3:
+            sug = _suggest_key(k, ALLOWED_T3)
+            hint = f" (did you mean '{sug}')" if sug else ""
+            _err(errors, f"t3.{k}", f"unknown key{hint}")
+
+    for k in raw_t4.keys():
+        if k not in ALLOWED_T4:
+            sug = _suggest_key(k, ALLOWED_T4)
+            hint = f" (did you mean '{sug}')" if sug else ""
+            _err(errors, f"t4.{k}", f"unknown key{hint}")
+
+    for k in raw_t1_cache.keys():
+        if k not in ALLOWED_CACHE_FIELDS:
+            sug = _suggest_key(k, ALLOWED_CACHE_FIELDS)
+            hint = f" (did you mean '{sug}')" if sug else ""
+            _err(errors, f"t1.cache.{k}", f"unknown key{hint}")
+
+    for k in raw_t2_cache.keys():
+        if k not in ALLOWED_CACHE_FIELDS:
+            sug = _suggest_key(k, ALLOWED_CACHE_FIELDS)
+            hint = f" (did you mean '{sug}')" if sug else ""
+            _err(errors, f"t2.cache.{k}", f"unknown key{hint}")
+
+    for k in raw_t2_ranking.keys():
+        if k not in ALLOWED_RANKING_FIELDS:
+            sug = _suggest_key(k, ALLOWED_RANKING_FIELDS)
+            hint = f" (did you mean '{sug}')" if sug else ""
+            _err(errors, f"t2.ranking.{k}", f"unknown key{hint}")
+
+    for k in raw_t4_cache.keys():
+        if k not in ALLOWED_CACHE_FIELDS:
+            sug = _suggest_key(k, ALLOWED_CACHE_FIELDS)
+            hint = f" (did you mean '{sug}')" if sug else ""
+            _err(errors, f"t4.cache.{k}", f"unknown key{hint}")
+
     merged = _deep_merge(cfg_in, DEFAULTS)
 
     # Keep raw user-provided subdicts for precedence-sensitive fields
-    raw_t4 = _ensure_dict(cfg_in.get("t4"))
     raw_t4_cache = _ensure_dict(raw_t4.get("cache"))
-
-    errors: List[str] = []
 
     # ---- T1 ----
     t1 = _ensure_subdict(merged, "t1")
     c1 = _ensure_subdict(t1, "cache")
     # types/coercions
     c1["max_entries"] = _coerce_int(c1.get("max_entries", 512))
-    c1["ttl_s"] = _coerce_int(c1.get("ttl_s", 300))
+    # TTL alias precedence: user ttl_s > user ttl_sec > current/default
+    if "ttl_s" in raw_t1_cache:
+        c1["ttl_s"] = _coerce_int(raw_t1_cache.get("ttl_s"), 300)
+    elif "ttl_sec" in raw_t1_cache:
+        c1["ttl_s"] = _coerce_int(raw_t1_cache.get("ttl_sec"), 300)
+    else:
+        c1["ttl_s"] = _coerce_int(c1.get("ttl_s", 300))
     # optional numeric knobs in some repos
     if "iter_cap" in t1:
         t1["iter_cap"] = _coerce_int(t1.get("iter_cap"))
@@ -188,7 +308,13 @@ def validate_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
 
     c2 = _ensure_subdict(t2, "cache")
     c2["max_entries"] = _coerce_int(c2.get("max_entries", 512))
-    c2["ttl_s"] = _coerce_int(c2.get("ttl_s", 300))
+    # TTL alias precedence: user ttl_s > user ttl_sec > current/default
+    if "ttl_s" in raw_t2_cache:
+        c2["ttl_s"] = _coerce_int(raw_t2_cache.get("ttl_s"), 300)
+    elif "ttl_sec" in raw_t2_cache:
+        c2["ttl_s"] = _coerce_int(raw_t2_cache.get("ttl_sec"), 300)
+    else:
+        c2["ttl_s"] = _coerce_int(c2.get("ttl_s", 300))
     if c2["max_entries"] < 0:
         _err(errors, "t2.cache.max_entries", "must be >= 0")
     if c2["ttl_s"] < 0:
@@ -244,6 +370,11 @@ def validate_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
     t4["weight_max"] = _coerce_float(t4.get("weight_max", 1.0))
     if not (t4["weight_min"] < t4["weight_max"]):
         _err(errors, "t4.weight_min/weight_max", "must satisfy weight_min < weight_max")
+    # Enforce inclusive bounds for weights
+    if not (-1.0 <= t4["weight_min"] <= 1.0):
+        _err(errors, "t4.weight_min", "must be in [-1.0, 1.0]")
+    if not (-1.0 <= t4["weight_max"] <= 1.0):
+        _err(errors, "t4.weight_max", "must be in [-1.0, 1.0]")
 
     t4["snapshot_every_n_turns"] = _coerce_int(t4.get("snapshot_every_n_turns", 1))
     if t4["snapshot_every_n_turns"] < 1:
@@ -283,6 +414,10 @@ def validate_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
         c4["namespaces"] = ["t2:semantic"]
     else:
         c4["namespaces"] = namespaces
+    # Validate namespaces against the known set
+    for ns in c4["namespaces"]:
+        if ns not in KNOWN_CACHE_NAMESPACES:
+            _err(errors, f"t4.cache.namespaces[{ns}]", f"unknown namespace (allowed: {sorted(KNOWN_CACHE_NAMESPACES)})")
     # write-back: ensure normalized cache is attached
     t4["cache"] = c4
 
@@ -296,3 +431,30 @@ def validate_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
     merged["t3"] = t3
     merged["t4"] = t4
     return merged
+
+
+# ------------------------------
+# Verbose API: return warnings as a second value
+# ------------------------------
+from typing import Tuple
+
+def validate_config_verbose(cfg: Dict[str, Any]) -> Tuple[Dict[str, Any], List[str]]:
+    """
+    Validate and normalize configuration, returning (normalized_cfg, warnings).
+
+    Warnings currently include:
+    - Duplicate cache namespace overlap between t2.stage cache and t4.orchestrator cache.
+    """
+    normalized = validate_config(cfg)  # will raise ValueError on errors
+
+    warnings: List[str] = []
+    try:
+        t2c = _ensure_dict(_ensure_dict(normalized.get("t2")).get("cache"))
+        t4c = _ensure_dict(_ensure_dict(normalized.get("t4")).get("cache"))
+        if _coerce_bool(t2c.get("enabled", True)) and "t2:semantic" in (t4c.get("namespaces") or []):
+            warnings.append("W[t4.cache.namespaces]: duplicate-cache-namespace 't2:semantic' overlaps with stage cache (t2.cache.enabled=true); deterministic but TTLs may be confusing.")
+    except Exception:
+        # Be conservative: never crash on warning collection
+        pass
+
+    return normalized, warnings
