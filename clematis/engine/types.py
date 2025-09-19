@@ -4,6 +4,9 @@ from typing import Any, Dict, List, Literal, Optional, Protocol, Tuple
 from numpy.typing import NDArray
 import numpy as np
 
+PlanVersion = Literal["t3-plan-v1"]
+BundleVersion = Literal["t3-bundle-v1"]
+
 # ---- Core datatypes ----
 
 @dataclass
@@ -59,12 +62,47 @@ class T2Result:
     graph_deltas_residual: List[Dict[str, Any]]
     metrics: Dict[str, Any]
 
+@dataclass(frozen=True)
+class SpeakOp:
+    kind: Literal["Speak"]
+    intent: Literal["ack","question","assertion","summary"]
+    topic_labels: List[str]
+    max_tokens: int
+
+@dataclass(frozen=True)
+class RequestRetrieveOp:
+    kind: Literal["RequestRetrieve"]
+    query: str
+    owner: Literal["agent","world","any"]
+    k: int
+    tier_pref: Optional[Literal["exact_semantic","cluster_semantic","archive"]] = None
+    hints: Dict[str, Any] = field(default_factory=dict)
+
+@dataclass(frozen=True)
+class EditGraphOp:
+    kind: Literal["EditGraph"]
+    edits: List[Dict[str, Any]]  # {op:"upsert_node"|"upsert_edge", id|src|dst, weight?, rel?}
+    cap: int
+
+@dataclass(frozen=True)
+class CreateGraphOp:
+    kind: Literal["CreateGraph"]
+    title: str
+    tags: List[str]
+
+@dataclass(frozen=True)
+class SetMetaFilterOp:
+    kind: Literal["SetMetaFilter"]
+    params: Dict[str, Any]  # {delta_norm_cap?, novelty_cap?, churn_cap?, cooldown_s?}
+
+Op = SpeakOp | RequestRetrieveOp | EditGraphOp | CreateGraphOp | SetMetaFilterOp
+
 @dataclass
 class Plan:
-    version: str
-    ops: List[Dict[str, Any]]
-    request_retrieve: Optional[Dict[str, Any]] = None
+    version: PlanVersion
     reflection: bool = False
+    ops: List[Op] = field(default_factory=list)
+    request_retrieve: Optional[Dict[str, Any]] = None
 
 @dataclass
 class T4Result:
@@ -149,7 +187,18 @@ class Config:
             "index": {"metric": "cosine", "ef_search": 64, "m": 16},
         },
     })
-    t3: Dict[str, Any] = field(default_factory=lambda: {"max_rag_loops":1,"tokens":512,"temp":0.7})
+    t3: Dict[str, Any] = field(default_factory=lambda: {
+        "max_rag_loops": 1,
+        "tokens": 256,
+        "temp": 0.7,
+        "max_ops_per_turn": 3,
+        "allow_reflection": False,
+        "backend": "rulebased",
+        "dialogue": {
+            "template": "style_prefix| summary: {labels}. next: {intent}",
+            "include_top_k_snippets": 2,
+        },
+    })
     t4: Dict[str, Any] = field(default_factory=lambda: {"delta_norm_cap":2.0,"novelty_cap":1.0,"churn_cap":64,"cooldown_s":60})
     budgets: Dict[str, Any] = field(default_factory=lambda: {"time_ms":1000,"ops":1000,"tokens":1024,"time_ms_reflection":6000})
     flags: Dict[str, Any] = field(default_factory=lambda: {"enable_world_memory":True,"allow_reflection":True})

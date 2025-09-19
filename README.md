@@ -123,6 +123,74 @@ t2:
 pytest -q tests/test_lance_index_optional.py
 ```
 
+## M3 — T3 Bundle & Plan Schemas
+
+### Bundle (t3-bundle-v1)
+Deterministic, compact snapshot produced by `make_plan_bundle(ctx, state, t1, t2)` (pure; no I/O). Lists are sorted and capped; missing fields have explicit defaults.
+
+```json
+{
+  "version": "t3-bundle-v1",
+  "now": "2025-09-19T00:00:00Z",
+  "agent": {"id": "agentA", "style_prefix": "", "caps": {"tokens": 256, "ops": 3}},
+  "world": {"hot_labels": [], "k": 0},
+  "t1": {
+    "touched_nodes": [
+      {"id": "n01", "label": "Label1", "delta": 0.42}
+    ],
+    "metrics": {"pops": 0, "iters": 0, "propagations": 0, "radius_cap_hits": 0, "layer_cap_hits": 0, "node_budget_hits": 0}
+  },
+  "t2": {
+    "retrieved": [
+      {"id": "e1", "score": 0.83, "owner": "any", "quarter": ""}
+    ],
+    "metrics": {"tier_sequence": [], "k_returned": 0, "sim_stats": {"mean": 0.0, "max": 0.0}, "cache_used": false}
+  },
+  "text": {"input": "…", "labels_from_t1": ["…"]},
+  "cfg": {
+    "t3": {"max_rag_loops": 1, "tokens": 256, "temp": 0.7},
+    "t2": {"owner_scope": "any", "k_retrieval": 64, "sim_threshold": 0.3}
+  }
+}
+```
+
+**Determinism rules**
+- `t1.touched_nodes`: choose top‑32 by |delta|, then sort by `id` ascending in the final list.
+- `t2.retrieved`: sort by `(-score, id)` and trim to `k_retrieval`.
+- `labels_from_t1`: dedupe + sort alphabetically.
+- Provide explicit empty defaults (`[]`, `{}`) for absent fields.
+
+### Plan & Ops (t3-plan-v1)
+Policy output (added in later PRs) uses a fixed schema. Allowed op kinds only:
+`CreateGraph`, `EditGraph`, `SetMetaFilter`, `RequestRetrieve`, `Speak`.
+
+```json
+{
+  "version": "t3-plan-v1",
+  "reflection": false,
+  "ops": [
+    {"kind": "Speak", "intent": "summary", "topic_labels": ["hot-topic"], "max_tokens": 128}
+  ],
+  "request_retrieve": null
+}
+```
+
+### T3 Config (defaults)
+Add under `t3:` in `configs/config.yaml` (already present in this repo):
+
+```yaml
+t3:
+  max_rag_loops: 1
+  tokens: 256
+  temp: 0.7
+  max_ops_per_turn: 3
+  allow_reflection: false
+  backend: rulebased
+  dialogue:
+    template: "style_prefix| summary: {labels}. next: {intent}"
+    include_top_k_snippets: 2
+```
+
 ## Stage semantics
 
 ### T1 (propagation)

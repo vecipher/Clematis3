@@ -14,14 +14,6 @@ t1:
     enabled: true
     max_entries: 512
     ttl_s: 300
-  lancedb:
-    uri: ./.data/lancedb
-    table: episodes
-    meta_table: meta
-    index:
-      metric: cosine
-      ef_search: 64
-      m: 16
 t2:
   backend: inmemory
   k_retrieval: 64
@@ -36,7 +28,24 @@ t2:
     enabled: true
     max_entries: 512
     ttl_s: 300
-t3: {max_rag_loops: 1, tokens: 512, temp: 0.7}
+  lancedb:
+    uri: ./.data/lancedb
+    table: episodes
+    meta_table: meta
+    index:
+      metric: cosine
+      ef_search: 64
+      m: 16
+t3:
+  max_rag_loops: 1
+  tokens: 256
+  temp: 0.7
+  max_ops_per_turn: 3
+  allow_reflection: false
+  backend: rulebased
+  dialogue:
+    template: "style_prefix| summary: {labels}. next: {intent}"
+    include_top_k_snippets: 2
 t4: {delta_norm_cap: 2.0, novelty_cap: 1.0, churn_cap: 64, cooldown_s: 60}
 budgets: {time_ms: 1000, ops: 1000, tokens: 1024, time_ms_reflection: 6000}
 flags: {enable_world_memory: true, allow_reflection: true}
