@@ -1,7 +1,14 @@
 from __future__ import annotations
 from typing import Dict, Any, List, Tuple, Callable, Optional
 from datetime import datetime, timezone
+
 from ..types import Plan, SpeakOp, EditGraphOp, RequestRetrieveOp
+# PR8: Optional LLM adapter types (duck-typed if unavailable)
+try:  # runtime optional
+    from ...adapters.llm import LLMAdapter, LLMResult  # type: ignore
+except Exception:  # pragma: no cover
+    LLMAdapter = object  # type: ignore
+    LLMResult = object   # type: ignore
 
 # PR4: Pure T3 bundle assembly (no policy/RAG/dialogue yet)
 # Deterministic: all lists sorted; explicit caps; empty defaults when absent.
@@ -623,3 +630,97 @@ def speak(dialog_bundle: Dict[str, Any], plan: Plan) -> Tuple[str, Dict[str, Any
         "snippet_count": int(len(snippet_ids)),
     }
     return utter_capped, metrics
+
+# --- PR8: LLM-based dialogue (optional backend) ---
+
+def build_llm_prompt(dialog_bundle: Dict[str, Any], plan: Plan) -> str:
+    """
+    Deterministic prompt assembly for LLM backends. Pure; no I/O.
+    Contains the same core fields used by rule-based speak(), in a stable layout.
+    """
+    speak_op = _first_speak_op(plan)
+    labels = list(getattr(speak_op, "topic_labels", []) or []) if speak_op else []
+    if not labels:
+        labels = list(dialog_bundle.get("text", {}).get("labels_from_t1", []) or [])
+    labels = _dedupe_sort_list([str(x) for x in labels])
+
+    intent = getattr(speak_op, "intent", "ack") if speak_op else "ack"
+    style_prefix = str(dialog_bundle.get("agent", {}).get("style_prefix", ""))
+    input_text = str(dialog_bundle.get("text", {}).get("input", ""))
+    snippet_ids = _top_snippet_ids(dialog_bundle)
+
+    # Stable, line-oriented prompt to minimize accidental non-determinism across providers.
+    lines = [
+        f"now: {dialog_bundle.get('now', '')}",
+        f"style_prefix: {style_prefix}",
+        f"intent: {intent}",
+        f"labels: {', '.join(labels)}",
+        f"snippets: {', '.join(snippet_ids)}",
+        "instruction: Compose a concise utterance that reflects the intent and labels. Do not exceed the token budget.",
+        f"input: {input_text}",
+    ]
+    return "\n".join(lines).strip()
+
+
+def llm_speak(dialog_bundle: Dict[str, Any], plan: Plan, adapter: Any) -> Tuple[str, Dict[str, Any]]:
+    """
+    Produce an utterance using an injected LLM adapter. Deterministic under a deterministic adapter.
+    Enforces the same token budget as rule-based speak() and prefixes style if template omits it.
+    Returns (utterance, metrics) with the same metric keys as speak(), plus backend info.
+    """
+    # Compute labels/intent again for metrics and style use
+    speak_op = _first_speak_op(plan)
+    intent = getattr(speak_op, "intent", "ack") if speak_op else "ack"
+    style_prefix = str(dialog_bundle.get("agent", {}).get("style_prefix", ""))
+    snippet_ids = _top_snippet_ids(dialog_bundle)
+
+    # Token budget policy: SpeakOp.max_tokens -> agent caps -> default 256
+    max_tokens = 256
+    if speak_op and getattr(speak_op, "max_tokens", None):
+        try:
+            max_tokens = int(speak_op.max_tokens)
+        except Exception:
+            max_tokens = 256
+    else:
+        try:
+            max_tokens = int(dialog_bundle.get("agent", {}).get("caps", {}).get("tokens", 256))
+        except Exception:
+            max_tokens = 256
+
+    # Temperature: read from adapter if present; default to 0.2
+    temperature = float(getattr(adapter, "default_temperature", 0.2))
+
+    prompt = build_llm_prompt(dialog_bundle, plan)
+    # Call the adapter; it must implement .generate(prompt, max_tokens, temperature) -> LLMResult-like
+    try:
+        result = adapter.generate(prompt, max_tokens=max_tokens, temperature=temperature)
+        # result may be a plain object; attempt attribute access first, fallback to dict
+        text = getattr(result, "text", None)
+        if text is None and isinstance(result, dict):
+            text = result.get("text", "")
+        tokens = getattr(result, "tokens", None)
+        if tokens is None and isinstance(result, dict):
+            tokens = int(result.get("tokens", 0))
+        truncated_llm = getattr(result, "truncated", None)
+        if truncated_llm is None and isinstance(result, dict):
+            truncated_llm = bool(result.get("truncated", False))
+    except Exception:
+        # Fail closed with a deterministic minimal message
+        text, tokens, truncated_llm = "[llm:error]", 0, True
+
+    # Ensure style prefix is present even if the adapter did not apply it
+    if style_prefix and not (text or "").startswith(f"{style_prefix}|"):
+        text = f"{style_prefix}| {text}".strip()
+
+    # Final budget enforcement (adapter should already respect it, but we cap deterministically)
+    text_capped, truncated_final, token_count = _truncate_to_tokens(text, max_tokens)
+
+    metrics = {
+        "tokens": int(token_count),
+        "truncated": bool(truncated_llm or truncated_final),
+        "style_prefix_used": bool(style_prefix != ""),
+        "snippet_count": int(len(snippet_ids)),
+        "backend": "llm",
+        "adapter": getattr(adapter, "name", adapter.__class__.__name__ if hasattr(adapter, "__class__") else "Unknown"),
+    }
+    return text_capped, metrics

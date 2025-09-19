@@ -1,21 +1,3 @@
-# Clematis v2 — Scaffold
-
-Minimal scaffold matching the Clematis v2 steering capsule. Stages are pure, orchestrator handles I/O. 
-This repo includes a runnable demo (`scripts/run_demo.py`) that exercises the turn loop and writes JSONL logs.
-
-## Quick start
-
-```bash
-python3 scripts/run_demo.py
-```
-
-Logs are written to `.logs/` at the repo root.
-
-## T1:
-	•	pops = PQ pops
-	•	iters = layers beyond seeds visited
-	•	propagations = relaxations (edge traversals)
-
 # Clematis v2 — Scaffold (M1 + M2)
 
 Minimal scaffold matching the Clematis v2 steering capsule. Stages are pure; the orchestrator handles I/O and logging.  
@@ -41,6 +23,7 @@ pytest -q
   PR4: bundle; PR5: rule‑based policy; PR6: one‑shot RAG refinement; PR7: deterministic dialogue via template. Logs: t3_plan.jsonl, t3_dialogue.jsonl.
 - **T4 — Meta‑filter & apply**  
   Accepts/filters proposed deltas; Apply persists and logs.
+- **Optional — T3 LLM adapter (behind flag)**  Enable `t3.backend: llm` and inject an adapter; falls back to rule-based if absent.
 
 ## Determinism guardrails
 
@@ -189,7 +172,7 @@ t3:
   allow_reflection: false
   backend: rulebased
   dialogue:
-    template: "style_prefix| summary: {labels}. next: {intent}"
+    template: "{style_prefix}| summary: {labels}. next: {intent}"
     include_top_k_snippets: 2
 ```
 
@@ -309,8 +292,44 @@ speak(dialog_bundle: dict, plan: Plan) -> tuple[str, dict]
 **Orchestrator wiring**
 - Flow: `make_plan_bundle → deliberate → (optional) rag_once → make_dialog_bundle → speak`.
 - JSONL logs written per turn:
-  - `t3_plan.jsonl`: `{policy_backend, ops_counts, requested_retrieve, rag_used, reflection, ms_deliberate, ms_rag}`
-  - `t3_dialogue.jsonl`: `{tokens, truncated, style_prefix_used, snippet_count, ms}`
+  - `t3_plan.jsonl`: `{policy_backend, backend, backend_fallback?, fallback_reason?, ops_counts, requested_retrieve, rag_used, reflection, ms_deliberate, ms_rag}`
+  - `t3_dialogue.jsonl`: `{backend, tokens, truncated, style_prefix_used, snippet_count, ms, adapter?, model?, temperature?}`
+
+## T3 — LLM adapter (PR8, optional)
+
+Opt-in LLM-driven dialogue while keeping the default rule-based backend and deterministic CI.
+
+**Enable (config)**
+```yaml
+# configs/config.yaml
+t3:
+  backend: rulebased   # or "llm"
+  llm:
+    provider: qwen
+    model: qwen3-4b-instruct
+    temperature: 0.2
+    max_tokens_default: 256
+    timeout_s: 30
+```
+
+**Provide an adapter at runtime** (no network in CI):
+```python
+from clematis.adapters.llm import QwenLLMAdapter
+
+def qwen_chat(prompt: str, *, model: str, max_tokens: int, temperature: float, timeout_s: int) -> str:
+    # Your client code to call Qwen (DashScope/Ollama/etc.) and return text
+    return "..."
+
+state["llm_adapter"] = QwenLLMAdapter(call_fn=qwen_chat, model="qwen3-4b-instruct", temperature=0.2, timeout_s=30)
+```
+
+**Deterministic tests**
+- CI uses `DeterministicLLMAdapter` (offline). No network calls. Token caps enforced the same as rule-based `speak()`.
+
+**Fallback behavior**
+- If `t3.backend: llm` but no adapter is present, orchestrator falls back to rule-based and logs:
+  - `t3_plan.jsonl`: `backend_fallback`, `fallback_reason: "no_adapter"`
+  - `t3_dialogue.jsonl`: `backend: "rulebased"`
 
 ## Stage semantics
 

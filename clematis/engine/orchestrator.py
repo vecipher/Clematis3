@@ -4,7 +4,7 @@ import time
 from .types import TurnCtx, TurnResult
 from .stages.t1 import t1_propagate
 from .stages.t2 import t2_semantic
-from .stages.t3 import make_plan_bundle, make_dialog_bundle, deliberate, rag_once, speak
+from .stages.t3 import make_plan_bundle, make_dialog_bundle, deliberate, rag_once, speak, llm_speak
 from .stages.t4 import t4_filter
 from .stages.apply_stage import apply_changes
 from ..io.log import append_jsonl
@@ -101,10 +101,29 @@ class Orchestrator:
         else:
             rag_ms = 0.0
 
-        # Dialogue synthesis
+        # Dialogue synthesis (rule-based vs optional LLM backend)
         t0 = time.perf_counter()
         dialog_bundle = make_dialog_bundle(ctx, state, t1, t2, plan)
-        utter, speak_metrics = speak(dialog_bundle, plan)
+
+        # Backend selection
+        backend_cfg = str(t3cfg.get("backend", "rulebased")) if isinstance(t3cfg, dict) else "rulebased"
+        llm_cfg = t3cfg.get("llm", {}) if isinstance(t3cfg, dict) else {}
+        adapter = state.get("llm_adapter", None) or getattr(ctx, "llm_adapter", None)
+
+        backend_used = "rulebased"
+        backend_fallback = None
+        fallback_reason = None
+
+        if backend_cfg == "llm" and adapter is not None:
+            utter, speak_metrics = llm_speak(dialog_bundle, plan, adapter)
+            backend_used = "llm"
+        else:
+            utter, speak_metrics = speak(dialog_bundle, plan)
+            if backend_cfg == "llm" and adapter is None:
+                backend_fallback, fallback_reason = "rulebased", "no_adapter"
+            elif backend_cfg not in ("rulebased", "llm"):
+                backend_fallback, fallback_reason = "rulebased", "invalid_backend"
+
         speak_ms = round((time.perf_counter() - t0) * 1000.0, 3)
 
         # Plan logging
@@ -120,6 +139,8 @@ class Orchestrator:
                 "turn": turn_id,
                 "agent": agent_id,
                 "policy_backend": policy_backend,
+                "backend": backend_used,
+                **({"backend_fallback": backend_fallback, "fallback_reason": fallback_reason} if backend_fallback else {}),
                 "ops_counts": ops_counts,
                 "requested_retrieve": bool(requested_retrieve),
                 "rag_used": bool(rag_metrics.get("rag_used", False)),
@@ -131,6 +152,15 @@ class Orchestrator:
         )
 
         # Dialogue logging
+        dlg_extra = {}
+        if backend_used == "llm":
+            adapter_name = getattr(adapter, "name", adapter.__class__.__name__ if hasattr(adapter, "__class__") else "Unknown")
+            model = str(llm_cfg.get("model", ""))
+            temperature = float(llm_cfg.get("temperature", 0.2))
+            dlg_extra.update({"backend": "llm", "adapter": adapter_name, "model": model, "temperature": temperature})
+        else:
+            dlg_extra.update({"backend": "rulebased"})
+
         append_jsonl(
             "t3_dialogue.jsonl",
             {
@@ -141,6 +171,7 @@ class Orchestrator:
                 "style_prefix_used": bool(speak_metrics.get("style_prefix_used", False)),
                 "snippet_count": int(speak_metrics.get("snippet_count", 0)),
                 "ms": speak_ms,
+                **dlg_extra,
                 **({"now": now} if now else {}),
             },
         )
