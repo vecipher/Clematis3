@@ -15,3 +15,99 @@ Logs are written to `.logs/` at the repo root.
 	•	pops = PQ pops
 	•	iters = layers beyond seeds visited
 	•	propagations = relaxations (edge traversals)
+
+# Clematis v2 — Scaffold (M1 + M2)
+
+Minimal scaffold matching the Clematis v2 steering capsule. Stages are pure; the orchestrator handles I/O and logging.  
+The demo exercises the canonical turn loop and writes structured JSONL logs for first‑class observability.
+
+## Quick start
+
+```bash
+# Run the end-to-end demo turn (writes logs under .logs/)
+python3 scripts/run_demo.py
+
+# Run unit tests
+pytest -q
+```
+
+## What’s implemented
+
+- **T1 — Keyword propagation (deterministic)**  
+  Wavefront PQ with decay + budgets, cache keyed by graph `version_etag`. Deterministic seeding, tie‑breaking, and delta emission.
+- **T2 — Semantic retrieval + residual (deterministic, tiered, offline)**  
+  Deterministic embedding stub (BGEAdapter) + in‑memory index with exact/cluster/archive tiers. Emits small, monotonic residual nudges (never undoes T1). Cached per query.
+- **T3/T4 — Stubs & meta‑filter**  
+  T3 is placeholder; T4 accepts/filters proposed deltas; Apply persists and logs.
+
+## Determinism guardrails
+
+- `_match_keywords` is **case‑insensitive**; labels iterated **sorted**.
+- Priority queue uses **node‑id tie‑break** to stabilize pop order.
+- Delta emission is **alphabetically sorted by node id**.
+- Configured caps are independent and observable:
+  - `pops` = PQ pops
+  - `iters` = layers **beyond seeds** explored (depth)
+  - `propagations` = edge traversals applied (relaxations)
+
+## Configuration (YAML)
+
+```yaml
+# configs/config.yaml
+t1:
+  decay: {mode: exp_floor, rate: 0.6, floor: 0.05}
+  edge_type_mult: {supports: 1.0, associates: 0.6, contradicts: 0.8}
+  iter_cap: 50            # legacy; see iter_cap_layers
+  iter_cap_layers: 50     # depth cap: layers beyond seeds
+  node_budget: 1.5
+  queue_budget: 10000
+  radius_cap: 4
+  relax_cap: null         # optional total relaxation cap
+  cache: {enabled: true, max_entries: 512, ttl_s: 300}
+
+t2:
+  backend: inmemory
+  k_retrieval: 64
+  sim_threshold: 0.3
+  tiers: [exact_semantic, cluster_semantic, archive]
+  exact_recent_days: 30
+  ranking: {alpha_sim: 0.75, beta_recency: 0.2, gamma_importance: 0.05}
+  clusters_top_m: 3
+  residual_cap_per_turn: 32
+  cache: {enabled: true, max_entries: 512, ttl_s: 300}
+```
+
+## Stage semantics
+
+### T1 (propagation)
+- **Decay modes:** `exp_floor` (default) or `attn_quad` via config.
+- **Caps:** `radius_cap`, `iter_cap_layers` (depth), `node_budget`, `queue_budget`, optional `relax_cap`.
+- **Metrics:** `pops`, `iters`, `propagations`, `radius_cap_hits`, `layer_cap_hits`, `node_budget_hits`, `cache_*`.
+
+### T2 (retrieval + residual)
+- **Query:** `input_text` + labels of nodes touched by T1 (deterministically gathered).
+- **Tiers:**  
+  1) `exact_semantic` → recent window (`exact_recent_days`) + `sim_threshold`  
+  2) `cluster_semantic` → route to `clusters_top_m` clusters by centroid similarity  
+  3) `archive` → older shards (fallback)  
+- **Embeddings:** offline deterministic `BGEAdapter(dim=32)` (stable hash‑based vectors).  
+- **Residuals:** keyword‑match episode text ↔ current graph labels, emit bounded `upsert_node` nudges; **never undo T1**.  
+- **Metrics:** `tier_sequence`, `k_returned`, `k_used`, `sim_stats{mean,max}`, `caps.residual_cap`, `cache_*`.
+
+## Logs
+
+JSONL files are written to `.logs/`:
+
+- `t1.jsonl` — propagation metrics per turn
+- `t2.jsonl` — retrieval/residual metrics per turn
+- `t3_plan.jsonl`, `t3_dialogue.jsonl` — placeholders for policy/dialogue
+- `t4.jsonl` — meta‑filter approvals/rejections
+- `apply.jsonl` — state changes summary
+- `turn.jsonl` — per‑turn roll‑up (durations, key metrics)
+- `health.jsonl` — guardrail flags
+
+## Development tips
+
+- Deterministic tests use the hash‑based embeddings; if a test filters too hard on cosine, set `t2.sim_threshold` to `-1.0` in that test to include all candidates and let other filters (recency, tiers) drive behavior.
+- Cache behavior is configurable per stage; tests include **first‑call miss → second‑call hit → invalidation by etag/index change**.
+- Keep stages **pure**. Instrumentation and persistence live in the orchestrator and adapters.

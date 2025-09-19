@@ -2,8 +2,9 @@ from __future__ import annotations
 from typing import Dict, Any, List
 from ..types import T4Result
 
-def t4_filter(ctx, state, t1, t2, plan) -> T4Result:
-    # Approve nothing (demo). In real impl, gate deltas/ops.
+def t4_filter(ctx, state, t1, t2, plan, utter) -> T4Result:
+    # Approve nothing (demo). In real impl, gate deltas/ops, certain keywords for obvious filter reasons, like slurs.
+    #TODO: hard-coded profanity filter
     ops = []
     if plan is not None:
         if hasattr(plan, "ops"):
