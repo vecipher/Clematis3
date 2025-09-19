@@ -56,6 +56,18 @@ t3:
     temperature: 0.2
     max_tokens_default: 256
     timeout_s: 30
-t4: {delta_norm_cap: 2.0, novelty_cap: 1.0, churn_cap: 64, cooldown_s: 60}
+t4:
+  enabled: true
+  delta_norm_cap_l2: 1.5
+  novelty_cap_per_node: 0.3
+  churn_cap_edges: 64
+  cooldowns:
+    EditGraph: 2
+    CreateGraph: 10
+  weight_min: -1.0
+  weight_max: 1.0
+  snapshot_every_n_turns: 1
+  snapshot_dir: ./.data/snapshots
+  cache_bust_mode: on-apply
 budgets: {time_ms: 1000, ops: 1000, tokens: 1024, time_ms_reflection: 6000}
 flags: {enable_world_memory: true, allow_reflection: true}

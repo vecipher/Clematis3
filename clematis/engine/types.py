@@ -95,6 +95,21 @@ class SetMetaFilterOp:
     kind: Literal["SetMetaFilter"]
     params: Dict[str, Any]  # {delta_norm_cap?, novelty_cap?, churn_cap?, cooldown_s?}
 
+@dataclass(frozen=True)
+class ProposedDelta:
+    # Canonical, additive proposal for a target attribute (usually "weight")
+    target_kind: Literal["node", "edge"]
+    target_id: str               # e.g., "n:node_id" or "e:src|rel|dst"
+    attr: str                    # e.g., "weight"
+    delta: float                 # additive change to apply
+    op_idx: Optional[int] = None # index of originating plan.op, if known
+    idx: Optional[int] = None    # original index for deterministic replay
+
+@dataclass(frozen=True)
+class OpRef:
+    kind: str
+    idx: int
+
 Op = SpeakOp | RequestRetrieveOp | EditGraphOp | CreateGraphOp | SetMetaFilterOp
 
 @dataclass
@@ -102,12 +117,13 @@ class Plan:
     version: PlanVersion
     reflection: bool = False
     ops: List[Op] = field(default_factory=list)
+    deltas: List[ProposedDelta] = field(default_factory=list)
     request_retrieve: Optional[Dict[str, Any]] = None
 
 @dataclass
 class T4Result:
-    approved_deltas: List[Dict[str, Any]]
-    rejected_ops: List[Dict[str, Any]]
+    approved_deltas: List[ProposedDelta]
+    rejected_ops: List[OpRef]
     reasons: List[str]
     metrics: Dict[str, Any]
 
@@ -199,6 +215,18 @@ class Config:
             "include_top_k_snippets": 2,
         },
     })
-    t4: Dict[str, Any] = field(default_factory=lambda: {"delta_norm_cap":2.0,"novelty_cap":1.0,"churn_cap":64,"cooldown_s":60})
+    t4: Dict[str, Any] = field(default_factory=lambda: {
+        "enabled": True,
+        "delta_norm_cap_l2": 1.5,
+        "novelty_cap_per_node": 0.3,
+        "churn_cap_edges": 64,
+        "cooldowns": {"EditGraph": 2, "CreateGraph": 10},
+        # Forward-looking defaults (used in later PRs, harmless here)
+        "weight_min": -1.0,
+        "weight_max": 1.0,
+        "snapshot_every_n_turns": 1,
+        "snapshot_dir": "./.data/snapshots",
+        "cache_bust_mode": "on-apply",
+    })
     budgets: Dict[str, Any] = field(default_factory=lambda: {"time_ms":1000,"ops":1000,"tokens":1024,"time_ms_reflection":6000})
     flags: Dict[str, Any] = field(default_factory=lambda: {"enable_world_memory":True,"allow_reflection":True})
