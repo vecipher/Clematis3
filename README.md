@@ -5,12 +5,45 @@ The demo exercises the canonical turn loop and writes structured JSONL logs for 
 
 ## Quick start
 
+
 ```bash
 # Run the end-to-end demo turn (writes logs under .logs/)
 python3 scripts/run_demo.py
 
 # Run unit tests
 pytest -q
+```
+
+## Validate your config (PR16)
+
+Use the built-in validator to sanity-check `configs/config.yaml` (or any YAML/JSON) before running:
+
+```bash
+# Default path (configs/config.yaml)
+python3 scripts/validate_config.py
+
+# Explicit file
+python3 scripts/validate_config.py path/to/your.yaml
+
+# From STDIN
+cat path/to/your.yaml | python3 scripts/validate_config.py -
+```
+
+**Expected success output**:
+```
+OK
+t4.cache: ttl_sec=600 namespaces=['t2:semantic'] cache_bust_mode=on-apply
+```
+
+**On error** you get explicit field paths, e.g.:
+```
+t4.weight_min/weight_max must satisfy weight_min < weight_max
+t2.k_retrieval must be >= 1
+```
+
+**TTL keys:**
+- Stage caches (T1/T2) use `ttl_s`.
+- Orchestrator cache (PR15) uses `t4.cache.ttl_sec` (alias: accepts `ttl_s`; normalized to `ttl_sec`).
 ```
 
 ## What’s implemented
@@ -363,6 +396,7 @@ Applies approved deltas to the in‑memory graph store, bumps versions, and snap
 
 **Kill switch**
 - `t4.enabled: true|false`. When `false`, T4 and Apply are bypassed; no `t4.jsonl`/`apply.jsonl` entries are written.
+Validation is provided via the CLI (above); the turn loop does not auto-validate configs by default.
 
 ### T4 configuration (add under `t4:` in `configs/config.yaml`)
 ```yaml
@@ -394,6 +428,7 @@ t4:
 - **Stage‑level** LRU caches in T1/T2 (legacy, per‑stage knobs; `ttl_s`).
 - **Orchestrator‑level** CacheManager around T2 (version‑aware, invalidated on Apply; `ttl_sec`).
 This is intentional for M4; consolidation is a later follow‑up.
+Use the validator to check TTLs and sizes across both layers quickly.
 
 ## Stage semantics
 
@@ -430,3 +465,15 @@ JSONL files are written to `.logs/`:
 - Deterministic tests use the hash‑based embeddings; if a test filters too hard on cosine, set `t2.sim_threshold` to `-1.0` in that test to include all candidates and let other filters (recency, tiers) drive behavior.
 - Cache behavior is configurable per stage; tests include **first‑call miss → second‑call hit → invalidation by etag/index change**.
 - Keep stages **pure**. Instrumentation and persistence live in the orchestrator and adapters.
+
+## M4 Status
+
+- PR12 (T4 Meta-Filter): ✅
+- PR13 (Apply/Persist + Orchestrator wiring): ✅
+- PR14 (Snapshot loader & resume): ✅
+- PR15 (Cache coherency & guardrails): ✅
+- PR16 (Docs & config validation): ✅
+
+**Optional follow-ups (not required for M4):**
+- CLI: inspect latest snapshot (P3 tooling)
+- Cache consolidation (single layer) in a future milestone
