@@ -1,12 +1,13 @@
 from __future__ import annotations
 from typing import Any, Dict
 import time
+from types import SimpleNamespace
 from .types import TurnCtx, TurnResult
 from .stages.t1 import t1_propagate
 from .stages.t2 import t2_semantic
 from .stages.t3 import make_plan_bundle, make_dialog_bundle, deliberate, rag_once, speak, llm_speak
 from .stages.t4 import t4_filter
-from .stages.apply_stage import apply_changes
+from .apply import apply_changes
 from ..io.log import append_jsonl
 
 
@@ -58,7 +59,12 @@ class Orchestrator:
         # All pure stage functions; only logging here does I/O.
         t0 = time.perf_counter()
         bundle = make_plan_bundle(ctx, state, t1, t2)
-        plan = deliberate(bundle)
+        # Allow tests to monkeypatch a module-level t3_deliberate(ctx, state, bundle)
+        delib_fn = globals().get("t3_deliberate")
+        if callable(delib_fn):
+            plan = delib_fn(ctx, state, bundle)
+        else:
+            plan = deliberate(bundle)
         plan_ms = round((time.perf_counter() - t0) * 1000.0, 3)
 
         # RAG: allow at most one refinement if both requested and enabled by config
@@ -108,21 +114,41 @@ class Orchestrator:
         # Backend selection
         backend_cfg = str(t3cfg.get("backend", "rulebased")) if isinstance(t3cfg, dict) else "rulebased"
         llm_cfg = t3cfg.get("llm", {}) if isinstance(t3cfg, dict) else {}
-        adapter = state.get("llm_adapter", None) or getattr(ctx, "llm_adapter", None)
+        adapter = (
+            state.get("llm_adapter", None) if isinstance(state, dict) else getattr(state, "llm_adapter", None)
+        ) or getattr(ctx, "llm_adapter", None)
 
         backend_used = "rulebased"
         backend_fallback = None
         fallback_reason = None
 
-        if backend_cfg == "llm" and adapter is not None:
-            utter, speak_metrics = llm_speak(dialog_bundle, plan, adapter)
-            backend_used = "llm"
+        # Allow tests to monkeypatch a module-level t3_dialogue with flexible signatures.
+        dlg_fn = globals().get("t3_dialogue")
+        if callable(dlg_fn):
+            try:
+                # Preferred signature: (dialog_bundle, plan)
+                res = dlg_fn(dialog_bundle, plan)
+            except TypeError:
+                # Fallback signature used by some tests: (ctx, state, dialog_bundle)
+                res = dlg_fn(ctx, state, dialog_bundle)
+            # Normalize: support returning just a string or (utter, metrics)
+            if isinstance(res, tuple):
+                utter = res[0]
+                speak_metrics = res[1] if len(res) > 1 and isinstance(res[1], dict) else {}
+            else:
+                utter = res
+                speak_metrics = {}
+            backend_used = "patched"
         else:
-            utter, speak_metrics = speak(dialog_bundle, plan)
-            if backend_cfg == "llm" and adapter is None:
-                backend_fallback, fallback_reason = "rulebased", "no_adapter"
-            elif backend_cfg not in ("rulebased", "llm"):
-                backend_fallback, fallback_reason = "rulebased", "invalid_backend"
+            if backend_cfg == "llm" and adapter is not None:
+                utter, speak_metrics = llm_speak(dialog_bundle, plan, adapter)
+                backend_used = "llm"
+            else:
+                utter, speak_metrics = speak(dialog_bundle, plan)
+                if backend_cfg == "llm" and adapter is None:
+                    backend_fallback, fallback_reason = "rulebased", "no_adapter"
+                elif backend_cfg not in ("rulebased", "llm"):
+                    backend_fallback, fallback_reason = "rulebased", "invalid_backend"
 
         speak_ms = round((time.perf_counter() - t0) * 1000.0, 3)
 
@@ -176,38 +202,52 @@ class Orchestrator:
             },
         )
 
-        # --- T4 ---
-        t0 = time.perf_counter()
-        t4 = t4_filter(ctx, state, t1, t2, plan, utter)
-        t4_ms = round((time.perf_counter() - t0) * 1000.0, 3)
-        append_jsonl(
-            "t4.jsonl",
-            {
-                "turn": turn_id,
-                "agent": agent_id,
-                **t4.metrics,
-                "approved": len(getattr(t4, "approved_deltas", [])),
-                "rejected": len(getattr(t4, "rejected_ops", [])),
-                "ms": t4_ms,
-                **({"now": now} if now else {}),
-            },
-        )
+        # Kill switch (t4.enabled). Default True if unspecified.
+        t4_cfg_full = getattr(getattr(ctx, "config", SimpleNamespace()), "t4", {}) or {}
+        t4_enabled = bool(t4_cfg_full.get("enabled", True)) if isinstance(t4_cfg_full, dict) else True
 
-        # --- Apply & persist ---
-        t0 = time.perf_counter()
-        apply = apply_changes(ctx, state, t4)
-        apply_ms = round((time.perf_counter() - t0) * 1000.0, 3)
-        append_jsonl(
-            "apply.jsonl",
-            {
-                "turn": turn_id,
-                "agent": agent_id,
-                **apply.applied,
-                "snapshot_id": "demo",
-                "ms": apply_ms,
-                **({"now": now} if now else {}),
-            },
-        )
+        # --- T4 / Apply (honor kill switch) ---
+        if t4_enabled:
+            # --- T4 ---
+            t0 = time.perf_counter()
+            t4 = t4_filter(ctx, state, t1, t2, plan, utter)
+            t4_ms = round((time.perf_counter() - t0) * 1000.0, 3)
+            append_jsonl(
+                "t4.jsonl",
+                {
+                    "turn": turn_id,
+                    "agent": agent_id,
+                    **t4.metrics,
+                    "approved": len(getattr(t4, "approved_deltas", [])),
+                    "rejected": len(getattr(t4, "rejected_ops", [])),
+                    "reasons": getattr(t4, "reasons", []),
+                    "ms": t4_ms,
+                    **({"now": now} if now else {}),
+                },
+            )
+            # --- Apply & persist ---
+            t0 = time.perf_counter()
+            apply = apply_changes(ctx, state, t4)
+            apply_ms = round((time.perf_counter() - t0) * 1000.0, 3)
+            append_jsonl(
+                "apply.jsonl",
+                {
+                    "turn": turn_id,
+                    "agent": agent_id,
+                    "applied": int(getattr(apply, "applied", 0)),
+                    "clamps": int(getattr(apply, "clamps", 0)),
+                    "version_etag": getattr(apply, "version_etag", None),
+                    "snapshot": getattr(apply, "snapshot_path", None),
+                    "ms": apply_ms,
+                    **({"now": now} if now else {}),
+                },
+            )
+        else:
+            # Bypassed: provide inert placeholders; no t4/apply logs
+            t4_ms = 0.0
+            apply_ms = 0.0
+            t4 = SimpleNamespace(approved_deltas=[], rejected_ops=[], reasons=["T4_DISABLED"], metrics={"counts": {"approved": 0}})
+            apply = SimpleNamespace(applied=0, clamps=0, version_etag=getattr(state, "version_etag", None), snapshot_path=None)
 
         # --- Health summary + per-turn rollup ---
         from . import health
@@ -238,4 +278,12 @@ class Orchestrator:
             },
         )
 
-        return TurnResult(line=apply.line, events=[])
+        return TurnResult(line=utter, events=[])
+
+
+def run_turn(ctx: TurnCtx, state: Dict[str, Any], input_text: str) -> TurnResult:
+    """
+    Thin wrapper so external callers/tests can use a stable API without
+    instantiating the Orchestrator class explicitly.
+    """
+    return Orchestrator().run_turn(ctx, state, input_text)

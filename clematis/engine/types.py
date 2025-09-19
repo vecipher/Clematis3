@@ -129,10 +129,11 @@ class T4Result:
 
 @dataclass
 class ApplyResult:
-    applied: Dict[str, Any]
-    clamps: List[str]
-    line: str
-    metrics: Dict[str, Any]
+    applied: int                     # number of deltas actually applied
+    clamps: int                      # number of values clamped to [weight_min, weight_max]
+    version_etag: Optional[str]      # new store version after apply
+    snapshot_path: Optional[str]     # path if a snapshot was written this turn, else None
+    metrics: Dict[str, Any]          # additional counters/timings
 
 @dataclass
 class TurnResult:
