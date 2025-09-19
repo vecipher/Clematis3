@@ -119,13 +119,28 @@ class Scheduler(Protocol):
 class Config:
     k_surface: int = 32
     surface_method: Literal["PCA","TopK"] = "PCA"
-    t1: Dict[str, Any] = field(default_factory=lambda: {"decay":{"mode":"exp_floor","rate":0.6,"floor":0.05},
-                                                        "edge_type_mult":{"supports":1.0,"associates":0.6,"contradicts":0.8},
-                                                        "iter_cap":50,"node_budget":1.5,"queue_budget":10_000,"radius_cap":4})
-    t2: Dict[str, Any] = field(default_factory=lambda: {"k_retrieval":64,"sim_threshold":0.3,
-                                                        "tiers":["exact_semantic","cluster_semantic","archive"],
-                                                        "ranking":{"alpha_sim":0.75,"beta_recency":0.2,"gamma_importance":0.05},
-                                                        "clusters_top_m":3})
+    t1: Dict[str, Any] = field(default_factory=lambda: {
+        "decay": {"mode": "exp_floor", "rate": 0.6, "floor": 0.05},
+        "edge_type_mult": {"supports": 1.0, "associates": 0.6, "contradicts": 0.8},
+        "iter_cap": 50,                 # legacy name; see iter_cap_layers
+        "iter_cap_layers": 50,          # layers beyond seeds (depth cap)
+        "node_budget": 1.5,
+        "queue_budget": 10_000,
+        "radius_cap": 4,
+        "relax_cap": None,              # optional max total relaxations (edge traversals)
+        "cache": {"enabled": True, "max_entries": 512, "ttl_s": 300},
+    })
+    t2: Dict[str, Any] = field(default_factory=lambda: {
+        "backend": "inmemory",                      # or "lancedb" later
+        "k_retrieval": 64,
+        "sim_threshold": 0.3,
+        "tiers": ["exact_semantic", "cluster_semantic", "archive"],
+        "exact_recent_days": 30,
+        "ranking": {"alpha_sim": 0.75, "beta_recency": 0.2, "gamma_importance": 0.05},
+        "clusters_top_m": 3,
+        "residual_cap_per_turn": 32,
+        "cache": {"enabled": True, "max_entries": 512, "ttl_s": 300},
+    })
     t3: Dict[str, Any] = field(default_factory=lambda: {"max_rag_loops":1,"tokens":512,"temp":0.7})
     t4: Dict[str, Any] = field(default_factory=lambda: {"delta_norm_cap":2.0,"novelty_cap":1.0,"churn_cap":64,"cooldown_s":60})
     budgets: Dict[str, Any] = field(default_factory=lambda: {"time_ms":1000,"ops":1000,"tokens":1024,"time_ms_reflection":6000})

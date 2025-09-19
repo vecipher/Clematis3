@@ -15,11 +15,18 @@ t1:
     max_entries: 512
     ttl_s: 300
 t2:
+  backend: inmemory
   k_retrieval: 64
   sim_threshold: 0.3
   tiers: [exact_semantic, cluster_semantic, archive]
+  exact_recent_days: 30
   ranking: {alpha_sim: 0.75, beta_recency: 0.2, gamma_importance: 0.05}
   clusters_top_m: 3
+  residual_cap_per_turn: 32
+  cache:
+    enabled: true
+    max_entries: 512
+    ttl_s: 300
 t3: {max_rag_loops: 1, tokens: 512, temp: 0.7}
 t4: {delta_norm_cap: 2.0, novelty_cap: 1.0, churn_cap: 64, cooldown_s: 60}
 budgets: {time_ms: 1000, ops: 1000, tokens: 1024, time_ms_reflection: 6000}

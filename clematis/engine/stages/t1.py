@@ -60,8 +60,9 @@ def t1_propagate(ctx, state, text: str) -> T1Result:
     radius_cap  = int(cfg_t1.get("radius_cap", 4))
     iter_cap    = int(cfg_t1.get("iter_cap", 50))
 
-    # iter_cap applies to layers beyond seeds; allow override via iter_cap_layers
-    iter_cap_layers = int(cfg_t1.get("iter_cap_layers", iter_cap))
+    # Effective depth cap: min(iter_cap_layers, iter_cap) so legacy iter_cap still works
+    iter_cap_layers_cfg = int(cfg_t1.get("iter_cap_layers", 50))
+    iter_cap_layers = min(iter_cap_layers_cfg, iter_cap)
     # Optional hard cap on number of relaxations (edge traversals)
     relax_cap = cfg_t1.get("relax_cap", None)
     if relax_cap is not None:
@@ -95,6 +96,7 @@ def t1_propagate(ctx, state, text: str) -> T1Result:
         seed_ids = sorted(seeds.keys())
         policy_caps = {
             "radius_cap": radius_cap,
+            "iter_cap": iter_cap,
             "iter_cap_layers": iter_cap_layers,
             "relax_cap": relax_cap,
             "queue_budget": queue_budget,
