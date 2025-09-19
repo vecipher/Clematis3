@@ -223,6 +223,65 @@ t3:
 
 **Determinism guardrails:** sort labels and node ids; fixed thresholds; no RNG; pure function.
 
+## T3 — One‑shot RAG refinement (PR6)
+
+A single, optional retrieval refinement step for low‑evidence cases. Stage‑only: no dialogue yet, no orchestrator changes required beyond passing a retrieve function when you wire it later.
+
+**Function:**
+```python
+# clematis/engine/stages/t3.py
+rag_once(bundle: dict, plan: Plan, retrieve_fn: Callable[[dict], dict], already_used: bool=False) -> (Plan, dict)
+```
+
+**Inputs**
+- `bundle`: output of `make_plan_bundle(...)` (PR4).
+- `plan`: output of `deliberate(bundle)` (PR5). If it contains a `RequestRetrieve` op, RAG can be used once.
+- `retrieve_fn(payload)` (injected): must return `{ "retrieved": [{id, score, owner, quarter}...], "metrics": {...} }`.
+- `already_used`: if `True`, RAG is blocked (idempotent no‑op).
+
+**Payload built deterministically** (from the first `RequestRetrieve` op):
+```json
+{
+  "query": "...",
+  "owner": "agent|world|any",
+  "k": 8,
+  "tier_pref": "exact_semantic|cluster_semantic|archive|null",
+  "hints": { "now": ISO8601, "sim_threshold": 0.3 }
+}
+```
+
+**Refinement policy**
+- Compute `pre_s_max = bundle.t2.metrics.sim_stats.max` and `s_max_rag = max(score)` from `retrieve_fn` results.
+- `post_s_max = max(pre_s_max, s_max_rag)`.
+- Update the first `Speak` op’s intent deterministically using thresholds (`t3.policy`):
+  - `post_s_max ≥ tau_high` → `summary`
+  - `tau_low ≤ post_s_max < tau_high` → `assertion` (or `ack` if no labels)
+  - `post_s_max < tau_low` → `question`
+- Optionally add **one** `EditGraph` op if evidence ≥ `tau_low` and none exists yet (ids sorted asc; edits capped).  
+- **Never** add a second `RequestRetrieve` op.  
+- Enforce `len(ops) ≤ t3.max_ops_per_turn`.
+
+**Outputs**
+- `(refined_plan, metrics)` where `metrics` is:
+```json
+{
+  "rag_used": true|false,
+  "rag_blocked": true|false,
+  "pre_s_max": 0.2,
+  "post_s_max": 0.85,
+  "k_retrieved": 2,
+  "owner": "any",
+  "tier_pref": "cluster_semantic"
+}
+```
+
+**Determinism**
+- Pure function: given the same `(bundle, plan)` and a deterministic `retrieve_fn`, the refined plan and metrics are identical.
+- Sorted ordering and caps are preserved; no DB or I/O.
+
+**Tests**
+- `tests/test_t3_rag.py` covers: one‑shot blocking, low→high refinement, no‑improvement case, optional `EditGraph`, determinism, and payload sanity.
+
 ## Stage semantics
 
 ### T1 (propagation)

@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Dict, Any, List, Tuple
+from typing import Dict, Any, List, Tuple, Callable, Optional
 from datetime import datetime, timezone
 from ..types import Plan, SpeakOp, EditGraphOp, RequestRetrieveOp
 
@@ -352,3 +352,164 @@ def deliberate(bundle: Dict[str, Any]) -> Plan:
         ops = ops[:caps_ops]
 
     return Plan(version="t3-plan-v1", reflection=False, ops=ops, request_retrieve=None)
+
+# --- PR6: One-shot RAG refinement (pure) ---
+# Orchestrator provides a deterministic retrieve_fn; this function remains pure.
+RetrieveFn = Callable[[Dict[str, Any]], Dict[str, Any]]
+
+
+def _first_request_retrieve_payload(plan: Plan) -> Optional[Dict[str, Any]]:
+    for op in getattr(plan, "ops", []) or []:
+        if getattr(op, "kind", None) == "RequestRetrieve":
+            # Normalize to a plain dict payload
+            return {
+                "query": getattr(op, "query", ""),
+                "owner": getattr(op, "owner", "any"),
+                "k": int(getattr(op, "k", 0) or 0),
+                "tier_pref": getattr(op, "tier_pref", None),
+                "hints": dict(getattr(op, "hints", {}) or {}),
+            }
+    return None
+
+
+def _normalize_rr_payload(bundle: Dict[str, Any], rr: Dict[str, Any]) -> Dict[str, Any]:
+    cfg_t2 = bundle.get("cfg", {}).get("t2", {})
+    hints = dict(rr.get("hints", {}) or {})
+    # Ensure deterministic required hints
+    hints.setdefault("now", bundle.get("now", ""))
+    hints.setdefault("sim_threshold", float(cfg_t2.get("sim_threshold", 0.3)))
+    owner = rr.get("owner", "any")
+    owner = owner if owner in ("agent", "world", "any") else "any"
+    k = int(rr.get("k", int(cfg_t2.get("k_retrieval", 1))))
+    k = max(1, k)
+    return {
+        "query": rr.get("query", ""),
+        "owner": owner,
+        "k": k,
+        "tier_pref": rr.get("tier_pref"),
+        "hints": hints,
+    }
+
+
+def _normalize_retrieved_result(result: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], int, float]:
+    hits: List[Dict[str, Any]] = []
+    for r in (result.get("retrieved", []) or []):
+        if isinstance(r, dict):
+            rid = str(r.get("id"))
+            score = float(r.get("_score", r.get("score", 0.0)) or 0.0)
+            owner = str(r.get("owner", "any"))
+            quarter = str(r.get("quarter", ""))
+        else:
+            rid = str(getattr(r, "id", ""))
+            score = float(getattr(r, "score", 0.0) or 0.0)
+            owner = str(getattr(r, "owner", "any"))
+            quarter = str(getattr(r, "quarter", ""))
+        if not rid:
+            continue
+        hits.append({"id": rid, "score": score, "owner": owner, "quarter": quarter})
+    # Deterministic ordering
+    hits.sort(key=lambda e: (-float(e.get("score", 0.0)), str(e.get("id", ""))))
+    k_ret = len(hits)
+    s_max = max([h.get("score", 0.0) for h in hits], default=0.0)
+    return hits, k_ret, float(s_max)
+
+
+def _refined_intent(tau_high: float, tau_low: float, labels: List[str], s_max: float) -> str:
+    if s_max >= tau_high:
+        return "summary"
+    if s_max >= tau_low:
+        return "assertion" if labels else "ack"
+    return "question"
+
+
+def rag_once(
+    bundle: Dict[str, Any],
+    plan: Plan,
+    retrieve_fn: RetrieveFn,
+    already_used: bool = False,
+) -> Tuple[Plan, Dict[str, Any]]:
+    """Single retrieval refinement. Pure given a deterministic retrieve_fn.
+    - If already_used: return plan unchanged with rag_blocked.
+    - If no RequestRetrieve in plan.ops: return unchanged (no-op).
+    - Else: call retrieve_fn with normalized payload; refine Speak intent and possibly add one EditGraph if within cap.
+    Returns: (refined_plan, rag_metrics)
+    """
+    # Pre metrics
+    sim_stats0 = bundle.get("t2", {}).get("metrics", {}).get("sim_stats", {}) or {}
+    pre_s_max = float(sim_stats0.get("max", 0.0))
+
+    rr = _first_request_retrieve_payload(plan)
+    if already_used:
+        return plan, {
+            "rag_used": False,
+            "rag_blocked": True,
+            "pre_s_max": pre_s_max,
+            "post_s_max": pre_s_max,
+            "k_retrieved": 0,
+            "owner": rr.get("owner") if rr else None,
+            "tier_pref": rr.get("tier_pref") if rr else None,
+        }
+
+    if rr is None:
+        return plan, {
+            "rag_used": False,
+            "rag_blocked": False,
+            "pre_s_max": pre_s_max,
+            "post_s_max": pre_s_max,
+            "k_retrieved": 0,
+            "owner": None,
+            "tier_pref": None,
+        }
+
+    payload = _normalize_rr_payload(bundle, rr)
+    result = retrieve_fn(payload)
+    hits, k_retrieved, s_max_rag = _normalize_retrieved_result(result if isinstance(result, dict) else {})
+
+    # Compute refined evidence level
+    thresholds = _policy_thresholds(bundle)
+    tau_high, tau_low, eps_edit = thresholds["tau_high"], thresholds["tau_low"], thresholds["eps_edit"]
+    labels = _topic_labels_from_bundle(bundle)
+
+    post_s_max = max(pre_s_max, s_max_rag)
+    new_intent = _refined_intent(tau_high, tau_low, labels, post_s_max)
+
+    # Build new ops deterministically
+    caps_ops = int(bundle.get("agent", {}).get("caps", {}).get("ops", 3))
+    tokens = int(bundle.get("cfg", {}).get("t3", {}).get("tokens", 256))
+
+    new_ops: List[Any] = []
+    has_editgraph = False
+    # Replace first Speak with refined intent; keep others in order
+    speak_replaced = False
+    for op in plan.ops:
+        k = getattr(op, "kind", None)
+        if k == "Speak" and not speak_replaced:
+            new_ops.append(SpeakOp(kind="Speak", intent=new_intent, topic_labels=labels, max_tokens=tokens))
+            speak_replaced = True
+        else:
+            new_ops.append(op)
+        if k == "EditGraph":
+            has_editgraph = True
+    # Optionally add one EditGraph if evidence now >= tau_low and none exists yet
+    if (post_s_max >= tau_low) and (not has_editgraph) and (len(new_ops) < caps_ops):
+        remaining = max(caps_ops - len(new_ops), 0)
+        edits = _edit_nodes_from_bundle(bundle, eps_edit=eps_edit, cap_nodes=remaining * 4)
+        if edits:
+            new_ops.append(EditGraphOp(kind="EditGraph", edits=edits, cap=min(len(edits), remaining * 4)))
+
+    # Enforce ops cap deterministically
+    if len(new_ops) > caps_ops:
+        new_ops = new_ops[:caps_ops]
+
+    refined = Plan(version="t3-plan-v1", reflection=getattr(plan, "reflection", False), ops=new_ops, request_retrieve=getattr(plan, "request_retrieve", None))
+
+    metrics = {
+        "rag_used": True,
+        "rag_blocked": False,
+        "pre_s_max": pre_s_max,
+        "post_s_max": post_s_max,
+        "k_retrieved": int(k_retrieved),
+        "owner": payload.get("owner"),
+        "tier_pref": payload.get("tier_pref"),
+    }
+    return refined, metrics
