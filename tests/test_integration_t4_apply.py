@@ -147,7 +147,7 @@ def test_kill_switch_bypasses_t4_and_apply(monkeypatch):
         # Minimal plan with no ops/deltas
         return SimpleNamespace(version="t3-plan-v1", ops=[], deltas=[], reflection=False)
 
-    def fake_t3_dialogue(ctx, state, dialog_bundle):
+    def fake_t3_dialogue(dialog_bundle, plan):
         return "HELLO_W0RLD"
 
     # Some codebases hang T3 helpers under orch directly; others import from a t3 module.

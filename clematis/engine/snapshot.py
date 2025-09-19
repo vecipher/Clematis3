@@ -1,5 +1,3 @@
-
-
 from __future__ import annotations
 from typing import Any, Dict, List, Optional
 from dataclasses import asdict
@@ -12,22 +10,43 @@ import json
 # -------------------------
 
 def _get_cfg(ctx) -> Dict[str, Any]:
+    """
+    Normalize config access across ctx.cfg / ctx.config and return a T4 dict
+    merged with defaults. Values are coerced to expected types.
+    """
     t4_default = {
         "snapshot_every_n_turns": 1,
         "snapshot_dir": "./.data/snapshots",
         "weight_min": -1.0,
         "weight_max": 1.0,
     }
-    cfg = getattr(getattr(ctx, "config", object()), "t4", None)
-    if isinstance(cfg, dict):
-        out = dict(t4_default)
-        out.update(cfg)
-        out["snapshot_every_n_turns"] = int(out.get("snapshot_every_n_turns", 1))
-        out["snapshot_dir"] = str(out.get("snapshot_dir", "./.data/snapshots"))
-        out["weight_min"] = float(out.get("weight_min", -1.0))
-        out["weight_max"] = float(out.get("weight_max", 1.0))
-        return out
-    return t4_default
+
+    # Pull a dict from ctx.cfg or ctx.config (SimpleNamespace or dict)
+    def _as_dict(obj):
+        if obj is None:
+            return {}
+        if isinstance(obj, dict):
+            return obj
+        try:
+            # SimpleNamespace or any object with __dict__
+            return dict(obj.__dict__)
+        except Exception:
+            return {}
+
+    full_cfg = {}
+    full_cfg.update(_as_dict(getattr(ctx, "cfg", None)))
+    full_cfg.update(_as_dict(getattr(ctx, "config", None)))
+
+    t4 = _as_dict(full_cfg.get("t4"))
+    out = dict(t4_default)
+    out.update(t4)
+
+    # Coerce types
+    out["snapshot_every_n_turns"] = int(out.get("snapshot_every_n_turns", 1))
+    out["snapshot_dir"] = str(out.get("snapshot_dir", "./.data/snapshots"))
+    out["weight_min"] = float(out.get("weight_min", -1.0))
+    out["weight_max"] = float(out.get("weight_max", 1.0))
+    return out
 
 
 def _ensure_dir(path: str) -> None:
@@ -151,7 +170,7 @@ def _serialize_deltas(deltas: Any) -> List[Dict[str, Any]]:
 # Public API
 # -------------------------
 
-def write_snapshot(ctx, state, version_etag: str, applied_count: int, deltas) -> str:
+def write_snapshot(ctx, state, version_etag: str, applied: int = 0, deltas=None) -> str:
     """
     Write a JSON snapshot for this agent. Returns the absolute file path.
     The payload includes {turn, agent, version_etag, applied, deltas, store?}.
@@ -168,14 +187,14 @@ def write_snapshot(ctx, state, version_etag: str, applied_count: int, deltas) ->
         "turn": turn,
         "agent": getattr(ctx, "agent_id", "agent"),
         "version_etag": version_etag,
-        "applied": int(applied_count or 0),
+        "applied": int(applied or 0),
         "deltas": _serialize_deltas(deltas),
     }
 
     store = getattr(state, "store", None) if not isinstance(state, dict) else state.get("store")
     store_export = _export_store_for_snapshot(store) if store is not None else None
-    if store_export:
-        payload["store"] = store_export
+    # Always include a 'store' key for shape stability (empty object when not available)
+    payload["store"] = store_export if isinstance(store_export, dict) else {}
 
     with open(path, "w", encoding="utf-8") as f:
         json.dump(payload, f)

@@ -12,6 +12,22 @@ from ..io.log import append_jsonl
 from .cache import CacheManager
 
 
+# --- Config accessor for harmonized config usage ---
+def _get_cfg(ctx) -> Dict[str, Any]:
+    """Normalize config access across ctx.cfg / ctx.config; always returns a dict."""
+    cfg = getattr(ctx, "cfg", None)
+    if isinstance(cfg, dict):
+        return cfg
+    if isinstance(cfg, SimpleNamespace):
+        return dict(cfg.__dict__)
+    cfg2 = getattr(ctx, "config", None)
+    if isinstance(cfg2, dict):
+        return cfg2
+    if isinstance(cfg2, SimpleNamespace):
+        return dict(cfg2.__dict__)
+    return {}
+
+
 class Orchestrator:
     """Single canonical turn loop with first-class observability.
 
@@ -41,13 +57,15 @@ class Orchestrator:
                     setattr(state, "_boot_loaded", True)
 
         # --- Cache manager bootstrap (version-aware, namespaced) ---
-        t4_cfg_for_cache = getattr(getattr(ctx, "config", SimpleNamespace()), "t4", {}) or {}
+        full_cfg = _get_cfg(ctx)
+        t4_cfg_for_cache = (full_cfg.get("t4") if isinstance(full_cfg, dict) else {}) or {}
         cache_cfg = t4_cfg_for_cache.get("cache", {}) if isinstance(t4_cfg_for_cache, dict) else {}
         cache_enabled = bool(cache_cfg.get("enabled", True)) if isinstance(cache_cfg, dict) else False
         cm_existing = (state.get("_cache_mgr") if isinstance(state, dict) else getattr(state, "_cache_mgr", None))
         if cache_enabled and cm_existing is None:
             max_entries = int(cache_cfg.get("max_entries", 512))
-            ttl_sec = int(cache_cfg.get("ttl_sec", 600))
+            ttl_conf = cache_cfg.get("ttl_sec", cache_cfg.get("ttl_s", 600))
+            ttl_sec = int(ttl_conf if ttl_conf is not None else 600)
             cm_new = CacheManager(max_entries=max_entries, ttl_sec=ttl_sec)
             if isinstance(state, dict):
                 state["_cache_mgr"] = cm_new
@@ -89,13 +107,6 @@ class Orchestrator:
         else:
             t2 = t2_semantic(ctx, state, input_text, t1)
 
-        # ensure metrics dict exists and record cache usage
-        try:
-            if not isinstance(getattr(t2, "metrics", None), dict):
-                t2.metrics = {}
-            t2.metrics["cache_used"] = bool(cache_hit)
-        except Exception:
-            pass
 
         t2_ms = round((time.perf_counter() - t0) * 1000.0, 3)
         append_jsonl(
@@ -124,7 +135,7 @@ class Orchestrator:
         plan_ms = round((time.perf_counter() - t0) * 1000.0, 3)
 
         # RAG: allow at most one refinement if both requested and enabled by config
-        cfg = getattr(ctx, "cfg", {}) or {}
+        cfg = _get_cfg(ctx)
         t3cfg = cfg.get("t3", {}) if isinstance(cfg, dict) else {}
         max_rag_loops = int(t3cfg.get("max_rag_loops", 1)) if isinstance(t3cfg, dict) else 1
 
@@ -259,7 +270,7 @@ class Orchestrator:
         )
 
         # Kill switch (t4.enabled). Default True if unspecified.
-        t4_cfg_full = getattr(getattr(ctx, "config", SimpleNamespace()), "t4", {}) or {}
+        t4_cfg_full = (_get_cfg(ctx).get("t4") if isinstance(_get_cfg(ctx), dict) else {}) or {}
         t4_enabled = bool(t4_cfg_full.get("enabled", True)) if isinstance(t4_cfg_full, dict) else True
 
         # --- T4 / Apply (honor kill switch) ---
@@ -325,7 +336,7 @@ class Orchestrator:
                 "t2": {
                     "k_returned": t2.metrics.get("k_returned"),
                     "k_used": t2.metrics.get("k_used"),
-                    "cache_used": t2.metrics.get("cache_used"),
+                    "cache_hit": bool(cache_hit),
                 },
                 "t4": {
                     "approved": len(getattr(t4, "approved_deltas", [])),

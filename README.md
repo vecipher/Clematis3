@@ -331,6 +331,70 @@ state["llm_adapter"] = QwenLLMAdapter(call_fn=qwen_chat, model="qwen3-4b-instruc
   - `t3_plan.jsonl`: `backend_fallback`, `fallback_reason: "no_adapter"`
   - `t3_dialogue.jsonl`: `backend: "rulebased"`
 
+## M4 — T4 Meta‑Filter & Apply/Persist
+
+A deterministic safety gate plus a side‑effecting apply step.
+
+### T4 Meta‑Filter (pure)
+Approves/clamps/limits proposed deltas from T1/T2/T3 without mutating state.
+
+**Policy (deterministic, order‑stable by `(target_id, attr)`):**
+1. **Normalize & combine** duplicate targets (sum deltas; keep stable order).
+2. **Cooldowns:** drop ops that violate `t4.cooldowns[kind]` → reason `COOLDOWN_BLOCKED`.
+3. **Per‑node novelty cap:** `|Δ_i| ≤ t4.novelty_cap_per_node` (clip magnitudes).
+4. **Global L2 cap:** if `‖Δ‖₂ > t4.delta_norm_cap_l2`, scale all remaining deltas proportionally.
+5. **Churn cap:** keep top‑K by `|Δ|`, stable tie‑break by id; drop tail → `CHURN_CAP_HIT`.
+
+**Outputs**
+- `T4Result{ approved_deltas, rejected_ops, reasons[], metrics }`
+- Log: `.logs/t4.jsonl` with `{turn, agent, approved, rejected_ops, reasons, metrics, ms}`.
+
+### Apply/Persist (side effects)
+Applies approved deltas to the in‑memory graph store, bumps versions, and snapshots.
+
+**Behavior**
+- **Clamp** weights into `[t4.weight_min, t4.weight_max]`; count clamps.
+- **Idempotent**: applying the same deltas twice yields no net change.
+- **Versioning**: increments `state.version_etag` (monotonic string).
+- **Snapshot cadence**: write `t4.snapshot_dir/state_{agent}.json` every `t4.snapshot_every_n_turns`. Snapshot schema is stable and **always** includes a top‑level `"store": {}` object (empty when not exportable).
+- **Cache coherency (PR15)**:
+  - Orchestrator maintains a **version‑aware** cache around T2 (keyed by `(version_etag or "0", input)`).
+  - On apply and when `t4.cache_bust_mode: on-apply`, the orchestrator invalidates configured namespaces (default: `["t2:semantic"]`). `apply.jsonl` records `cache_invalidations`.
+
+**Kill switch**
+- `t4.enabled: true|false`. When `false`, T4 and Apply are bypassed; no `t4.jsonl`/`apply.jsonl` entries are written.
+
+### T4 configuration (add under `t4:` in `configs/config.yaml`)
+```yaml
+t4:
+  enabled: true
+  # Filter caps
+  delta_norm_cap_l2: 1.5
+  novelty_cap_per_node: 0.3
+  churn_cap_edges: 64
+  cooldowns:
+    EditGraph: 2
+    CreateGraph: 10
+  # Apply + snapshots
+  weight_min: -1.0
+  weight_max: 1.0
+  snapshot_every_n_turns: 1
+  snapshot_dir: ./.data/snapshots
+  # Cache coherency (PR15)
+  cache_bust_mode: on-apply   # or "none"
+  cache:
+    enabled: true
+    namespaces:
+      - "t2:semantic"
+    max_entries: 512
+    ttl_sec: 600
+```
+
+### Caches (two layers in M4)
+- **Stage‑level** LRU caches in T1/T2 (legacy, per‑stage knobs; `ttl_s`).
+- **Orchestrator‑level** CacheManager around T2 (version‑aware, invalidated on Apply; `ttl_sec`).
+This is intentional for M4; consolidation is a later follow‑up.
+
 ## Stage semantics
 
 ### T1 (propagation)
@@ -353,11 +417,11 @@ state["llm_adapter"] = QwenLLMAdapter(call_fn=qwen_chat, model="qwen3-4b-instruc
 JSONL files are written to `.logs/`:
 
 - `t1.jsonl` — propagation metrics per turn
-- `t2.jsonl` — retrieval/residual metrics per turn
+- `t2.jsonl` — retrieval/residual metrics per turn (includes `cache_hit: bool`, `cache_size: int`)
 - `t3_plan.jsonl` — plan metrics and policy details
 - `t3_dialogue.jsonl` — dialogue synthesis metrics
 - `t4.jsonl` — meta‑filter approvals/rejections
-- `apply.jsonl` — state changes summary
+- `apply.jsonl` — state changes summary (includes `cache_invalidations: int`)
 - `turn.jsonl` — per‑turn roll‑up (durations, key metrics)
 - `health.jsonl` — guardrail flags
 
