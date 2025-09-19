@@ -9,6 +9,7 @@ from .stages.t3 import make_plan_bundle, make_dialog_bundle, deliberate, rag_onc
 from .stages.t4 import t4_filter
 from .apply import apply_changes, load_latest_snapshot
 from ..io.log import append_jsonl
+from .cache import CacheManager
 
 
 class Orchestrator:
@@ -39,6 +40,20 @@ class Orchestrator:
                 else:
                     setattr(state, "_boot_loaded", True)
 
+        # --- Cache manager bootstrap (version-aware, namespaced) ---
+        t4_cfg_for_cache = getattr(getattr(ctx, "config", SimpleNamespace()), "t4", {}) or {}
+        cache_cfg = t4_cfg_for_cache.get("cache", {}) if isinstance(t4_cfg_for_cache, dict) else {}
+        cache_enabled = bool(cache_cfg.get("enabled", True)) if isinstance(cache_cfg, dict) else False
+        cm_existing = (state.get("_cache_mgr") if isinstance(state, dict) else getattr(state, "_cache_mgr", None))
+        if cache_enabled and cm_existing is None:
+            max_entries = int(cache_cfg.get("max_entries", 512))
+            ttl_sec = int(cache_cfg.get("ttl_sec", 600))
+            cm_new = CacheManager(max_entries=max_entries, ttl_sec=ttl_sec)
+            if isinstance(state, dict):
+                state["_cache_mgr"] = cm_new
+            else:
+                setattr(state, "_cache_mgr", cm_new)
+
         # --- T1 ---
         t0 = time.perf_counter()
         t1 = t1_propagate(ctx, state, input_text)
@@ -54,16 +69,43 @@ class Orchestrator:
             },
         )
 
-        # --- T2 ---
+        # --- T2 (with version-aware cache) ---
         t0 = time.perf_counter()
-        t2 = t2_semantic(ctx, state, input_text, t1)
+        # Resolve cache manager
+        cm = (state.get("_cache_mgr") if isinstance(state, dict) else getattr(state, "_cache_mgr", None))
+        ver = (state.get("version_etag") if isinstance(state, dict) else getattr(state, "version_etag", None)) or "0"
+        ns = "t2:semantic"
+        key = (ver, str(input_text))
+
+        cache_hit = False
+        if cm is not None:
+            hit, cached = cm.get(ns, key)
+            if hit:
+                t2 = cached
+                cache_hit = True
+            else:
+                t2 = t2_semantic(ctx, state, input_text, t1)
+                cm.set(ns, key, t2)
+        else:
+            t2 = t2_semantic(ctx, state, input_text, t1)
+
+        # ensure metrics dict exists and record cache usage
+        try:
+            if not isinstance(getattr(t2, "metrics", None), dict):
+                t2.metrics = {}
+            t2.metrics["cache_used"] = bool(cache_hit)
+        except Exception:
+            pass
+
         t2_ms = round((time.perf_counter() - t0) * 1000.0, 3)
         append_jsonl(
             "t2.jsonl",
             {
                 "turn": turn_id,
                 "agent": agent_id,
-                **t2.metrics,
+                **(t2.metrics if isinstance(getattr(t2, "metrics", None), dict) else {}),
+                **({"cache_hit": cache_hit} if cm is not None else {}),
+                **({"cache_size": (cm.stats.get("size", 0))} if cm is not None else {}),
                 "ms": t2_ms,
                 **({"now": now} if now else {}),
             },
@@ -248,10 +290,11 @@ class Orchestrator:
                 {
                     "turn": turn_id,
                     "agent": agent_id,
-                    "applied": int(getattr(apply, "applied", 0)),
-                    "clamps": int(getattr(apply, "clamps", 0)),
-                    "version_etag": getattr(apply, "version_etag", None),
-                    "snapshot": getattr(apply, "snapshot_path", None),
+                    "applied": apply.applied,
+                    "clamps": apply.clamps,
+                    "version_etag": apply.version_etag,
+                    "snapshot": apply.snapshot_path,
+                    "cache_invalidations": int((getattr(apply, "metrics", {}) or {}).get("cache_invalidations", 0)),
                     "ms": apply_ms,
                     **({"now": now} if now else {}),
                 },

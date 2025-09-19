@@ -97,7 +97,7 @@ def apply_changes(ctx, state, t4: T4Result) -> ApplyResult:
             clamps=0,
             version_etag=version_etag,
             snapshot_path=snap_path,
-            metrics={"ms": _now_ms() - started, "notes": "no-store"},
+            metrics={"ms": _now_ms() - started, "notes": "no-store", "cache_invalidations": 0},
         )
 
     # Apply deltas one batch; if store supports batching, use it; else per-delta.
@@ -135,11 +135,27 @@ def apply_changes(ctx, state, t4: T4Result) -> ApplyResult:
             clamps=0,
             version_etag=version_etag,
             snapshot_path=snap_path,
-            metrics={"ms": _now_ms() - started, "notes": "no-apply-fn"},
+            metrics={"ms": _now_ms() - started, "notes": "no-apply-fn", "cache_invalidations": 0},
         )
 
     # Bump version etag after successful apply
     version_etag = _bump_version_etag(state)
+
+    # Cache invalidation per config (PR15)
+    invalidated = 0
+    t4_cfg = getattr(getattr(ctx, "config", object()), "t4", {}) or {}
+    bust_mode = (t4_cfg.get("cache_bust_mode") if isinstance(t4_cfg, dict) else None) or "none"
+    if str(bust_mode) == "on-apply":
+        cm = state["_cache_mgr"] if (isinstance(state, dict) and "_cache_mgr" in state) else getattr(state, "_cache_mgr", None)
+        cache_cfg = t4_cfg.get("cache", {}) if isinstance(t4_cfg, dict) else {}
+        namespaces = cache_cfg.get("namespaces", ["t2:semantic"]) if isinstance(cache_cfg, dict) else ["t2:semantic"]
+        if cm is not None:
+            try:
+                for ns in namespaces:
+                    invalidated += int(cm.invalidate_namespace(str(ns)))
+            except Exception:
+                # never fail apply due to cache invalidation
+                pass
 
     # Snapshot cadence
     snap_path = None
@@ -150,6 +166,7 @@ def apply_changes(ctx, state, t4: T4Result) -> ApplyResult:
         "ms": _now_ms() - started,
         "applied": applied_count,
         "clamps": clamp_count,
+        "cache_invalidations": invalidated,
     }
     return ApplyResult(
         applied=applied_count,

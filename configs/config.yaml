@@ -69,5 +69,11 @@ t4:
   snapshot_every_n_turns: 1
   snapshot_dir: ./.data/snapshots
   cache_bust_mode: on-apply
+  cache:
+    enabled: true
+    namespaces:
+      - "t2:semantic"
+    max_entries: 512
+    ttl_sec: 600
 budgets: {time_ms: 1000, ops: 1000, tokens: 1024, time_ms_reflection: 6000}
 flags: {enable_world_memory: true, allow_reflection: true}
