@@ -37,8 +37,10 @@ pytest -q
   Wavefront PQ with decay + budgets, cache keyed by graph `version_etag`. Deterministic seeding, tie‑breaking, and delta emission.
 - **T2 — Semantic retrieval + residual (deterministic, tiered, offline)**  
   Deterministic embedding stub (BGEAdapter) + in‑memory index with exact/cluster/archive tiers. Emits small, monotonic residual nudges (never undoes T1). Cached per query.
-- **T3/T4 — Stubs & meta‑filter**  
-  T3 is placeholder; T4 accepts/filters proposed deltas; Apply persists and logs.
+- **T3 — Bundle, policy, one‑shot RAG, dialogue (deterministic)**  
+  PR4: bundle; PR5: rule‑based policy; PR6: one‑shot RAG refinement; PR7: deterministic dialogue via template. Logs: t3_plan.jsonl, t3_dialogue.jsonl.
+- **T4 — Meta‑filter & apply**  
+  Accepts/filters proposed deltas; Apply persists and logs.
 
 ## Determinism guardrails
 
@@ -282,6 +284,34 @@ rag_once(bundle: dict, plan: Plan, retrieve_fn: Callable[[dict], dict], already_
 **Tests**
 - `tests/test_t3_rag.py` covers: one‑shot blocking, low→high refinement, no‑improvement case, optional `EditGraph`, determinism, and payload sanity.
 
+## T3 — Dialogue & Logging (PR7)
+
+Deterministic dialogue synthesis from the plan/bundle. No LLM dependency is required; output is produced via a simple template and hard caps.
+
+**Functions**
+```python
+# clematis/engine/stages/t3.py
+make_dialog_bundle(ctx, state, t1, t2, plan) -> dict
+speak(dialog_bundle: dict, plan: Plan) -> tuple[str, dict]
+```
+
+**Template variables** (from `t3.dialogue.template`): `{labels}`, `{intent}`, `{snippets}`, `{style_prefix}`.  
+- Labels: deduped + sorted from the Plan’s Speak op (fallback to bundle `labels_from_t1`).
+- Snippets: top‑K retrieved IDs (cap = `t3.dialogue.include_top_k_snippets`).
+- If the template omits `{style_prefix}` but a prefix exists, it is auto‑prefixed as `"{style_prefix}| "`.
+
+**Token budget**
+- Enforced deterministically with whitespace tokenization. Budget = `SpeakOp.max_tokens` if present, else `agent.caps.tokens`, else 256.
+
+**Outputs**
+- `utterance: str` and `metrics`: `{tokens, truncated, style_prefix_used, snippet_count}`.
+
+**Orchestrator wiring**
+- Flow: `make_plan_bundle → deliberate → (optional) rag_once → make_dialog_bundle → speak`.
+- JSONL logs written per turn:
+  - `t3_plan.jsonl`: `{policy_backend, ops_counts, requested_retrieve, rag_used, reflection, ms_deliberate, ms_rag}`
+  - `t3_dialogue.jsonl`: `{tokens, truncated, style_prefix_used, snippet_count, ms}`
+
 ## Stage semantics
 
 ### T1 (propagation)
@@ -305,7 +335,8 @@ JSONL files are written to `.logs/`:
 
 - `t1.jsonl` — propagation metrics per turn
 - `t2.jsonl` — retrieval/residual metrics per turn
-- `t3_plan.jsonl`, `t3_dialogue.jsonl` — placeholders for policy/dialogue
+- `t3_plan.jsonl` — plan metrics and policy details
+- `t3_dialogue.jsonl` — dialogue synthesis metrics
 - `t4.jsonl` — meta‑filter approvals/rejections
 - `apply.jsonl` — state changes summary
 - `turn.jsonl` — per‑turn roll‑up (durations, key metrics)

@@ -220,28 +220,32 @@ def make_plan_bundle(ctx, state, t1, t2) -> Dict[str, Any]:
     }
     return bundle
 
-# --- PR4 placeholder ---
-# The orchestrator imports `make_dialog_bundle` as a forward stub.
-# Provide a deterministic, pure placeholder that will be replaced in PR7.
+# --- PR7: Dialogue bundle (deterministic, pure)
 DIALOG_BUNDLE_VERSION = "t3-dialog-bundle-v1"
 
 def make_dialog_bundle(ctx, state, t1, t2, plan=None) -> Dict[str, Any]:
-    """Minimal deterministic dialogue bundle placeholder.
-    Pure: no I/O. Mirrors `make_plan_bundle` and projects a small subset.
+    """Assemble a deterministic dialogue bundle from PR4 bundle + Plan.
+    Pure: no I/O. Uses only ctx/state/t1/t2/plan and config.
     """
     base = make_plan_bundle(ctx, state, t1, t2)
+    # Dialogue config snapshot
+    cfg_t3 = (getattr(ctx, "cfg", {}) or {}).get("t3", {}) if isinstance(getattr(ctx, "cfg", {}), dict) else {}
+    dialogue_cfg = {}
+    if isinstance(cfg_t3, dict):
+        dialogue_cfg = cfg_t3.get("dialogue", {}) or {}
+    template = str(dialogue_cfg.get("template", "summary: {labels}. next: {intent}"))
+    include_top_k = int(dialogue_cfg.get("include_top_k_snippets", 2) or 2)
+
+    # Retrieved already sorted/capped by make_plan_bundle
+    retrieved = list(base.get("t2", {}).get("retrieved", []) or [])
+
     return {
         "version": DIALOG_BUNDLE_VERSION,
         "now": base["now"],
         "agent": base["agent"],
         "text": base["text"],
-        # Keep retrieved list as-is (already capped/sorted by make_plan_bundle)
-        "retrieved": base["t2"]["retrieved"],
-        # Lightweight plan summary if provided
-        "plan_summary": {
-            "has_plan": bool(plan is not None),
-            "ops": int(len(getattr(plan, "ops", []) or [])),
-        },
+        "retrieved": retrieved,
+        "dialogue": {"template": template, "include_top_k_snippets": include_top_k},
     }
 
 # --- PR5: Rule-based policy (no RAG) ---
@@ -513,3 +517,109 @@ def rag_once(
         "tier_pref": payload.get("tier_pref"),
     }
     return refined, metrics
+
+
+# --- PR7: Deterministic dialogue synthesis ---
+
+def _dedupe_sort_list(xs: List[str]) -> List[str]:
+    return sorted({str(x) for x in (xs or [])})
+
+
+def _format_labels(labels: List[str]) -> str:
+    return ", ".join(labels)
+
+
+def _top_snippet_ids(dialog_bundle: Dict[str, Any]) -> List[str]:
+    n = int(dialog_bundle.get("dialogue", {}).get("include_top_k_snippets", 2) or 2)
+    hits = dialog_bundle.get("retrieved", []) or []
+    ids = [str(h.get("id")) for h in hits if isinstance(h, dict) and h.get("id")]
+    return ids[: max(n, 0)]
+
+
+def _tokenize(s: str) -> List[str]:
+    # Deterministic whitespace tokenization
+    return (s or "").split()
+
+
+def _truncate_to_tokens(s: str, max_tokens: int) -> Tuple[str, bool, int]:
+    toks = _tokenize(s)
+    if max_tokens <= 0:
+        return "", True, 0
+    if len(toks) <= max_tokens:
+        return s, False, len(toks)
+    out = " ".join(toks[:max_tokens])
+    return out, True, max_tokens
+
+
+def _first_speak_op(plan: Plan) -> Optional[SpeakOp]:
+    for op in getattr(plan, "ops", []) or []:
+        if getattr(op, "kind", None) == "Speak":
+            return op  # type: ignore[return-value]
+    return None
+
+
+def speak(dialog_bundle: Dict[str, Any], plan: Plan) -> Tuple[str, Dict[str, Any]]:
+    """Produce a deterministic utterance using a simple template.
+    No external I/O/LLM. Enforces token budget via deterministic truncation.
+    Returns (utterance, metrics).
+    """
+    speak_op = _first_speak_op(plan)
+    # Labels: prefer Plan's Speak labels; else fallback to bundle text labels
+    plan_labels = list(getattr(speak_op, "topic_labels", []) or []) if speak_op else []
+    if not plan_labels:
+        plan_labels = list(dialog_bundle.get("text", {}).get("labels_from_t1", []) or [])
+    labels_sorted = _dedupe_sort_list([str(x) for x in plan_labels])
+
+    intent = getattr(speak_op, "intent", "ack") if speak_op else "ack"
+    style_prefix = str(dialog_bundle.get("agent", {}).get("style_prefix", ""))
+    template = str(dialog_bundle.get("dialogue", {}).get("template", "summary: {labels}. next: {intent}"))
+
+    # Snippets: top-K ids
+    snippet_ids = _top_snippet_ids(dialog_bundle)
+    snippets_str = ", ".join(snippet_ids)
+
+    # Variables for formatting
+    fmt_vars = {
+        "labels": _format_labels(labels_sorted),
+        "intent": intent,
+        "snippets": snippets_str,
+        "style_prefix": style_prefix,
+    }
+
+    # Primary formatting path
+    try:
+        core = template.format(**fmt_vars)
+    except Exception:
+        # Fallback deterministic minimal rendering
+        core = f"summary: {fmt_vars['labels']}. next: {fmt_vars['intent']}"
+
+    # Ensure style prefix is included even if template lacks {style_prefix}
+    if "{style_prefix}" not in template and style_prefix:
+        utter = f"{style_prefix}| {core}".strip()
+        style_used = True
+    else:
+        utter = core
+        style_used = bool(style_prefix)
+
+    # Token budget: prefer SpeakOp.max_tokens, else agent caps, else 256
+    max_tokens = 256
+    if speak_op and getattr(speak_op, "max_tokens", None):
+        try:
+            max_tokens = int(speak_op.max_tokens)
+        except Exception:
+            max_tokens = 256
+    else:
+        try:
+            max_tokens = int(dialog_bundle.get("agent", {}).get("caps", {}).get("tokens", 256))
+        except Exception:
+            max_tokens = 256
+
+    utter_capped, truncated, token_count = _truncate_to_tokens(utter, max_tokens)
+
+    metrics = {
+        "tokens": int(token_count),
+        "truncated": bool(truncated),
+        "style_prefix_used": bool(style_used and style_prefix),
+        "snippet_count": int(len(snippet_ids)),
+    }
+    return utter_capped, metrics

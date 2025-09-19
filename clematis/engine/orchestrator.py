@@ -4,7 +4,7 @@ import time
 from .types import TurnCtx, TurnResult
 from .stages.t1 import t1_propagate
 from .stages.t2 import t2_semantic
-from .stages.t3 import make_plan_bundle, make_dialog_bundle  # placeholders for future PRs
+from .stages.t3 import make_plan_bundle, make_dialog_bundle, deliberate, rag_once, speak
 from .stages.t4 import t4_filter
 from .stages.apply_stage import apply_changes
 from ..io.log import append_jsonl
@@ -54,34 +54,93 @@ class Orchestrator:
             },
         )
 
-        # --- T3 placeholders (deliberation/dialogue) ---
-        # These are stubs until PR3; keep minimal but observable.
-        plan = {
-            "version": "t3-plan-v1",
-            "ops": [{"kind": "Speak", "payload": {"style": "neutral"}}],
-            "request_retrieve": None,
-            "reflection": False,
-        }
+        # --- T3 (deliberation → optional one-shot RAG → dialogue) ---
+        # All pure stage functions; only logging here does I/O.
+        t0 = time.perf_counter()
+        bundle = make_plan_bundle(ctx, state, t1, t2)
+        plan = deliberate(bundle)
+        plan_ms = round((time.perf_counter() - t0) * 1000.0, 3)
+
+        # RAG: allow at most one refinement if both requested and enabled by config
+        cfg = getattr(ctx, "cfg", {}) or {}
+        t3cfg = cfg.get("t3", {}) if isinstance(cfg, dict) else {}
+        max_rag_loops = int(t3cfg.get("max_rag_loops", 1)) if isinstance(t3cfg, dict) else 1
+
+        def _retrieve_fn(payload: Dict[str, Any]) -> Dict[str, Any]:
+            # Deterministic wrapper around T2: re-run with the provided query; map to the shape rag_once expects.
+            q = str(payload.get("query") or input_text)
+            t2_alt = t2_semantic(ctx, state, q, t1)
+            # Normalize retrieved to list[dict]
+            hits = []
+            for r in getattr(t2_alt, "retrieved", []) or []:
+                if isinstance(r, dict):
+                    hits.append({
+                        "id": str(r.get("id")),
+                        "score": float(r.get("_score", r.get("score", 0.0)) or 0.0),
+                        "owner": str(r.get("owner", "any")),
+                        "quarter": str(r.get("quarter", "")),
+                    })
+                else:
+                    rid = str(getattr(r, "id", ""))
+                    if not rid:
+                        continue
+                    hits.append({
+                        "id": rid,
+                        "score": float(getattr(r, "score", 0.0) or 0.0),
+                        "owner": str(getattr(r, "owner", "any")),
+                        "quarter": str(getattr(r, "quarter", "")),
+                    })
+            return {"retrieved": hits, "metrics": getattr(t2_alt, "metrics", {})}
+
+        requested_retrieve = any(getattr(op, "kind", None) == "RequestRetrieve" for op in getattr(plan, "ops", []) or [])
+        rag_metrics = {"rag_used": False, "rag_blocked": False, "pre_s_max": 0.0, "post_s_max": 0.0, "k_retrieved": 0, "owner": None, "tier_pref": None}
+        if requested_retrieve and max_rag_loops >= 1:
+            t0_rag = time.perf_counter()
+            plan, rag_metrics = rag_once(bundle, plan, _retrieve_fn, already_used=False)
+            rag_ms = round((time.perf_counter() - t0_rag) * 1000.0, 3)
+        else:
+            rag_ms = 0.0
+
+        # Dialogue synthesis
+        t0 = time.perf_counter()
+        dialog_bundle = make_dialog_bundle(ctx, state, t1, t2, plan)
+        utter, speak_metrics = speak(dialog_bundle, plan)
+        speak_ms = round((time.perf_counter() - t0) * 1000.0, 3)
+
+        # Plan logging
+        ops_counts: Dict[str, int] = {}
+        for op in getattr(plan, "ops", []) or []:
+            k = getattr(op, "kind", None)
+            ops_counts[k] = ops_counts.get(k, 0) + 1
+
+        policy_backend = str(t3cfg.get("backend", "rulebased")) if isinstance(t3cfg, dict) else "rulebased"
         append_jsonl(
             "t3_plan.jsonl",
             {
                 "turn": turn_id,
                 "agent": agent_id,
-                "ops_counts": {"Speak": 1},
-                "requested_retrieve": False,
-                "reflection": False,
+                "policy_backend": policy_backend,
+                "ops_counts": ops_counts,
+                "requested_retrieve": bool(requested_retrieve),
+                "rag_used": bool(rag_metrics.get("rag_used", False)),
+                "reflection": bool(getattr(plan, "reflection", False)),
+                "ms_deliberate": plan_ms,
+                "ms_rag": rag_ms,
                 **({"now": now} if now else {}),
             },
         )
 
-        utter = "Hello (demo)."  # t3 dialogue stub
+        # Dialogue logging
         append_jsonl(
             "t3_dialogue.jsonl",
             {
                 "turn": turn_id,
                 "agent": agent_id,
-                "tokens_in": 0,
-                "tokens_out": 3,
+                "tokens": int(speak_metrics.get("tokens", 0)),
+                "truncated": bool(speak_metrics.get("truncated", False)),
+                "style_prefix_used": bool(speak_metrics.get("style_prefix_used", False)),
+                "snippet_count": int(speak_metrics.get("snippet_count", 0)),
+                "ms": speak_ms,
                 **({"now": now} if now else {}),
             },
         )
