@@ -98,18 +98,37 @@ def t2_semantic(ctx, state, text: str, t1) -> T2Result:
     now_str = getattr(ctx, "now", None)
     # Cache setup
     cache = _get_cache(cfg_t2)
-    index_size = len(getattr(index, "_eps", []))
+    try:
+        index_ver = int(index.index_version())
+    except Exception:
+        index_ver = len(getattr(index, "_eps", []))
     ckey = (
         "t2",
         tuple(tiers),
-        stable_key({"q": q_text, "exact_recent_days": exact_recent_days, "sim_threshold": sim_threshold, "clusters_top_m": clusters_top_m}),
-        index_size,
+        stable_key({
+            "q": q_text,
+            "exact_recent_days": exact_recent_days,
+            "sim_threshold": sim_threshold,
+            "clusters_top_m": clusters_top_m,
+        }),
+        index_ver,
     )
     cache_used = False
+    cache_hits = 0
+    cache_misses = 0
     if cache is not None:
         hit = cache.get(ckey)
         if hit is not None:
+            # Mark this as a cache hit on the returned metrics (without recomputing)
+            try:
+                hit.metrics["cache_used"] = True
+                hit.metrics["cache_hits"] = hit.metrics.get("cache_hits", 0) + 1
+                hit.metrics["cache_misses"] = hit.metrics.get("cache_misses", 0)
+            except Exception:
+                pass
             return hit
+        else:
+            cache_misses += 1
     # Execute tiers with dedupe
     retrieved = []  # List[EpisodeRef]
     seen_ids = set()
@@ -218,9 +237,12 @@ def t2_semantic(ctx, state, text: str, t1) -> T2Result:
         "caps": {"residual_cap": residual_cap},
         "cache_enabled": cache is not None,
         "cache_used": cache_used,
+        "cache_hits": cache_hits,
+        "cache_misses": cache_misses,
     }
     result = T2Result(retrieved=retrieved, graph_deltas_residual=graph_deltas_residual, metrics=metrics)
     if cache is not None:
         cache.put(ckey, result)
         result.metrics["cache_used"] = True
+        result.metrics["cache_misses"] = result.metrics.get("cache_misses", 0) + 1
     return result

@@ -1,5 +1,3 @@
-
-
 import numpy as np
 from clematis.engine.types import Config, T1Result
 from clematis.engine.stages.t2 import t2_semantic
@@ -202,3 +200,50 @@ def test_t2_owner_scope_agent_filters_other_owners():
     assert r.retrieved, "expected some hits for owner A"
     assert all(h.owner == "A" for h in r.retrieved), f"unexpected owners in hits: {[h.owner for h in r.retrieved]}"
     assert r.metrics.get("owner_scope") == "agent"
+
+
+def test_t2_cache_hit_then_miss_on_index_version_bump():
+    cfg = Config()
+    cfg.t2["tiers"] = ["exact_semantic"]
+    cfg.t2["k_retrieval"] = 10
+    cfg.t2["sim_threshold"] = -1.0
+    cfg.t2["exact_recent_days"] = 365
+    cfg.t2["cache"]["enabled"] = True
+
+    state = _bootstrap_graph()
+    idx = InMemoryIndex()
+    state["mem_index"] = idx
+
+    # Seed two recent episodes
+    _add_ep(idx, eid="ep1", text="apple pie", ts="2025-08-25T00:00:00Z")
+    _add_ep(idx, eid="ep2", text="banana split", ts="2025-08-26T00:00:00Z")
+
+    t1 = T1Result(graph_deltas=[{"op":"upsert_node","id":"n:apple"}], metrics={})
+
+    Ctx = type("Ctx", (), {})
+    ctx = Ctx()
+    ctx.cfg = cfg
+    ctx.now = "2025-09-01T00:00:00Z"
+
+    # First call -> cache miss
+    r1 = t2_semantic(ctx, state, "tell me", t1)
+    assert r1.metrics.get("cache_enabled") is True
+    # On miss, we expect at least one miss and zero hits
+    assert r1.metrics.get("cache_hits", 0) == 0
+    assert r1.metrics.get("cache_misses", 0) >= 1
+
+    # Second call (same inputs) -> cache hit
+    r2 = t2_semantic(ctx, state, "tell me", t1)
+    assert r2.metrics.get("cache_enabled") is True
+    assert r2.metrics.get("cache_hits", 0) >= 1
+    # Miss count shouldn't increase on a pure hit path
+    assert r2.metrics.get("cache_misses", 0) >= r1.metrics.get("cache_misses", 0)
+
+    # Bump index version by adding an episode
+    _add_ep(idx, eid="ep3", text="apple tart", ts="2025-08-27T00:00:00Z")
+
+    # Third call after index mutation -> new cache entry (miss)
+    r3 = t2_semantic(ctx, state, "tell me", t1)
+    assert r3.metrics.get("cache_enabled") is True
+    assert r3.metrics.get("cache_hits", 0) == 0
+    assert r3.metrics.get("cache_misses", 0) >= 1

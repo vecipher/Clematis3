@@ -9,9 +9,15 @@ import hashlib
 class InMemoryIndex:
     def __init__(self) -> None:
         self._eps: List[Dict[str, Any]] = []
+        self._ver: int = 0
 
     def add(self, ep: Dict[str, Any]) -> None:
         self._eps.append(ep)
+        self._ver += 1
+
+    def index_version(self) -> int:
+        """Monotonic version that increments on each mutation (add)."""
+        return self._ver
 
     def search_tiered(self, owner: Optional[str], q_vec: NDArray[np.float32], k: int, tier: str, hints: Dict[str, Any]) -> List[EpisodeRef]:
         # Placeholder: returns empty list
