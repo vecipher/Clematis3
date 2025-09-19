@@ -132,3 +132,73 @@ def test_t2_residual_cap_and_determinism():
     assert len([d for d in r1.graph_deltas_residual if d.get("op") == "upsert_node"]) <= 3
     # Deterministic emission
     assert r1.graph_deltas_residual == r2.graph_deltas_residual
+
+
+# Additional tests for recency/importance and owner scope
+def test_t2_scoring_orders_by_recency_and_importance():
+    """
+    With alpha_sim=0 (equal cosine), ordering must follow beta*recency + gamma*importance.
+    Recent-but-low-importance should outrank old-but-high-importance given beta>gamma.
+    """
+    cfg = Config()
+    cfg.t2["tiers"] = ["exact_semantic"]
+    cfg.t2["k_retrieval"] = 10
+    cfg.t2["sim_threshold"] = -1.0  # include all by cosine
+    cfg.t2["exact_recent_days"] = 365
+    cfg.t2["ranking"] = {"alpha_sim": 0.0, "beta_recency": 0.7, "gamma_importance": 0.3}
+
+    state = _bootstrap_graph()
+    idx = InMemoryIndex()
+    state["mem_index"] = idx
+
+    # Two episodes with identical text (equal cosine to the query)
+    # Make one very recent but low importance, the other 1 year old but high importance.
+    _add_ep(idx, eid="ep_recent_lowimp", text="same text", ts="2025-08-31T00:00:00Z", importance=0.0)
+    _add_ep(idx, eid="ep_old_highimp",  text="same text", ts="2024-09-01T00:00:00Z", importance=1.0)
+
+    # No need to bias query via T1 labels; keep neutral
+    t1 = T1Result(graph_deltas=[], metrics={})
+
+    # Provide a fixed 'now' on ctx so recency normalization is deterministic
+    Ctx = type("Ctx", (), {})
+    ctx = Ctx()
+    ctx.cfg = cfg
+    ctx.now = "2025-09-01T00:00:00Z"
+    r = t2_semantic(ctx, state, "same text", t1)
+
+    ids = [h.id for h in r.retrieved[:2]]
+    assert ids == ["ep_recent_lowimp", "ep_old_highimp"], f"unexpected order: {ids}"
+    assert "score_stats" in r.metrics and r.metrics["score_stats"]["max"] >= r.metrics["score_stats"]["mean"]
+
+
+def test_t2_owner_scope_agent_filters_other_owners():
+    """
+    When owner_scope=agent, only episodes owned by ctx.agent_id should be considered.
+    """
+    cfg = Config()
+    cfg.t2["tiers"] = ["exact_semantic"]
+    cfg.t2["k_retrieval"] = 10
+    cfg.t2["sim_threshold"] = -1.0
+    cfg.t2["owner_scope"] = "agent"
+
+    state = _bootstrap_graph()
+    idx = InMemoryIndex()
+    state["mem_index"] = idx
+
+    # Owner A and Owner B episodes
+    _add_ep(idx, eid="a1", text="apple topic", ts="2025-08-25T00:00:00Z", owner="A")
+    _add_ep(idx, eid="b1", text="apple topic", ts="2025-08-25T00:00:00Z", owner="B")
+
+    # Touch apple in T1 to bias query minimally (not strictly needed here)
+    t1 = T1Result(graph_deltas=[{"op":"upsert_node","id":"n:apple"}], metrics={})
+
+    Ctx = type("Ctx", (), {})
+    ctx = Ctx()
+    ctx.cfg = cfg
+    ctx.agent_id = "A"
+    ctx.now = "2025-09-01T00:00:00Z"
+
+    r = t2_semantic(ctx, state, "apple", t1)
+    assert r.retrieved, "expected some hits for owner A"
+    assert all(h.owner == "A" for h in r.retrieved), f"unexpected owners in hits: {[h.owner for h in r.retrieved]}"
+    assert r.metrics.get("owner_scope") == "agent"

@@ -138,6 +138,7 @@ class Config:
         "exact_recent_days": 30,
         "ranking": {"alpha_sim": 0.75, "beta_recency": 0.2, "gamma_importance": 0.05},
         "clusters_top_m": 3,
+        "owner_scope": "any",
         "residual_cap_per_turn": 32,
         "cache": {"enabled": True, "max_entries": 512, "ttl_s": 300},
     })

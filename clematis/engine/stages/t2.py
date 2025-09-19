@@ -5,6 +5,7 @@ from ..cache import LRUCache, stable_key
 from ...adapters.embeddings import BGEAdapter
 from ...memory.index import InMemoryIndex
 import numpy as np
+import datetime as dt
 
 # Config-driven cache (constructed lazily per cfg)
 _T2_CACHE = None
@@ -61,16 +62,24 @@ def _build_label_map(state: dict) -> Dict[str, str]:
                 m[n.label.lower()] = n.id
     return m
 
-def t2_semantic(ctx, state, text: str, t1) -> T2Result:
-    retrieved: List[EpisodeRef] = []
-    residual = []
-    metrics = {"tier_sequence": ["exact_semantic"], "k_returned": 0, "sim_stats": {}, "residual_count": 0, "cap_hits": 0}
-    return T2Result(retrieved=retrieved, graph_deltas_residual=residual, metrics=metrics)
+def _parse_iso(ts: str) -> dt.datetime:
+  try:
+      return dt.datetime.fromisoformat((ts or "").replace("Z", "+00:00")).astimezone(dt.timezone.utc)
+  except Exception:
+      return dt.datetime.now(dt.timezone.utc)
+
+def _owner_for_query(ctx, cfg_t2: dict):
+  scope = str(cfg_t2.get("owner_scope", "any")).lower()
+  if scope == "agent":
+      return getattr(ctx, "agent_id", None)
+  if scope == "world":
+      return "world"
+  return None  # any
 
 def t2_semantic(ctx, state, text: str, t1) -> T2Result:
     cfg = ctx.cfg
     cfg_t2 = cfg.t2
-        # Ensure a memory index exists in state
+    # Ensure a memory index exists in state
     index: InMemoryIndex = state.setdefault("mem_index", InMemoryIndex())
     # Query text = user text + labels changed by T1
     t1_labels = _gather_changed_labels(state, t1)
@@ -86,6 +95,7 @@ def t2_semantic(ctx, state, text: str, t1) -> T2Result:
     exact_recent_days: int = int(cfg_t2.get("exact_recent_days", 30))
     sim_threshold: float = float(cfg_t2.get("sim_threshold", 0.3))
     clusters_top_m: int = int(cfg_t2.get("clusters_top_m", 3))
+    now_str = getattr(ctx, "now", None)
     # Cache setup
     cache = _get_cache(cfg_t2)
     index_size = len(getattr(index, "_eps", []))
@@ -116,7 +126,10 @@ def t2_semantic(ctx, state, text: str, t1) -> T2Result:
             pass
         else:
             continue
-        hits = index.search_tiered(owner=None, q_vec=q_vec, k=k_retrieval, tier=tier, hints=hints)
+        owner_query = _owner_for_query(ctx, cfg_t2)
+        if now_str:
+            hints["now"] = now_str
+        hits = index.search_tiered(owner=owner_query, q_vec=q_vec, k=k_retrieval, tier=tier, hints=hints)
         for h in hits:
             if h.id in seen_ids:
                 continue
@@ -126,6 +139,44 @@ def t2_semantic(ctx, state, text: str, t1) -> T2Result:
                 break
         if len(retrieved) >= k_retrieval:
             break
+    # --- Combined scoring (alpha * cosine + beta * recency + gamma * importance) ---
+    ranking = cfg_t2.get("ranking", {})
+    alpha = float(ranking.get("alpha_sim", 0.75))
+    beta = float(ranking.get("beta_recency", 0.2))
+    gamma = float(ranking.get("gamma_importance", 0.05))
+
+    # Build episode lookup (id -> full dict) for recency/importance
+    eps = getattr(index, "_eps", [])
+    ep_by_id = {str(e.get("id")): e for e in eps}
+
+    # Reference 'now' from ctx if available
+    now_str = getattr(ctx, "now", None)
+    now_utc = _parse_iso(now_str) if now_str else dt.datetime.now(dt.timezone.utc)
+
+    HORIZON_DAYS = 365.0  # normalization horizon for recency
+    rescored: List[tuple[EpisodeRef, float, float]] = []  # (ref, combined, cos)
+
+    for ref in retrieved:
+        cos = float(ref.score)  # from index
+        cos_norm = (cos + 1.0) / 2.0  # [-1,1] -> [0,1]
+
+        ep = ep_by_id.get(ref.id, {})
+        ts = ep.get("ts")
+        if ts:
+            age_days = max(0.0, (now_utc - _parse_iso(ts)).total_seconds() / 86400.0)
+        else:
+            age_days = HORIZON_DAYS  # treat unknown as old
+        recency = max(0.0, min(1.0, 1.0 - (age_days / HORIZON_DAYS)))
+
+        importance = float((ep.get("aux") or {}).get("importance", 0.5))
+        importance = max(0.0, min(1.0, importance))
+
+        combined = alpha * cos_norm + beta * recency + gamma * importance
+        rescored.append((ref, combined, cos))
+
+    # Deterministic ordering by combined score desc, then id asc
+    rescored.sort(key=lambda t: (-t[1], t[0].id))
+    retrieved = [r for (r, _, _) in rescored]
     # Residual propagation: map episode texts back to node labels
     residual_cap = int(cfg_t2.get("residual_cap_per_turn", 32))
     label_map = _build_label_map(state)
@@ -152,11 +203,18 @@ def t2_semantic(ctx, state, text: str, t1) -> T2Result:
         "mean": float(np.mean(scores)) if scores else 0.0,
         "max": float(np.max(scores)) if scores else 0.0,
     }
+    combined_scores = [s for (_, s, _) in rescored] if 'rescored' in locals() and rescored else []
+    score_stats = {
+        "mean": float(np.mean(combined_scores)) if combined_scores else 0.0,
+        "max": float(np.max(combined_scores)) if combined_scores else 0.0,
+    }
     metrics = {
         "tier_sequence": tiers,
         "k_returned": len(retrieved),
         "k_used": len(graph_deltas_residual),
         "sim_stats": sim_stats,
+        "score_stats": score_stats,
+        "owner_scope": str(cfg_t2.get("owner_scope", "any")).lower(),
         "caps": {"residual_cap": residual_cap},
         "cache_enabled": cache is not None,
         "cache_used": cache_used,
