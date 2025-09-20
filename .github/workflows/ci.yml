@@ -22,8 +22,10 @@ jobs:
           if [ -f requirements-dev.txt ]; then
             pip install -r requirements-dev.txt
           else
-            pip install pytest numpy
+            pip install pytest
           fi
+          # Ensure minimal test deps are present regardless
+          pip install pyyaml
 
       # Install your package in editable mode (so `from clematis...` works)
       - name: Install package
