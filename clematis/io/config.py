@@ -16,7 +16,7 @@ def load_config(path: str | None = None) -> Config:
             data: Dict[str, Any] = yaml.safe_load(f) or {}
         cfg = Config()
         # Shallow update known sections
-        for k in ["k_surface","surface_method","t1","t2","t3","t4","budgets","flags"]:
+        for k in ["k_surface","surface_method","t1","t2","t3","t4","budgets","flags","scheduler"]:
             if k in data:
                 setattr(cfg, k, data[k])
         return cfg

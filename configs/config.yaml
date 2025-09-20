@@ -77,3 +77,19 @@ t4:
     ttl_sec: 600
 budgets: {time_ms: 1000, ops: 1000, tokens: 1024, time_ms_reflection: 6000}
 flags: {enable_world_memory: true, allow_reflection: true}
+# -----------------------------------------------------------------------------
+# Scheduler (M5) — Example config (feature-flagged; defaults live in validate.py)
+# -----------------------------------------------------------------------------
+# scheduler:
+#   enabled: false
+#   policy: round_robin   # or fair_queue
+#   quantum_ms: 20
+#   budgets:
+#     t1_pops: null       # int or null
+#     t1_iters: 50
+#     t2_k: 64            # cap on results USED (not fetched)
+#     t3_ops: 3
+#     wall_ms: 200        # must be >= quantum_ms
+#   fairness:
+#     max_consecutive_turns: 1  # enforced in PR27
+#     aging_ms: 200              # bucket size for fair-queue priority

@@ -231,3 +231,6 @@ class Config:
     })
     budgets: Dict[str, Any] = field(default_factory=lambda: {"time_ms":1000,"ops":1000,"tokens":1024,"time_ms_reflection":6000})
     flags: Dict[str, Any] = field(default_factory=lambda: {"enable_world_memory":True,"allow_reflection":True})
+
+    # M5: scheduler config (feature-flagged; defaults merged by validate.py)
+    scheduler: Dict[str, Any] = field(default_factory=dict)

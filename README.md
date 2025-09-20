@@ -45,6 +45,22 @@ t2.k_retrieval must be >= 1
 - Stage caches (T1/T2) use `ttl_s`.
 - Orchestrator cache (PR15) uses `t4.cache.ttl_sec` (alias: accepts `ttl_s`; normalized to `ttl_sec`).
 
+## M5 — Scheduler (PR25 core, OFF by default)
+
+PR25 adds a **pure, deterministic scheduler core** and a validated `scheduler` config block. There is **no runtime wiring** yet; with `scheduler.enabled: false` the system behaves exactly like pre‑M5.
+
+- Core module: `clematis/scheduler.py` (init/next_turn/on_yield; RR + fair‑queue aging).
+- Config source of truth: `configs/validate.py` (`DEFAULTS["scheduler"]`), with a **commented example** at the end of `configs/config.yaml`.
+- Loader passthrough: `clematis/io/config.py` accepts the `scheduler` block.
+- Types: `Config.scheduler` (dict) in `clematis/engine/types.py`.
+
+**Try it (tests only; no wiring yet):**
+```bash
+pytest -q tests/test_scheduler_basic.py tests/test_scheduler_config_validate.py
+```
+
+**Determinism:** No RNG; lexicographic tie‑breaks. `fair_queue` priority = `idle_ms // aging_ms` using a fixed test clock.
+
 ## What’s implemented
 
 - **T1 — Keyword propagation (deterministic)**  

@@ -159,6 +159,22 @@ DEFAULTS: Dict[str, Any] = {
             "cap_per_turn": 2,
         },
     },
+    "scheduler": {
+        "enabled": False,
+        "policy": "round_robin",      # or "fair_queue"
+        "quantum_ms": 20,             # used in PR26
+        "budgets": {
+            "t1_pops": None,          # int or None
+            "t1_iters": 50,
+            "t2_k": 64,               # cap on results USED (not fetched)
+            "t3_ops": 3,
+            "wall_ms": 200,           # hard per-slice wall (PR26)
+        },
+        "fairness": {
+            "max_consecutive_turns": 1,  # enforced in PR27
+            "aging_ms": 200,             # bucket size for fair-queue priority
+        },
+    },
 }
 
 
@@ -170,7 +186,7 @@ DEFAULTS: Dict[str, Any] = {
 KNOWN_CACHE_NAMESPACES = {"t2:semantic"}
 
 # Allowed key sets per section
-ALLOWED_TOP = {"t1", "t2", "t3", "t4", "graph", "k_surface", "surface_method", "budgets", "flags"}
+ALLOWED_TOP = {"t1", "t2", "t3", "t4", "graph", "k_surface", "surface_method", "budgets", "flags", "scheduler"}
 ALLOWED_T1 = {"cache", "iter_cap", "queue_budget", "node_budget", "decay", "edge_type_mult", "radius_cap"}
 ALLOWED_T2 = {"backend", "k_retrieval", "sim_threshold", "cache", "ranking", "hybrid",
               "tiers", "exact_recent_days", "clusters_top_m", "owner_scope",
@@ -196,6 +212,7 @@ ALLOWED_GRAPH_DECAY = {"half_life_turns", "floor"}
 ALLOWED_GRAPH_MERGE = {"enabled", "min_size", "min_avg_w", "max_diameter", "cap_per_turn"}
 ALLOWED_GRAPH_SPLIT = {"enabled", "weak_edge_thresh", "min_component_size", "cap_per_turn"}
 ALLOWED_GRAPH_PROMOTION = {"enabled", "label_mode", "topk_label_ids", "attach_weight", "cap_per_turn"}
+_ALLOWED_SCHED_POLICIES = {"round_robin", "fair_queue"}
 
 def _lev(a: str, b: str) -> int:
     """Tiny Levenshtein distance (edit distance) for did-you-mean suggestions."""
@@ -699,6 +716,53 @@ def validate_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
         _err(errors, "graph.promotion.cap_per_turn", "must be >= 0")
     g["promotion"] = gp
 
+    # ---- SCHEDULER ----
+    s = _ensure_subdict(merged, "scheduler")
+    # enabled
+    s["enabled"] = _coerce_bool(s.get("enabled", False))
+    # policy
+    pol = str(s.get("policy", "round_robin"))
+    if pol not in _ALLOWED_SCHED_POLICIES:
+        _err(errors, "scheduler.policy", f"must be one of {_ALLOWED_SCHED_POLICIES}")
+    s["policy"] = pol
+    # quantum_ms
+    qms = _coerce_int(s.get("quantum_ms", 20))
+    if qms < 1:
+        _err(errors, "scheduler.quantum_ms", "must be >= 1")
+    s["quantum_ms"] = qms
+
+    # budgets block
+    sb = _ensure_subdict(s, "budgets")
+    def _budget_int_or_none(name: str, min_val: int) -> None:
+        v = sb.get(name, None)
+        if v is None:
+            return
+        vi = _coerce_int(v)
+        if vi < min_val:
+            _err(errors, f"scheduler.budgets.{name}", f"must be >= {min_val} (or null)")
+        sb[name] = vi
+
+    _budget_int_or_none("t1_pops", 0)
+    _budget_int_or_none("t1_iters", 0)
+    _budget_int_or_none("t2_k", 0)
+    _budget_int_or_none("t3_ops", 0)
+    _budget_int_or_none("wall_ms", 1)
+
+    wall = sb.get("wall_ms")
+    if isinstance(wall, int) and wall < qms:
+        _err(errors, "scheduler.budgets.wall_ms", "must be >= scheduler.quantum_ms")
+    s["budgets"] = sb
+
+    # fairness block
+    sf = _ensure_subdict(s, "fairness")
+    sf["max_consecutive_turns"] = _coerce_int(sf.get("max_consecutive_turns", 1))
+    if sf["max_consecutive_turns"] < 1:
+        _err(errors, "scheduler.fairness.max_consecutive_turns", "must be >= 1")
+    sf["aging_ms"] = _coerce_int(sf.get("aging_ms", 200))
+    if sf["aging_ms"] < 0:
+        _err(errors, "scheduler.fairness.aging_ms", "must be >= 0")
+    s["fairness"] = sf
+
     # If we collected errors, raise a single ValueError with all messages (stable order)
     if errors:
         raise ValueError("\n".join(errors))
@@ -709,6 +773,7 @@ def validate_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
     merged["t3"] = t3
     merged["t4"] = t4
     merged["graph"] = g
+    merged["scheduler"] = s
     return merged
 
 
@@ -735,5 +800,22 @@ def validate_config_verbose(cfg: Dict[str, Any]) -> Tuple[Dict[str, Any], List[s
     except Exception:
         # Be conservative: never crash on warning collection
         pass
+    try:
+        sched = _ensure_dict(normalized.get("scheduler"))
+        budgets = _ensure_dict(sched.get("budgets"))
+        fairness = _ensure_dict(sched.get("fairness"))
 
+        qms = _coerce_int(sched.get("quantum_ms", 20))
+        t1_iters = budgets.get("t1_iters")
+        t1_pops = budgets.get("t1_pops")
+
+        # Both zero can stall T1 when the scheduler is enabled
+        if t1_iters == 0 and t1_pops == 0:
+            warnings.append("W[scheduler]: both t1_iters and t1_pops are 0; T1 may not progress when scheduler is enabled.")
+
+        aging = _coerce_int(fairness.get("aging_ms", 200))
+        if aging < qms:
+            warnings.append("W[scheduler]: fairness.aging_ms < quantum_ms; aging tiers may be too fine-grained to have effect.")
+    except Exception:
+        pass
     return normalized, warnings
