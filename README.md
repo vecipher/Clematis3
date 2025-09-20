@@ -534,6 +534,9 @@ JSONL files are written to `.logs/`:
 - **gel.jsonl** — Graph Evolution Layer events (only when `graph.enabled=true`)
   - `observe_retrieval` fields: `turn`, `agent`, `k_in`, `k_used`, `pairs_updated`, `threshold`, `mode`, `alpha`, `ms`
   - `edge_decay` fields: `turn`, `agent`, `decayed_edges`, `dropped_edges`, `half_life_turns`, `floor`, `ms`
+  - `merge` fields: component signature, size, avg_w, diameter
+  - `split` fields: parts/signature, thresholds
+  - `promotion` fields: concept_id, label, members_count, attach_weight
 - `turn.jsonl` — per‑turn roll‑up (durations, key metrics)
 - `health.jsonl` — guardrail flags
 # HS1:
@@ -665,10 +668,12 @@ python3 scripts/inspect_snapshot.py --dir ./.data/snapshots --format json
 ```
 
 - Exit `0` when a snapshot is found; prints a pretty summary by default.
+  - Shows **graph schema** and GEL meta counts when present (PR24).
 - Exit `2` if no snapshot exists or cannot be read (runtime remains tolerant).
 - New snapshots include `schema_version: v1`; legacy snapshots may show `unknown`.
 
 **Fields shown** (when available): `schema_version`, `version_etag`, `nodes`, `edges`, `last_update`, and T4 caps (`delta_norm_cap_l2`, `novelty_cap_per_node`, `churn_cap_edges`, `weight_min`, `weight_max`).
+**Additional fields** (when present): `graph_schema_version`, and a compact GEL summary: node/edge counts and meta counters (`merges`, `splits`, `promotions`, `concepts`).
 
 ## PR19 — Log schemas & rotation helper
 
@@ -805,6 +810,9 @@ graph:
   merge: { enabled: false, min_size: 3 }
   split: { enabled: false }
 ```
+```md
+> **Note (PR24)**: The GEL config is extended with `merge`, `split`, and `promotion` blocks. See PR24 below. Enabling these in HS1 only records metadata and logs; core retrieval/apply behavior remains unchanged.
+
 
 **Determinism & bounds**
 - No RNG; stable ordering and canonicalized edge keys (`a→b` where `a < b`).
@@ -899,3 +907,43 @@ Adds compact fields to `t2.jsonl`:
 python3 scripts/run_demo.py
 jq '.hybrid_used, .hybrid' < ./.logs/t2.jsonl | tail -n2
 ```
+## PR24 — GEL: Merge / Split / Promotion (contracts; metadata-only in HS1)
+
+Adds deterministic **interfaces and stubs** to manage higher-order structure in the Graph Evolution Layer (GEL). Default **OFF**; enabling writes metadata and logs but does **not** change retrieval or application behavior in HS1.
+
+### What lands in PR24
+- **Merge candidates**: `merge_candidates(ctx, state)` → list of components with `{nodes, size, avg_w, diameter, signature}`; sorted by `(-avg_w, -size, signature)`.
+- **Apply merge**: `apply_merge(ctx, state, cand)` → records an event in `state.graph.meta.merges`; **does not** mutate edges in HS1.
+- **Split candidates**: `split_candidates(ctx, state)` → weak-edge cuts produce `{parts: [list[str], list[str], ...], signature}` based on `split.weak_edge_thresh` and `min_component_size`.
+- **Apply split**: `apply_split(ctx, state, cand)` → records an event in `state.graph.meta.splits`; **no** edge mutation in HS1.
+- **Promotions**: `promote_clusters(ctx, state, clusters)` deterministically proposes concept nodes with ids `c::<lexmin>` and labels per mode (`lexmin` or `concat_k`). `apply_promotion(ctx, state, promo)` creates a concept node (if absent) and attaches `rel="concept"` edges to members with a bounded weight; idempotent.
+
+### Snapshot & schema
+- **`graph_schema_version`** is still written at the **top level** (e.g., `"v1"`), and PR24 adds a richer `gel.meta` block under the GEL section.
+- GEL meta includes: `merges[]`, `splits[]`, `promotions[]`, and `concept_nodes_count`, and is tagged internally with `meta.schema = "v1.1"`.
+- Loader remains backward-compatible: legacy snapshots without a `gel` block, or with only a compact `graph` summary, load as empty GEL.
+
+### Validation (config surface)
+The validator now accepts and bounds the following keys (all optional; defaults provided):
+```yaml
+graph:
+  merge: { enabled: false, min_size: 3, min_avg_w: 0.20, max_diameter: 2, cap_per_turn: 4 }
+  split: { enabled: false, weak_edge_thresh: 0.05, min_component_size: 2, cap_per_turn: 4 }
+  promotion: { enabled: false, label_mode: lexmin, topk_label_ids: 3, attach_weight: 0.5, cap_per_turn: 2 }
+
+# HS1 wrap-up
+
+**Status:** PR17–PR24 landed. HS1 hardening complete with:
+- Config hygiene & validator (PR17)
+- Snapshot inspector & schema tagging (PR18)
+- Log schemas & rotation helper (PR19)
+- T4 property tests + perf guardrails + microbench (PR20)
+- GEL edge update/decay (PR22)
+- Hybrid dense+graph re-ranking (PR23)
+- GEL merge/split/promotion contracts & snapshot meta (PR24)
+
+**Runtime behavior:** Deterministic; feature flags default OFF for GEL and Hybrid. When disabled, outputs remain bit-for-bit identical to pre-HS1.
+
+**Next tracks (post-HS1, optional):**
+- M5A — LLM productization with deterministic fixtures.
+- M5B — Retrieval quality & eval (nDCG@k, hit@k) with richer GEL features.
