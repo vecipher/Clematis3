@@ -1,0 +1,14 @@
+# Forces frequent yields & visible RR rotation
+scheduler:
+  enabled: true
+  policy: round_robin
+  quantum_ms: 20
+  budgets:
+    t1_iters: 1
+    t1_pops: 0
+    t2_k: 1
+    t3_ops: 1
+    wall_ms: 200
+  fairness:
+    max_consecutive_turns: 1
+    aging_ms: 200

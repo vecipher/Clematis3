@@ -1,0 +1,14 @@
+# Demonstrates deterministic aging tiers (no rotation in fair_queue)
+scheduler:
+  enabled: true
+  policy: fair_queue
+  quantum_ms: 20
+  budgets:
+    t1_iters: 3
+    t1_pops: null
+    t2_k: 4
+    t3_ops: 2
+    wall_ms: 500
+  fairness:
+    max_consecutive_turns: 2
+    aging_ms: 200

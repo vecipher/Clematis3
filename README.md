@@ -987,6 +987,8 @@ scheduler:
   budgets: { t1_iters: 50, t2_k: 64, t3_ops: 3, wall_ms: 200 }
 
   fairness: { max_consecutive_turns: 1, aging_ms: 200 }  # logged only in PR26
+```
+
 
 ## M5 — Scheduler (PR27 fairness + enforced yields + ready-set; OFF by default)
 
@@ -1005,12 +1007,71 @@ PR27 builds on PR26. Summary:
 - `turn.jsonl`: slice entries include `slice_idx`, `yielded: true`, `yield_reason`.
 - (Queue rotation and `queue_before/queue_after` are planned for PR28.)
 
-**Enable (same config surface)**
-```yaml
-scheduler:
-  enabled: true
-  policy: round_robin            # or "fair_queue"
-  quantum_ms: 20
-  budgets: { t1_iters: 50, t2_k: 64, t3_ops: 3, wall_ms: 200 }
-  fairness: { max_consecutive_turns: 1, aging_ms: 200 }
+
+## M5 — Scheduler (PR28 docs, demo, queue rotation; OFF by default)
+
+PR28 adds a rotation-aware demo and documentation updates. No core behavior changes beyond what PR27 introduced.
+
+**What’s new**
+- **Queue rotation (RR only, demo/driver level):** after an enforced yield, the selected agent is rotated head→tail. `fair_queue` does **not** rotate.
+- **Pick-reason passthrough:** the demo passes `pick_reason` into the orchestrator so `scheduler.jsonl` includes it.  
+- **Full `queue_before/queue_after` logging** is deferred to **PR29** (driver-authored record).
+
+**Run the demo**
+```bash
+# Multi-agent loop with small caps to force frequent yields & RR rotation
+python3 scripts/run_demo.py \
+  --agents AgentA,AgentB,AgentC \
+  --policy round_robin \
+  --steps 6 \
+  --t1-iters 1 --t2-k 1 --t3-ops 1
+
+# Fair-queue (no rotation), deterministic aging tiers
+python3 scripts/run_demo.py \
+  --agents AgentA,AgentB,AgentC \
+  --policy fair_queue \
+  --steps 6
 ```
+
+**Inspect logs**
+```bash
+tail -n 3 ./.logs/scheduler.jsonl | jq .
+tail -n 3 ./.logs/turn.jsonl | jq .
+```
+You should see `pick_reason` on scheduler records when provided (e.g., `"ROUND_ROBIN"`, `"AGING_BOOST"`, or `"RESET_CONSEC"`).  
+In RR, the demo prints the queue transition like `['A','B','C'] -> ['B','C','A']` whenever a yield happens.
+
+**Examples (configs)**
+
+Use the example configs under `examples/scheduler/` to get predictable behavior out-of-the-box:
+
+- `examples/scheduler/round_robin_minimal.yaml` — frequent yields & visible RR rotation
+- `examples/scheduler/fair_queue_aging.yaml` — aging tiers; **no rotation**
+- `examples/scheduler/quantum_vs_wall.yaml` — shows precedence (WALL > budgets > quantum)
+
+Run them with the demo:
+```bash
+python3 scripts/run_demo.py --config examples/scheduler/round_robin_minimal.yaml \
+  --agents AgentA,AgentB,AgentC --steps 6
+
+python3 scripts/run_demo.py --config examples/scheduler/fair_queue_aging.yaml \
+  --agents AgentA,AgentB,AgentC --steps 6 --policy fair_queue
+
+python3 scripts/run_demo.py --config examples/scheduler/quantum_vs_wall.yaml \
+  --agents AgentA,AgentB --steps 4
+```
+
+**FAQ**
+- *Why no rotation in `fair_queue`?* Aging (idle time) deterministically controls selection priority; rotating would be cosmetic and can reduce determinism.
+- *Why can RR still look bursty?* With `max_consecutive_turns > 1`, RR will produce bursts of length `max_consecutive_turns` by design. Rotation happens **after** a yield.
+- *Where do I see `pick_reason`?* In `scheduler.jsonl` when the driver passes it (PR28 wires this via `scenario.run_one_turn(..., pick_reason=...)`).
+- *Where are `queue_before/queue_after`?* Deferred to **PR29**, where the driver will author a single enriched `scheduler.jsonl` record per yield.
+- *Does any of this change stage semantics?* No. Stages remain pure; only immutable per-slice budgets are injected; rotation occurs in the driver/demo layer.
+
+**Notes & invariants**
+- Rotation is performed **only** when `scheduler.enabled=true`, `policy=round_robin`, and a yield occurs at a stage boundary.
+- `fair_queue` order is governed by deterministic aging; rotating would be cosmetic and is intentionally avoided.
+- Determinism holds: same inputs + same config ⇒ identical picks and yields.
+
+**Next (PR29)**
+- Single-source `scheduler.jsonl` records authored by the driver, including `queue_before/queue_after` in addition to `pick_reason`.

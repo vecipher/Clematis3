@@ -104,6 +104,7 @@ def agent_ready(ctx, state, agent_id: str) -> tuple[bool, str]:
 
 
 # --- Config accessor for harmonized config usage ---
+
 def _get_cfg(ctx) -> Dict[str, Any]:
     """Normalize config access across ctx.cfg / ctx.config; always returns a dict."""
     cfg = getattr(ctx, "cfg", None)
@@ -117,6 +118,20 @@ def _get_cfg(ctx) -> Dict[str, Any]:
     if isinstance(cfg2, SimpleNamespace):
         return dict(cfg2.__dict__)
     return {}
+
+# --- Helper for pick reason passthrough to scheduler logs ---
+def _get_pick_reason(ctx) -> str | None:
+    """Return a driver-supplied pick reason if present on ctx.
+    Looks for ctx._sched_pick_reason first, then ctx.pick_reason."""
+    pr = getattr(ctx, "_sched_pick_reason", None)
+    if pr is None:
+        pr = getattr(ctx, "pick_reason", None)
+    if pr is None:
+        return None
+    try:
+        return str(pr)
+    except Exception:
+        return None
 
 
 class Orchestrator:
@@ -231,6 +246,7 @@ class Orchestrator:
                     "slice": slice_ctx["slice_idx"],
                     "agent": agent_id,
                     "policy": (_get_cfg(ctx).get("scheduler") or {}).get("policy", "round_robin"),
+                    **({"pick_reason": _get_pick_reason(ctx)} if _get_pick_reason(ctx) else {}),
                     "reason": reason,
                     "enforced": True,
                     "stage_end": "T1",
@@ -315,6 +331,7 @@ class Orchestrator:
                     "slice": slice_ctx["slice_idx"],
                     "agent": agent_id,
                     "policy": (_get_cfg(ctx).get("scheduler") or {}).get("policy", "round_robin"),
+                    **({"pick_reason": _get_pick_reason(ctx)} if _get_pick_reason(ctx) else {}),
                     "reason": reason,
                     "enforced": True,
                     "stage_end": "T2",
@@ -402,6 +419,7 @@ class Orchestrator:
                     "slice": slice_ctx["slice_idx"],
                     "agent": agent_id,
                     "policy": (_get_cfg(ctx).get("scheduler") or {}).get("policy", "round_robin"),
+                    **({"pick_reason": _get_pick_reason(ctx)} if _get_pick_reason(ctx) else {}),
                     "reason": reason,
                     "enforced": True,
                     "stage_end": "T3",
@@ -608,6 +626,7 @@ class Orchestrator:
                         "slice": slice_ctx["slice_idx"],
                         "agent": agent_id,
                         "policy": (_get_cfg(ctx).get("scheduler") or {}).get("policy", "round_robin"),
+                        **({"pick_reason": _get_pick_reason(ctx)} if _get_pick_reason(ctx) else {}),
                         "reason": reason,
                         "enforced": True,
                         "stage_end": "T4",
@@ -757,6 +776,7 @@ class Orchestrator:
                         "slice": slice_ctx["slice_idx"],
                         "agent": agent_id,
                         "policy": (_get_cfg(ctx).get("scheduler") or {}).get("policy", "round_robin"),
+                        **({"pick_reason": _get_pick_reason(ctx)} if _get_pick_reason(ctx) else {}),
                         "reason": reason,
                         "enforced": True,
                         "stage_end": "Apply",

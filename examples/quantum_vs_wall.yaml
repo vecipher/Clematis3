@@ -1,0 +1,14 @@
+# Shows precedence; expect WALL_MS to cap long runs
+scheduler:
+  enabled: true
+  policy: round_robin
+  quantum_ms: 10      # small quantum to trigger frequent checks
+  budgets:
+    t1_iters: null
+    t1_pops: null
+    t2_k: 64
+    t3_ops: 8
+    wall_ms: 100      # hard per-turn wall
+  fairness:
+    max_consecutive_turns: 1
+    aging_ms: 200
