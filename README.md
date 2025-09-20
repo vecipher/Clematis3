@@ -44,7 +44,6 @@ t2.k_retrieval must be >= 1
 **TTL keys:**
 - Stage caches (T1/T2) use `ttl_s`.
 - Orchestrator cache (PR15) uses `t4.cache.ttl_sec` (alias: accepts `ttl_s`; normalized to `ttl_sec`).
-```
 
 ## What’s implemented
 
@@ -593,3 +592,54 @@ python3 scripts/inspect_snapshot.py --dir ./.data/snapshots --format json
 - New snapshots include `schema_version: v1`; legacy snapshots may show `unknown`.
 
 **Fields shown** (when available): `schema_version`, `version_etag`, `nodes`, `edges`, `last_update`, and T4 caps (`delta_norm_cap_l2`, `novelty_cap_per_node`, `churn_cap_edges`, `weight_min`, `weight_max`).
+
+## PR19 — Log schemas & rotation helper
+
+Documented the JSONL shapes we emit and added a tiny size‑based rotation script. This PR does **not** change runtime behavior.
+
+### Log schemas (minimal fields)
+
+All logs live under `.logs/` unless configured otherwise.
+
+- **t1.jsonl** — per‑turn propagation metrics  
+  Fields: `turn`, `agent`, `pops`, `iters`, `propagations`, `radius_cap_hits`, `layer_cap_hits`, `node_budget_hits`, `cache_hit`, `cache_size`, `ms`
+
+- **t2.jsonl** — retrieval/residual metrics  
+  Fields: `turn`, `agent`, `k_retrieved`, `k_used`, `tier_sequence[]`, `sim_stats{mean,max}`, `cache_hit`, `cache_size`, `backend`, `backend_fallback?`, `backend_fallback_reason?`, `ms`
+
+- **t3_plan.jsonl** — plan/policy metrics  
+  Fields: `turn`, `agent`, `policy_backend`, `backend`, `ops_counts`, `requested_retrieve`, `rag_used`, `reflection`, `ms_deliberate`, `ms_rag`
+
+- **t3_dialogue.jsonl** — dialogue synthesis metrics  
+  Fields: `turn`, `agent`, `backend`, `tokens`, `truncated`, `style_prefix_used`, `snippet_count`, `adapter?`, `model?`, `temperature?`, `ms`
+
+- **t4.jsonl** — meta‑filter decisions  
+  Fields: `turn`, `agent`, `approved`, `rejected_ops[]`, `reasons[]`, `metrics{caps,clamps,cooldowns}`, `ms`
+
+- **apply.jsonl** — apply/snapshot summary  
+  Fields: `turn`, `agent`, `applied`, `clamps`, `version_etag`, `snapshot_path`, `cache_invalidations`, `ms`
+
+- **turn.jsonl** — per‑turn roll‑up  
+  Fields: `turn`, `agent`, `ms_total`, `ms_t1`, `ms_t2`, `ms_t3`, `ms_t4`, `ms_apply`, `health`
+
+- **health.jsonl** — guardrail flags  
+  Fields: `turn`, `agent`, `flags[]` (e.g., `GEL_EDGES`, `GEL_MERGES`, `GEL_SPLITS` when GEL is enabled)
+
+> Notes: Field sets are minimal and stable. Additional fields may appear; consumers should ignore unknown keys.
+
+### Rotating logs (optional ops helper)
+
+Use the provided script to keep JSONL files capped by size with deterministic numeric suffixes:
+
+```bash
+# Dry‑run (show actions only)
+python3 scripts/rotate_logs.py --dir ./.logs --pattern '*.jsonl' --max-bytes 10_000_000 --backups 5 --dry-run
+
+# Perform rotation
+python3 scripts/rotate_logs.py --dir ./.logs --pattern '*.jsonl' --max-bytes 10_000_000 --backups 5
+```
+
+- Rotates any matched file with size **≥ `--max-bytes`**.
+- Keeps `--backups` generations: `.1`, `.2`, … (oldest dropped).
+- No recursion; only files directly under `--dir` are considered.
+- The script does **not** append—only rotates existing files. Wire‑in is optional and non‑disruptive.
