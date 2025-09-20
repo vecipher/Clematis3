@@ -7,7 +7,8 @@ from .stages.t1 import t1_propagate
 from .stages.t2 import t2_semantic
 from .stages.t3 import make_plan_bundle, make_dialog_bundle, deliberate, rag_once, speak, llm_speak
 from .stages.t4 import t4_filter
-from .apply import apply_changes, load_latest_snapshot
+from .apply import apply_changes
+from .snapshot import load_latest_snapshot
 from ..io.log import append_jsonl
 from .cache import CacheManager
 

@@ -7,8 +7,7 @@ requires-python = ">=3.10"
 authors = [{ name = "Clematis Dev" }]
 dependencies = []
 
-[tool.pytest.ini_options]
-testpaths = ["tests"]
+ 
 
 [build-system]
 requires = ["setuptools>=68", "wheel"]
@@ -19,6 +18,7 @@ where = ["."]
 include = ["clematis*"]
 
 [tool.pytest.ini_options]
+testpaths = ["tests"]
 markers = [
   "perf: opt-in performance tests",
 ]

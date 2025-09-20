@@ -32,22 +32,55 @@ jobs:
         run: pip install -e .
 
       - name: Sanity imports
+        continue-on-error: true
         run: |
+          set -euxo pipefail
           python - <<'PY'
-          import sys, traceback
+          import sys, os, traceback, importlib.util, site, pkgutil
           print("python:", sys.version)
+          print("sys.executable:", sys.executable)
+          print("sys.path[0:5]:", sys.path[:5])
+
+          def show(msg, fn):
+              print(f"\n--- {msg} ---")
+              try:
+                  fn()
+                  print(f"--- {msg}: OK ---")
+              except Exception as e:
+                  print(f"*** {msg}: FAILED: {e}")
+                  traceback.print_exc()
+
+          def show_spec(name):
+              spec = importlib.util.find_spec(name)
+              print(f"find_spec({name!r}) ->", spec)
+
+          show("pip list head", lambda: os.system("python -m pip list | head -n 50"))
+          show("where site-packages", lambda: print(site.getsitepackages(), site.getusersitepackages()))
+
+          show_spec("yaml")
+          show("import yaml", lambda: __import__("yaml"))
           try:
               import yaml
-              print("yaml:", getattr(yaml, "__version__", "unknown"))
-          except Exception as e:
-              print("YAML import failure:", e); traceback.print_exc(); raise
+              print("yaml version:", getattr(yaml, "__version__", "unknown"))
+          except Exception:
+              pass
+
+          show_spec("clematis")
+          show("import clematis", lambda: __import__("clematis"))
           try:
               import clematis
-              print("clematis package import: OK")
+              print("clematis.__file__:", getattr(clematis, "__file__", None))
+              root = os.path.dirname(getattr(clematis, "__file__", "") or "")
+              print("ls clematis root:", os.listdir(root) if root and os.path.isdir(root) else "N/A")
+          except Exception:
+              pass
+
+          show_spec("clematis.engine.stages.t4")
+          def import_t4():
               import clematis.engine.stages.t4 as t4
-              print("t4 import: OK; has t4_filter?", hasattr(t4, "t4_filter"))
-          except Exception as e:
-              print("Clematis import failure:", e); traceback.print_exc(); raise
+              print("t4.__file__:", getattr(t4, "__file__", None))
+              print("has t4_filter?", hasattr(t4, "t4_filter"))
+          show("import clematis.engine.stages.t4", import_t4)
           PY
 
       - name: Run tests

@@ -3,6 +3,7 @@ from typing import Any, Dict, List, Optional
 from dataclasses import asdict
 import os
 import json
+import math
 
 
 # -------------------------
@@ -99,12 +100,32 @@ def get_latest_snapshot_info(directory: str = "./.data/snapshots") -> Optional[D
         return None
 
     schema = data.get("schema_version", "unknown")
+    graph_schema = data.get("graph_schema_version", None)
+    gel = (data.get("gel") or {})
     graph = (data.get("graph") or {})
     caps = (data.get("t4_caps") or {})
     meta = (graph.get("meta") or {})
 
-    # --- Legacy fallbacks for counts ---
-    nodes = graph.get("nodes_count")
+    # --- Prefer GEL counts if present, else fall back to legacy 'graph' or top-level ---
+    nodes = None
+    edges = None
+
+    # GEL structure (preferred in newer snapshots)
+    if isinstance(gel, dict):
+        g_nodes = gel.get("nodes")
+        if isinstance(g_nodes, dict):
+            nodes = len(g_nodes)
+        elif isinstance(g_nodes, list):
+            nodes = len(g_nodes)
+        g_edges = gel.get("edges")
+        if isinstance(g_edges, dict):
+            edges = len(g_edges)
+        elif isinstance(g_edges, list):
+            edges = len(g_edges)
+
+    # Legacy 'graph' field
+    if nodes is None:
+        nodes = graph.get("nodes_count")
     if nodes is None:
         g_nodes = graph.get("nodes")
         if isinstance(g_nodes, (list, dict)):
@@ -114,7 +135,8 @@ def get_latest_snapshot_info(directory: str = "./.data/snapshots") -> Optional[D
             if isinstance(top_nodes, (list, dict)):
                 nodes = len(top_nodes)
 
-    edges = graph.get("edges_count")
+    if edges is None:
+        edges = graph.get("edges_count")
     if edges is None:
         g_edges = graph.get("edges")
         if isinstance(g_edges, (list, dict)):
@@ -130,6 +152,7 @@ def get_latest_snapshot_info(directory: str = "./.data/snapshots") -> Optional[D
     return {
         "path": path,
         "schema_version": schema,
+        "graph_schema_version": graph_schema,
         "version_etag": data.get("version_etag"),
         "nodes": nodes,
         "edges": edges,
@@ -306,6 +329,145 @@ def _serialize_deltas(deltas: Any) -> List[Dict[str, Any]]:
 
 
 # -------------------------
+# GEL (Graph Evolution Layer) helpers
+# -------------------------
+
+def _extract_full_cfg(ctx) -> Dict[str, Any]:
+    def _as_dict(obj):
+        if obj is None:
+            return {}
+        if isinstance(obj, dict):
+            return obj
+        try:
+            return dict(obj.__dict__)
+        except Exception:
+            return {}
+    full = {}
+    full.update(_as_dict(getattr(ctx, "cfg", None)))
+    full.update(_as_dict(getattr(ctx, "config", None)))
+    return full
+
+
+def _graph_bounds_from_cfg(ctx) -> Dict[str, float]:
+    """Get clamp/epsilon from graph.* if present, else fall back to t4.*."""
+    full = _extract_full_cfg(ctx)
+    g = (full.get("graph") or {})
+    t4 = (full.get("t4") or {})
+    wmin = float(g.get("weight_min", t4.get("weight_min", -1.0)))
+    wmax = float(g.get("weight_max", t4.get("weight_max", 1.0)))
+    decay = (g.get("decay") or {})
+    eps = float(decay.get("epsilon_prune", 0.0))
+    if not (wmin < wmax):
+        # fallback safety
+        wmin, wmax = -1.0, 1.0
+    if eps < 0:
+        eps = 0.0
+    return {"wmin": wmin, "wmax": wmax, "eps": eps}
+
+
+def _round6(x: float) -> float:
+    try:
+        if not math.isfinite(x):
+            return 0.0
+        return round(float(x), 6)
+    except Exception:
+        return 0.0
+
+
+def _clamp(x: float, lo: float, hi: float) -> float:
+    try:
+        if x < lo:
+            return lo
+        if x > hi:
+            return hi
+        return x
+    except Exception:
+        return x
+
+
+def _edge_id(src: str, dst: str, rel: str) -> str:
+    a, b = (str(src), str(dst))
+    if a <= b:
+        return f"{a}__{b}__{rel}"
+    return f"{b}__{a}__{rel}"
+
+
+def _sanitize_gel_for_write(gel: Any, ctx) -> Dict[str, Any]:
+    bounds = _graph_bounds_from_cfg(ctx)
+    wmin, wmax, eps = bounds["wmin"], bounds["wmax"], bounds["eps"]
+    nodes_out: Dict[str, Any] = {}
+    edges_out: Dict[str, Any] = {}
+
+    # Nodes: accept dict or list of node dicts with an 'id'
+    try:
+        gnodes = (gel or {}).get("nodes", {}) if isinstance(gel, dict) else {}
+        if isinstance(gnodes, dict):
+            for nid, nd in gnodes.items():
+                nodes_out[str(nid)] = nd
+        elif isinstance(gnodes, list):
+            for nd in gnodes:
+                nid = str((nd or {}).get("id", ""))
+                if nid:
+                    nodes_out[nid] = nd
+    except Exception:
+        pass
+
+    # Edges: accept dict keyed by id, or list of {src,dst,rel,weight,...}
+    try:
+        gedges = (gel or {}).get("edges", {}) if isinstance(gel, dict) else {}
+        if isinstance(gedges, dict):
+            items = gedges.items()
+        elif isinstance(gedges, list):
+            items = []
+            for ed in gedges:
+                if not isinstance(ed, dict):
+                    continue
+                src = str(ed.get("src", ""))
+                dst = str(ed.get("dst", ""))
+                rel = str(ed.get("rel", "coact"))
+                eid = _edge_id(src, dst, rel)
+                items.append((eid, ed))
+        else:
+            items = []
+        for eid, ed in items:
+            if not isinstance(ed, dict):
+                continue
+            src = str(ed.get("src", ""))
+            dst = str(ed.get("dst", ""))
+            rel = str(ed.get("rel", "coact"))
+            w = _round6(_clamp(float(ed.get("weight", 0.0)), wmin, wmax))
+            if abs(w) < eps:
+                w = 0.0
+            edges_out[_edge_id(src, dst, rel)] = {
+                "src": src,
+                "dst": dst,
+                "rel": rel,
+                "weight": w,
+                "updated_at": ed.get("updated_at"),
+                "attrs": ed.get("attrs", {}),
+            }
+    except Exception:
+        pass
+
+    return {"nodes": nodes_out, "edges": edges_out}
+
+
+def _sanitize_gel_for_load(gel: Any, ctx) -> Dict[str, Any]:
+    # For now, same rules as write path
+    return _sanitize_gel_for_write(gel, ctx)
+
+
+def _set_state_field(state, key: str, val: Any) -> None:
+    if isinstance(state, dict):
+        state[key] = val
+    else:
+        try:
+            setattr(state, key, val)
+        except Exception:
+            pass
+
+
+# -------------------------
 # Public API
 # -------------------------
 
@@ -335,6 +497,20 @@ def write_snapshot(ctx, state, version_etag: str, applied: int = 0, deltas=None)
     store_export = _export_store_for_snapshot(store) if store is not None else None
     # Always include a 'store' key for shape stability (empty object when not available)
     payload["store"] = store_export if isinstance(store_export, dict) else {}
+
+    # Include GEL (Graph Evolution Layer) section and schema tag; tolerate absence
+    try:
+        gel_state = None
+        if isinstance(state, dict):
+            gel_state = state.get("gel")
+        else:
+            gel_state = getattr(state, "gel", None)
+        payload["graph_schema_version"] = "v1"
+        payload["gel"] = _sanitize_gel_for_write(gel_state or {"nodes": {}, "edges": {}}, ctx)
+    except Exception:
+        # Ensure keys exist even if sanitization fails
+        payload.setdefault("graph_schema_version", "v1")
+        payload.setdefault("gel", {"nodes": {}, "edges": {}})
 
     with open(path, "w", encoding="utf-8") as f:
         json.dump(payload, f)
@@ -372,5 +548,14 @@ def load_latest_snapshot(ctx, state) -> Dict[str, Any]:
     snap_store = data.get("store")
     if store is not None and snap_store is not None:
         loaded_store = _import_store_from_snapshot(store, snap_store)
+
+    # GEL restore (tolerant): always set a well-formed gel container
+    try:
+        snap_gel = data.get("gel")
+        gel_out = _sanitize_gel_for_load(snap_gel or {"nodes": {}, "edges": {}}, ctx)
+        _set_state_field(state, "gel", gel_out)
+    except Exception:
+        # On any error, still ensure field presence to avoid attribute errors downstream
+        _set_state_field(state, "gel", {"nodes": {}, "edges": {}})
 
     return {"loaded": bool(loaded_store or ver is not None), "path": path, "version_etag": ver}
