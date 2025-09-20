@@ -19,7 +19,7 @@ from typing import Dict, List, Tuple, TypedDict, Literal
 
 # --------------------------- Types & Public API ------------------------------
 
-ReasonPick = Literal["ROUND_ROBIN", "AGING_BOOST"]
+ReasonPick = Literal["ROUND_ROBIN", "AGING_BOOST", "RESET_CONSEC"]
 
 
 class SchedulerState(TypedDict):
@@ -47,6 +47,10 @@ __all__ = [
     "next_turn",
     "on_yield",
 ]
+
+
+# Max value used when fairness_cfg does not specify max_consecutive_turns
+_MAX_INT = 10**9
 
 
 # ------------------------------- Helpers ------------------------------------
@@ -127,22 +131,47 @@ def next_turn(
     """
     Pure selection. Returns (agent_id, slice_budgets, reason).
 
-    - In PR25, `slice_budgets` is an empty dict to keep the core decoupled.
-      The orchestrator (PR26) will derive budgets from config and inject them.
-
+    - slice_budgets is empty in PR25/27 core; orchestrator derives actual budgets.
     - Determinism:
-        * "round_robin": pick head of queue.
-        * "fair_queue" : pick by aging tiers (idle_ms // aging_ms), tie-break lex.
-
-    - No queue mutations here; the orchestrator handles rotations in later PRs.
+        * "round_robin": pick first ELIGIBLE agent by queue order.
+        * "fair_queue" : among ELIGIBLE agents, pick highest aging tier (idle_ms // aging_ms), tie-break lex.
+    - Eligibility uses max_consecutive_turns (mct). If all agents are saturated (no eligible),
+      select lexicographic-min agent and return reason="RESET_CONSEC" to signal a counter reset.
+    - No queue mutations here; the orchestrator handles rotations (RR) in later stages.
     """
     now = _now_ms(ctx)
+    aging_ms = int(fairness_cfg.get("aging_ms", 200))
+    mct = int(getattr(fairness_cfg, "get", lambda *_: _MAX_INT)("max_consecutive_turns", _MAX_INT))  # type: ignore
+
+    # Build eligible set under mct
+    q = sched["queue"]
+    if not q:
+        return "", {}, "ROUND_ROBIN" if policy != "fair_queue" else "AGING_BOOST"
+
+    eligible = [a for a in q if sched["consec_turns"].get(a, 0) < mct]
+
+    # If no eligible agents, pick lex-min and signal RESET_CONSEC
+    if not eligible:
+        agent = min(q)  # deterministic
+        return agent, {}, "RESET_CONSEC"
+
     if policy == "fair_queue":
-        agent = _pick_fair_queue(sched, now, int(fairness_cfg.get("aging_ms", 200)))
-        return agent, {}, "AGING_BOOST"
-    # Default / unknown policy falls back to round-robin deterministically
-    agent = _pick_round_robin(sched)
-    return agent, {}, "ROUND_ROBIN"
+        # Among eligible, choose highest tier; tie-break lex
+        best_agent = None
+        best_tier = -1
+        for a in eligible:
+            last = sched["last_ran_ms"].get(a, 0)
+            idle = now - last
+            if idle < 0:
+                idle = 0
+            tier = (idle // aging_ms) if aging_ms > 0 else 0
+            if tier > best_tier or (tier == best_tier and (best_agent is None or a < best_agent)):
+                best_tier = tier
+                best_agent = a
+        return (best_agent or eligible[0]), {}, "AGING_BOOST"
+    else:
+        # Round-robin: take first eligible according to queue order (no rotation here)
+        return eligible[0], {}, "ROUND_ROBIN"
 
 
 def on_yield(
@@ -152,19 +181,28 @@ def on_yield(
     consumed: Dict[str, int],
     reason: str,
     fairness_cfg: FairnessCfg,
+    reset: bool = False,
 ) -> None:
     """
-    Post-slice bookkeeping (no ordering changes in PR25):
+    Post-slice bookkeeping:
 
-    - Update last_ran_ms[agent_id] = ctx.now_ms()
-    - Increment consec_turns[agent_id]
+    - Always update last_ran_ms[agent_id] = ctx.now_ms()
+    - Increment consec_turns[agent_id] by 1, unless `reset=True`, in which case
+      all consec_turns are zeroed (deterministically) after the slice.
 
-    Parameters:
-        consumed: forward-compat placeholder for recording per-slice counters.
-        reason  : yield reason string (enum will be formalized in PR26).
+    Notes:
+      * We do NOT rotate the queue here; RR rotation is the orchestrator's job.
+      * `reset=True` is used when `next_turn` returned reason="RESET_CONSEC" (all agents saturated).
     """
     now = _now_ms(ctx)
     if agent_id in sched["last_ran_ms"]:
         sched["last_ran_ms"][agent_id] = now
+
+    if reset:
+        # Zero all counters deterministically
+        for a in sched["consec_turns"].keys():
+            sched["consec_turns"][a] = 0
+        return
+
     if agent_id in sched["consec_turns"]:
         sched["consec_turns"][agent_id] += 1

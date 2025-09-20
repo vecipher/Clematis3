@@ -557,8 +557,6 @@ JSONL files are written to `.logs/`:
 - `health.jsonl` — guardrail flags
 # HS1:
 
-## Development tips
-
 - Deterministic tests use the hash‑based embeddings; if a test filters too hard on cosine, set `t2.sim_threshold` to `-1.0` in that test to include all candidates and let other filters (recency, tiers) drive behavior.
 - Cache behavior is configurable per stage; tests include **first‑call miss → second‑call hit → invalidation by etag/index change**.
 - Keep stages **pure**. Instrumentation and persistence live in the orchestrator and adapters.
@@ -575,7 +573,7 @@ JSONL files are written to `.logs/`:
 - CLI: inspect latest snapshot (P3 tooling)
 - Cache consolidation (single layer) in a future milestone
 
-# HS1:
+## HS1 — Hardening Sprint
 
 ## PR17 — Config validation & hygiene
 
@@ -946,6 +944,7 @@ graph:
   merge: { enabled: false, min_size: 3, min_avg_w: 0.20, max_diameter: 2, cap_per_turn: 4 }
   split: { enabled: false, weak_edge_thresh: 0.05, min_component_size: 2, cap_per_turn: 4 }
   promotion: { enabled: false, label_mode: lexmin, topk_label_ids: 3, attach_weight: 0.5, cap_per_turn: 2 }
+```
 
 # HS1 wrap-up
 
@@ -963,7 +962,8 @@ graph:
 **Next tracks (post-HS1, optional):**
 - M5A — LLM productization with deterministic fixtures.
 - M5B — Retrieval quality & eval (nDCG@k, hit@k) with richer GEL features.
-- (Note, we changes those to be tucked into M7 and M10, reverse order)
+- (Note: we changed those to be tucked into M7 and M10, reverse order)
+```
 
 ## M5 — Scheduler (PR26 wiring, logging only; OFF by default)
 
@@ -985,4 +985,32 @@ scheduler:
   policy: round_robin
   quantum_ms: 20
   budgets: { t1_iters: 50, t2_k: 64, t3_ops: 3, wall_ms: 200 }
+
   fairness: { max_consecutive_turns: 1, aging_ms: 200 }  # logged only in PR26
+
+## M5 — Scheduler (PR27 fairness + enforced yields + ready-set; OFF by default)
+
+PR27 builds on PR26. Summary:
+- **Fairness**: enforce `max_consecutive_turns` and deterministic aging (`idle_ms // aging_ms`) in `fair_queue`. No RNG; lex tie-break.
+- **Enforced yields**: at T1/T2/T3/T4/Apply boundaries, when a reason is hit, the slice is cut and control returns to the scheduler.
+- **Ready-Set hook**: `agent_ready(ctx, state, agent_id) -> (bool, str)` gate. Default always true; overrideable and deterministic.
+- **Rotation**: _deferred to PR28_ (driver-level). Expect bursty `max_consecutive_turns > 1` on round-robin until then.
+
+**What changed**
+- `clematis/scheduler.py`: `next_turn` now respects `max_consecutive_turns` and aging, and can return `"RESET_CONSEC"`; `on_yield` updates clocks/counters and supports `reset=True`.
+- `clematis/engine/orchestrator.py`: enforces yields at stage boundaries; augments `turn.jsonl` with `slice_idx`, `yielded: true`, `yield_reason`; writes `scheduler.jsonl` entries with `"enforced": true`; exposes `agent_ready(...)`.
+
+**Logging additions**
+- `scheduler.jsonl`: adds `"enforced": true` when a yield is applied.
+- `turn.jsonl`: slice entries include `slice_idx`, `yielded: true`, `yield_reason`.
+- (Queue rotation and `queue_before/queue_after` are planned for PR28.)
+
+**Enable (same config surface)**
+```yaml
+scheduler:
+  enabled: true
+  policy: round_robin            # or "fair_queue"
+  quantum_ms: 20
+  budgets: { t1_iters: 50, t2_k: 64, t3_ops: 3, wall_ms: 200 }
+  fairness: { max_consecutive_turns: 1, aging_ms: 200 }
+```

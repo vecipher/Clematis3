@@ -65,6 +65,7 @@ def _derive_budgets(ctx) -> Dict[str, int]:
     out["quantum_ms"] = int(s.get("quantum_ms", 20))
     return out
 
+
 def _should_yield(slice_ctx: _SliceCtx, consumed: Dict[str,int]) -> str | None:
     """
     Decide if a slice should yield based on budgets and elapsed time.
@@ -90,6 +91,15 @@ def _should_yield(slice_ctx: _SliceCtx, consumed: Dict[str,int]) -> str | None:
     if elapsed_ms >= budgets.get("quantum_ms", 20):
         return "QUANTUM_EXCEEDED"
     return None
+
+
+# --- PR27: Ready-Set hook (pure, deterministic; default always ready) ---
+def agent_ready(ctx, state, agent_id: str) -> tuple[bool, str]:
+    """
+    Returns (is_ready, reason). Default returns (True, "DEFAULT_TRUE").
+    Override or monkeypatch in tests to block specific agents deterministically.
+    """
+    return True, "DEFAULT_TRUE"
 
 
 
@@ -222,6 +232,7 @@ class Orchestrator:
                     "agent": agent_id,
                     "policy": (_get_cfg(ctx).get("scheduler") or {}).get("policy", "round_robin"),
                     "reason": reason,
+                    "enforced": True,
                     "stage_end": "T1",
                     "quantum_ms": slice_ctx["budgets"].get("quantum_ms"),
                     "wall_ms": slice_ctx["budgets"].get("wall_ms"),
@@ -230,6 +241,27 @@ class Orchestrator:
                     "queued": [],  # external loop owns the queue
                     "ms": 0,
                 })
+                total_ms_now = round((time.perf_counter() - total_t0) * 1000.0, 3)
+                append_jsonl(
+                    "turn.jsonl",
+                    {
+                        "turn": turn_id,
+                        "agent": agent_id,
+                        "durations_ms": {"t1": t1_ms, "t2": 0.0, "t4": 0.0, "apply": 0.0, "total": total_ms_now},
+                        "t1": {
+                            "pops": t1.metrics.get("pops"),
+                            "iters": t1.metrics.get("iters"),
+                            "graphs_touched": t1.metrics.get("graphs_touched"),
+                        },
+                        "t2": {},
+                        "t4": {},
+                        "slice_idx": slice_ctx["slice_idx"],
+                        "yielded": True,
+                        "yield_reason": reason,
+                        **({"now": now} if now else {}),
+                    },
+                )
+                return TurnResult(line="", events=[])
 
         # --- T2 (with version-aware cache) ---
         t0 = time.perf_counter()
@@ -284,6 +316,7 @@ class Orchestrator:
                     "agent": agent_id,
                     "policy": (_get_cfg(ctx).get("scheduler") or {}).get("policy", "round_robin"),
                     "reason": reason,
+                    "enforced": True,
                     "stage_end": "T2",
                     "quantum_ms": slice_ctx["budgets"].get("quantum_ms"),
                     "wall_ms": slice_ctx["budgets"].get("wall_ms"),
@@ -292,6 +325,31 @@ class Orchestrator:
                     "queued": [],
                     "ms": 0,
                 })
+                total_ms_now = round((time.perf_counter() - total_t0) * 1000.0, 3)
+                append_jsonl(
+                    "turn.jsonl",
+                    {
+                        "turn": turn_id,
+                        "agent": agent_id,
+                        "durations_ms": {"t1": t1_ms, "t2": t2_ms, "t4": 0.0, "apply": 0.0, "total": total_ms_now},
+                        "t1": {
+                            "pops": t1.metrics.get("pops"),
+                            "iters": t1.metrics.get("iters"),
+                            "graphs_touched": t1.metrics.get("graphs_touched"),
+                        },
+                        "t2": {
+                            "k_returned": t2.metrics.get("k_returned"),
+                            "k_used": t2.metrics.get("k_used"),
+                            "cache_hit": bool(cache_hit),
+                        },
+                        "t4": {},
+                        "slice_idx": slice_ctx["slice_idx"],
+                        "yielded": True,
+                        "yield_reason": reason,
+                        **({"now": now} if now else {}),
+                    },
+                )
+                return TurnResult(line="", events=[])
 
         # --- GEL observe (optional; gated by graph.enabled) ---
         graph_cfg_all = (_get_cfg(ctx).get("graph") if isinstance(_get_cfg(ctx), dict) else {}) or {}
@@ -345,6 +403,7 @@ class Orchestrator:
                     "agent": agent_id,
                     "policy": (_get_cfg(ctx).get("scheduler") or {}).get("policy", "round_robin"),
                     "reason": reason,
+                    "enforced": True,
                     "stage_end": "T3",
                     "quantum_ms": slice_ctx["budgets"].get("quantum_ms"),
                     "wall_ms": slice_ctx["budgets"].get("wall_ms"),
@@ -353,6 +412,31 @@ class Orchestrator:
                     "queued": [],
                     "ms": 0,
                 })
+                total_ms_now = round((time.perf_counter() - total_t0) * 1000.0, 3)
+                append_jsonl(
+                    "turn.jsonl",
+                    {
+                        "turn": turn_id,
+                        "agent": agent_id,
+                        "durations_ms": {"t1": t1_ms, "t2": t2_ms, "t4": 0.0, "apply": 0.0, "total": total_ms_now},
+                        "t1": {
+                            "pops": t1.metrics.get("pops"),
+                            "iters": t1.metrics.get("iters"),
+                            "graphs_touched": t1.metrics.get("graphs_touched"),
+                        },
+                        "t2": {
+                            "k_returned": t2.metrics.get("k_returned"),
+                            "k_used": t2.metrics.get("k_used"),
+                            "cache_hit": bool(cache_hit),
+                        },
+                        "t4": {},
+                        "slice_idx": slice_ctx["slice_idx"],
+                        "yielded": True,
+                        "yield_reason": reason,
+                        **({"now": now} if now else {}),
+                    },
+                )
+                return TurnResult(line="", events=[])
 
         # RAG: allow at most one refinement if both requested and enabled by config
         cfg = _get_cfg(ctx)
@@ -525,6 +609,7 @@ class Orchestrator:
                         "agent": agent_id,
                         "policy": (_get_cfg(ctx).get("scheduler") or {}).get("policy", "round_robin"),
                         "reason": reason,
+                        "enforced": True,
                         "stage_end": "T4",
                         "quantum_ms": slice_ctx["budgets"].get("quantum_ms"),
                         "wall_ms": slice_ctx["budgets"].get("wall_ms"),
@@ -533,6 +618,34 @@ class Orchestrator:
                         "queued": [],
                         "ms": 0,
                     })
+                    total_ms_now = round((time.perf_counter() - total_t0) * 1000.0, 3)
+                    append_jsonl(
+                        "turn.jsonl",
+                        {
+                            "turn": turn_id,
+                            "agent": agent_id,
+                            "durations_ms": {"t1": t1_ms, "t2": t2_ms, "t4": t4_ms, "apply": 0.0, "total": total_ms_now},
+                            "t1": {
+                                "pops": t1.metrics.get("pops"),
+                                "iters": t1.metrics.get("iters"),
+                                "graphs_touched": t1.metrics.get("graphs_touched"),
+                            },
+                            "t2": {
+                                "k_returned": t2.metrics.get("k_returned"),
+                                "k_used": t2.metrics.get("k_used"),
+                                "cache_hit": bool(cache_hit),
+                            },
+                            "t4": {
+                                "approved": len(getattr(t4, "approved_deltas", [])),
+                                "rejected": len(getattr(t4, "rejected_ops", [])),
+                            },
+                            "slice_idx": slice_ctx["slice_idx"],
+                            "yielded": True,
+                            "yield_reason": reason,
+                            **({"now": now} if now else {}),
+                        },
+                    )
+                    return TurnResult(line=utter if 'utter' in locals() else "", events=[])
             # --- GEL decay tick (optional; run before Apply so snapshot includes decay) ---
             graph_cfg_all2 = (_get_cfg(ctx).get("graph") if isinstance(_get_cfg(ctx), dict) else {}) or {}
             graph_enabled2 = bool(graph_cfg_all2.get("enabled", False)) if isinstance(graph_cfg_all2, dict) else False
@@ -645,6 +758,7 @@ class Orchestrator:
                         "agent": agent_id,
                         "policy": (_get_cfg(ctx).get("scheduler") or {}).get("policy", "round_robin"),
                         "reason": reason,
+                        "enforced": True,
                         "stage_end": "Apply",
                         "quantum_ms": slice_ctx["budgets"].get("quantum_ms"),
                         "wall_ms": slice_ctx["budgets"].get("wall_ms"),
@@ -653,6 +767,34 @@ class Orchestrator:
                         "queued": [],
                         "ms": 0,
                     })
+                    total_ms_now = round((time.perf_counter() - total_t0) * 1000.0, 3)
+                    append_jsonl(
+                        "turn.jsonl",
+                        {
+                            "turn": turn_id,
+                            "agent": agent_id,
+                            "durations_ms": {"t1": t1_ms, "t2": t2_ms, "t4": t4_ms, "apply": apply_ms, "total": total_ms_now},
+                            "t1": {
+                                "pops": t1.metrics.get("pops"),
+                                "iters": t1.metrics.get("iters"),
+                                "graphs_touched": t1.metrics.get("graphs_touched"),
+                            },
+                            "t2": {
+                                "k_returned": t2.metrics.get("k_returned"),
+                                "k_used": t2.metrics.get("k_used"),
+                                "cache_hit": bool(cache_hit),
+                            },
+                            "t4": {
+                                "approved": len(getattr(t4, "approved_deltas", [])),
+                                "rejected": len(getattr(t4, "rejected_ops", [])),
+                            },
+                            "slice_idx": slice_ctx["slice_idx"],
+                            "yielded": True,
+                            "yield_reason": reason,
+                            **({"now": now} if now else {}),
+                        },
+                    )
+                    return TurnResult(line=utter if 'utter' in locals() else "", events=[])
         else:
             # Bypassed: provide inert placeholders; no t4/apply logs
             t4_ms = 0.0
