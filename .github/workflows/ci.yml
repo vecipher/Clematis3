@@ -31,5 +31,24 @@ jobs:
       - name: Install package
         run: pip install -e .
 
+      - name: Sanity imports
+        run: |
+          python - <<'PY'
+          import sys, traceback
+          print("python:", sys.version)
+          try:
+              import yaml
+              print("yaml:", getattr(yaml, "__version__", "unknown"))
+          except Exception as e:
+              print("YAML import failure:", e); traceback.print_exc(); raise
+          try:
+              import clematis
+              print("clematis package import: OK")
+              import clematis.engine.stages.t4 as t4
+              print("t4 import: OK; has t4_filter?", hasattr(t4, "t4_filter"))
+          except Exception as e:
+              print("Clematis import failure:", e); traceback.print_exc(); raise
+          PY
+
       - name: Run tests
         run: pytest -q
