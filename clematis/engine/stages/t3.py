@@ -199,6 +199,15 @@ def make_plan_bundle(ctx, state, t1, t2) -> Dict[str, Any]:
     cfg = _cfg_snapshot(ctx)
     k_ret = cfg["t2"]["k_retrieval"]
 
+    # M5: carry per-slice caps from orchestrator (if any)
+    slice_caps = {}
+    try:
+        caps = getattr(ctx, "slice_budgets", None) or {}
+        if isinstance(caps, dict) and caps.get("t3_ops") is not None:
+            slice_caps["t3_ops"] = int(caps.get("t3_ops"))
+    except Exception:
+        slice_caps = {}
+
     # Agent & world
     agent = _get_agent_info(ctx)
     hot_labels, k_hot = _world_hot_labels(state)
@@ -224,6 +233,7 @@ def make_plan_bundle(ctx, state, t1, t2) -> Dict[str, Any]:
         "t2": {"retrieved": t2_hits, "metrics": t2_metrics},
         "text": {"input": input_text, "labels_from_t1": labels_from_t1},
         "cfg": cfg,
+        "slice_caps": slice_caps,
     }
     return bundle
 
@@ -308,7 +318,12 @@ def deliberate(bundle: Dict[str, Any]) -> Plan:
     cfg_t3 = bundle.get("cfg", {}).get("t3", {})
     cfg_t2 = bundle.get("cfg", {}).get("t2", {})
 
-    caps_ops = int(bundle.get("agent", {}).get("caps", {}).get("ops", 3))
+    base_ops = int(bundle.get("agent", {}).get("caps", {}).get("ops", 3))
+    try:
+        slice_cap = int(bundle.get("slice_caps", {}).get("t3_ops", base_ops))
+    except Exception:
+        slice_cap = base_ops
+    caps_ops = min(base_ops, slice_cap)
     tokens = int(cfg_t3.get("tokens", 256))
 
     thresholds = _policy_thresholds(bundle)
@@ -485,7 +500,12 @@ def rag_once(
     new_intent = _refined_intent(tau_high, tau_low, labels, post_s_max)
 
     # Build new ops deterministically
-    caps_ops = int(bundle.get("agent", {}).get("caps", {}).get("ops", 3))
+    base_ops = int(bundle.get("agent", {}).get("caps", {}).get("ops", 3))
+    try:
+        slice_cap = int(bundle.get("slice_caps", {}).get("t3_ops", base_ops))
+    except Exception:
+        slice_cap = base_ops
+    caps_ops = min(base_ops, slice_cap)
     tokens = int(bundle.get("cfg", {}).get("t3", {}).get("tokens", 256))
 
     new_ops: List[Any] = []

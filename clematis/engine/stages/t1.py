@@ -62,11 +62,18 @@ def t1_propagate(ctx, state, text: str) -> T1Result:
 
     # Effective depth cap: min(iter_cap_layers, iter_cap) so legacy iter_cap still works
     iter_cap_layers_cfg = int(cfg_t1.get("iter_cap_layers", 50))
-    iter_cap_layers = min(iter_cap_layers_cfg, iter_cap)
+    base_iter_cap_layers = min(iter_cap_layers_cfg, iter_cap)
     # Optional hard cap on number of relaxations (edge traversals)
     relax_cap = cfg_t1.get("relax_cap", None)
     if relax_cap is not None:
         relax_cap = int(relax_cap)
+
+    # --- M5 scheduler slice caps (optional, read-only clamps) ---
+    caps = getattr(ctx, "slice_budgets", None) or {}
+    slice_t1_iters = caps.get("t1_iters")
+    slice_t1_pops  = caps.get("t1_pops")
+    effective_iter_cap_layers = base_iter_cap_layers if slice_t1_iters is None else min(base_iter_cap_layers, int(slice_t1_iters))
+    effective_queue_budget    = queue_budget if slice_t1_pops is None else min(queue_budget, int(slice_t1_pops))
 
     store = state.get("store")
     active_graphs = state.get("active_graphs", [])
@@ -97,9 +104,9 @@ def t1_propagate(ctx, state, text: str) -> T1Result:
         policy_caps = {
             "radius_cap": radius_cap,
             "iter_cap": iter_cap,
-            "iter_cap_layers": iter_cap_layers,
+            "iter_cap_layers": effective_iter_cap_layers,
             "relax_cap": relax_cap,
-            "queue_budget": queue_budget,
+            "queue_budget": effective_queue_budget,
             "node_budget": node_budget,
         }
         ckey = ("t1", gid, etag, stable_key(decay_cfg), stable_key(edge_mult), stable_key(policy_caps), tuple(seed_ids))
@@ -132,7 +139,7 @@ def t1_propagate(ctx, state, text: str) -> T1Result:
             dist[nid] = 0
             max_delta = max(max_delta, abs(w))
         
-        while pq and pops < queue_budget:
+        while pq and pops < effective_queue_budget:
             _, node_key, u, w = heapq.heappop(pq)
             pops += 1
             layer = dist.get(u, 0)  # 0 for seeds, 1 for first neighbors, etc.
@@ -140,7 +147,7 @@ def t1_propagate(ctx, state, text: str) -> T1Result:
             # Update layers_processed (count each depth beyond seeds once)
             if layer > 0 and layer > layers_processed:
                 layers_processed = layer
-                if layers_processed > iter_cap_layers:
+                if layers_processed > effective_iter_cap_layers:
                     # Do not expand this or deeper layers; skip expansion but keep popping remaining PQ
                     continue
         
@@ -156,7 +163,7 @@ def t1_propagate(ctx, state, text: str) -> T1Result:
                 if d > radius_cap:
                     radius_hits += 1
                     continue
-                if d > iter_cap_layers:
+                if d > effective_iter_cap_layers:
                     layer_hits += 1
                     continue
         
@@ -188,7 +195,7 @@ def t1_propagate(ctx, state, text: str) -> T1Result:
             deltas_for_gid.append({"op": "upsert_node", "id": nid})
         result_metrics = {
             "pops": pops,
-            "iters": min(layers_processed, iter_cap_layers),  # layers beyond seeds actually explored
+            "iters": min(layers_processed, effective_iter_cap_layers),  # layers beyond seeds actually explored
             "propagations": propagations,
             "layer_cap_hits": layer_hits,  # local increments already tracked globally
         }

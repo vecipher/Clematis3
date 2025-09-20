@@ -963,3 +963,26 @@ graph:
 **Next tracks (post-HS1, optional):**
 - M5A — LLM productization with deterministic fixtures.
 - M5B — Retrieval quality & eval (nDCG@k, hit@k) with richer GEL features.
+- (Note, we changes those to be tucked into M7 and M10, reverse order)
+
+## M5 — Scheduler (PR26 wiring, logging only; OFF by default)
+
+PR26 wires the scheduler at **stage boundaries** and writes `./.logs/scheduler.jsonl`. It injects immutable per-slice caps into `ctx.slice_budgets` (read by T1/T2/T3), evaluates yield reasons at boundaries (**WALL_MS > BUDGET_* > QUANTUM_EXCEEDED**), and logs them. **No preemption/rotation is enforced yet** (that’s PR27). With `scheduler.enabled: false`, behavior and logs remain byte-for-byte identical to pre-M5.
+
+**What changed**
+- Orchestrator: attaches `ctx.slice_budgets` + `slice_idx` when enabled; logs scheduler events after T1/T2/T3/T4/Apply via `append_jsonl("scheduler.jsonl", …)`.
+- Stages (pure, read-only caps):
+  - T1 respects `t1_iters` (depth) and `t1_pops` (queue); metrics include `iters`, `pops`.
+  - T2 uses only the first `t2_k` retrieved items this slice; metrics add `k_used`.
+  - T3 clamps plan ops to `t3_ops` this slice.
+- `turn.jsonl` gains `slice_idx`/`yielded` fields **only when enabled**.
+
+**Enable (example)**
+```yaml
+# configs/config.yaml
+scheduler:
+  enabled: true
+  policy: round_robin
+  quantum_ms: 20
+  budgets: { t1_iters: 50, t2_k: 64, t3_ops: 3, wall_ms: 200 }
+  fairness: { max_consecutive_turns: 1, aging_ms: 200 }  # logged only in PR26

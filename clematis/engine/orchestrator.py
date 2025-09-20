@@ -20,7 +20,77 @@ from .gel import (
     apply_promotion as gel_apply_promotion,
 )
 from ..io.log import append_jsonl
+
 from .cache import CacheManager
+
+# --- M5: Scheduler wiring (PR26 — helpers & scaffolding; yields gated) ---
+from typing import TypedDict
+try:
+    # Core from PR25 (pure, deterministic)
+    from clematis.scheduler import next_turn as _sched_next_turn, on_yield as _sched_on_yield
+except Exception:
+    _sched_next_turn = None
+    _sched_on_yield = None
+
+class _SliceCtx(TypedDict):
+    slice_idx: int
+    started_ms: int
+    budgets: Dict[str, int]
+    agent_id: str
+
+def _m5_enabled(ctx) -> bool:
+    cfg = _get_cfg(ctx)
+    s = (cfg.get("scheduler") if isinstance(cfg, dict) else {}) or {}
+    return bool(s.get("enabled", False))
+
+def _clock(ctx) -> int:
+    fn = getattr(ctx, "now_ms", None)
+    if callable(fn):
+        try:
+            return int(fn())
+        except Exception:
+            return 0
+    return 0
+
+def _derive_budgets(ctx) -> Dict[str, int]:
+    cfg = _get_cfg(ctx)
+    s = (cfg.get("scheduler") if isinstance(cfg, dict) else {}) or {}
+    b = (s.get("budgets") or {})
+    out: Dict[str, int] = {}
+    for k in ("t1_pops","t1_iters","t2_k","t3_ops","wall_ms"):
+        v = b.get(k)
+        if v is None:
+            continue
+        out[k] = int(v)
+    out["quantum_ms"] = int(s.get("quantum_ms", 20))
+    return out
+
+def _should_yield(slice_ctx: _SliceCtx, consumed: Dict[str,int]) -> str | None:
+    """
+    Decide if a slice should yield based on budgets and elapsed time.
+    Precedence: WALL_MS > BUDGET_* > QUANTUM_EXCEEDED.
+    NOTE: PR26 scaffolding only logs; enforcement (early return) can be added later.
+    """
+    budgets = slice_ctx["budgets"]
+    # elapsed since slice start
+    elapsed_ms = consumed.get("ms", 0)
+    # WALL first
+    if "wall_ms" in budgets and elapsed_ms >= budgets["wall_ms"]:
+        return "WALL_MS"
+    # Budgets
+    if budgets.get("t1_iters") is not None and consumed.get("t1_iters") == budgets.get("t1_iters"):
+        return "BUDGET_T1_ITERS"
+    if budgets.get("t1_pops") is not None and consumed.get("t1_pops") == budgets.get("t1_pops"):
+        return "BUDGET_T1_POPS"
+    if budgets.get("t2_k") is not None and consumed.get("t2_k") == budgets.get("t2_k"):
+        return "BUDGET_T2_K"
+    if budgets.get("t3_ops") is not None and consumed.get("t3_ops") == budgets.get("t3_ops"):
+        return "BUDGET_T3_OPS"
+    # Quantum last
+    if elapsed_ms >= budgets.get("quantum_ms", 20):
+        return "QUANTUM_EXCEEDED"
+    return None
+
 
 
 # --- Config accessor for harmonized config usage ---
@@ -52,6 +122,39 @@ class Orchestrator:
         now = getattr(ctx, "now", None)
 
         total_t0 = time.perf_counter()
+
+        # --- M5 slice init (PR26 scaffolding) ---
+        sched_enabled = _m5_enabled(ctx)
+        slice_ctx: _SliceCtx | None = None
+        if sched_enabled:
+            budgets = _derive_budgets(ctx)
+            # If PR25 core is available, record the pick (no enforcement here).
+            if _sched_next_turn is not None:
+                try:
+                    policy = str((_get_cfg(ctx).get("scheduler") or {}).get("policy", "round_robin"))
+                    fairness = (_get_cfg(ctx).get("scheduler") or {}).get("fairness", {}) or {}
+                    # We don't maintain a global sched state here; external loop owns it.
+                    # This call is only to keep logs consistent with policy naming.
+                    _ = policy, fairness  # placeholders to avoid lints
+                except Exception:
+                    pass
+            # Attach immutable per-slice budgets to ctx for stages to read.
+            slice_idx_prev = int(getattr(ctx, "slice_idx", 0) or 0)
+            slice_ctx = {
+                "slice_idx": slice_idx_prev + 1,
+                "started_ms": _clock(ctx),
+                "budgets": budgets,
+                "agent_id": agent_id,
+            }
+            setattr(ctx, "slice_idx", slice_ctx["slice_idx"])
+            setattr(ctx, "slice_budgets", budgets)
+        else:
+            # Ensure stages see no scheduler caps when disabled
+            if hasattr(ctx, "slice_budgets"):
+                try:
+                    delattr(ctx, "slice_budgets")
+                except Exception:
+                    setattr(ctx, "slice_budgets", None)
 
         # --- Boot hook: load latest snapshot once per process ---
         boot_loaded = state.get("_boot_loaded", False) if isinstance(state, dict) else getattr(state, "_boot_loaded", False)
@@ -97,6 +200,36 @@ class Orchestrator:
                 **({"now": now} if now else {}),
             },
         )
+        # --- M5 boundary check after T1 ---
+        if slice_ctx is not None:
+            consumed = {
+                "ms": int(round((time.perf_counter() - total_t0) * 1000.0)),
+            }
+            # Map T1 metrics if present
+            try:
+                if isinstance(t1.metrics, dict):
+                    if t1.metrics.get("iters") is not None:
+                        consumed["t1_iters"] = int(t1.metrics.get("iters"))
+                    if t1.metrics.get("pops") is not None:
+                        consumed["t1_pops"] = int(t1.metrics.get("pops"))
+            except Exception:
+                pass
+            reason = _should_yield(slice_ctx, consumed)
+            if reason:
+                append_jsonl("scheduler.jsonl", {
+                    "turn": turn_id,
+                    "slice": slice_ctx["slice_idx"],
+                    "agent": agent_id,
+                    "policy": (_get_cfg(ctx).get("scheduler") or {}).get("policy", "round_robin"),
+                    "reason": reason,
+                    "stage_end": "T1",
+                    "quantum_ms": slice_ctx["budgets"].get("quantum_ms"),
+                    "wall_ms": slice_ctx["budgets"].get("wall_ms"),
+                    "budgets": {k: v for k, v in slice_ctx["budgets"].items() if k != "quantum_ms"},
+                    "consumed": consumed,
+                    "queued": [],  # external loop owns the queue
+                    "ms": 0,
+                })
 
         # --- T2 (with version-aware cache) ---
         t0 = time.perf_counter()
@@ -132,6 +265,33 @@ class Orchestrator:
                 **({"now": now} if now else {}),
             },
         )
+        # --- M5 boundary check after T2 ---
+        if slice_ctx is not None:
+            consumed = {
+                "ms": int(round((time.perf_counter() - total_t0) * 1000.0)),
+            }
+            try:
+                m = getattr(t2, "metrics", {}) or {}
+                if m.get("k_used") is not None:
+                    consumed["t2_k"] = int(m.get("k_used"))
+            except Exception:
+                pass
+            reason = _should_yield(slice_ctx, consumed)
+            if reason:
+                append_jsonl("scheduler.jsonl", {
+                    "turn": turn_id,
+                    "slice": slice_ctx["slice_idx"],
+                    "agent": agent_id,
+                    "policy": (_get_cfg(ctx).get("scheduler") or {}).get("policy", "round_robin"),
+                    "reason": reason,
+                    "stage_end": "T2",
+                    "quantum_ms": slice_ctx["budgets"].get("quantum_ms"),
+                    "wall_ms": slice_ctx["budgets"].get("wall_ms"),
+                    "budgets": {k: v for k, v in slice_ctx["budgets"].items() if k != "quantum_ms"},
+                    "consumed": consumed,
+                    "queued": [],
+                    "ms": 0,
+                })
 
         # --- GEL observe (optional; gated by graph.enabled) ---
         graph_cfg_all = (_get_cfg(ctx).get("graph") if isinstance(_get_cfg(ctx), dict) else {}) or {}
@@ -167,6 +327,32 @@ class Orchestrator:
         else:
             plan = deliberate(bundle)
         plan_ms = round((time.perf_counter() - t0) * 1000.0, 3)
+        # --- M5 boundary check after T3 (plan) ---
+        if slice_ctx is not None:
+            consumed = {
+                "ms": int(round((time.perf_counter() - total_t0) * 1000.0)),
+            }
+            try:
+                ops_count = sum(1 for _ in (getattr(plan, "ops", []) or []))
+                consumed["t3_ops"] = int(ops_count)
+            except Exception:
+                pass
+            reason = _should_yield(slice_ctx, consumed)
+            if reason:
+                append_jsonl("scheduler.jsonl", {
+                    "turn": turn_id,
+                    "slice": slice_ctx["slice_idx"],
+                    "agent": agent_id,
+                    "policy": (_get_cfg(ctx).get("scheduler") or {}).get("policy", "round_robin"),
+                    "reason": reason,
+                    "stage_end": "T3",
+                    "quantum_ms": slice_ctx["budgets"].get("quantum_ms"),
+                    "wall_ms": slice_ctx["budgets"].get("wall_ms"),
+                    "budgets": {k: v for k, v in slice_ctx["budgets"].items() if k != "quantum_ms"},
+                    "consumed": consumed,
+                    "queued": [],
+                    "ms": 0,
+                })
 
         # RAG: allow at most one refinement if both requested and enabled by config
         cfg = _get_cfg(ctx)
@@ -326,6 +512,27 @@ class Orchestrator:
                     **({"now": now} if now else {}),
                 },
             )
+            # --- M5 boundary check after T4 ---
+            if slice_ctx is not None:
+                consumed = {
+                    "ms": int(round((time.perf_counter() - total_t0) * 1000.0)),
+                }
+                reason = _should_yield(slice_ctx, consumed)
+                if reason:
+                    append_jsonl("scheduler.jsonl", {
+                        "turn": turn_id,
+                        "slice": slice_ctx["slice_idx"],
+                        "agent": agent_id,
+                        "policy": (_get_cfg(ctx).get("scheduler") or {}).get("policy", "round_robin"),
+                        "reason": reason,
+                        "stage_end": "T4",
+                        "quantum_ms": slice_ctx["budgets"].get("quantum_ms"),
+                        "wall_ms": slice_ctx["budgets"].get("wall_ms"),
+                        "budgets": {k: v for k, v in slice_ctx["budgets"].items() if k != "quantum_ms"},
+                        "consumed": consumed,
+                        "queued": [],
+                        "ms": 0,
+                    })
             # --- GEL decay tick (optional; run before Apply so snapshot includes decay) ---
             graph_cfg_all2 = (_get_cfg(ctx).get("graph") if isinstance(_get_cfg(ctx), dict) else {}) or {}
             graph_enabled2 = bool(graph_cfg_all2.get("enabled", False)) if isinstance(graph_cfg_all2, dict) else False
@@ -425,6 +632,27 @@ class Orchestrator:
                     **({"now": now} if now else {}),
                 },
             )
+            # --- M5 boundary check after Apply ---
+            if slice_ctx is not None:
+                consumed = {
+                    "ms": int(round((time.perf_counter() - total_t0) * 1000.0)),
+                }
+                reason = _should_yield(slice_ctx, consumed)
+                if reason:
+                    append_jsonl("scheduler.jsonl", {
+                        "turn": turn_id,
+                        "slice": slice_ctx["slice_idx"],
+                        "agent": agent_id,
+                        "policy": (_get_cfg(ctx).get("scheduler") or {}).get("policy", "round_robin"),
+                        "reason": reason,
+                        "stage_end": "Apply",
+                        "quantum_ms": slice_ctx["budgets"].get("quantum_ms"),
+                        "wall_ms": slice_ctx["budgets"].get("wall_ms"),
+                        "budgets": {k: v for k, v in slice_ctx["budgets"].items() if k != "quantum_ms"},
+                        "consumed": consumed,
+                        "queued": [],
+                        "ms": 0,
+                    })
         else:
             # Bypassed: provide inert placeholders; no t4/apply logs
             t4_ms = 0.0
@@ -457,6 +685,10 @@ class Orchestrator:
                     "approved": len(getattr(t4, "approved_deltas", [])),
                     "rejected": len(getattr(t4, "rejected_ops", [])),
                 },
+                **({
+                    "slice_idx": (slice_ctx["slice_idx"] if slice_ctx is not None else None),
+                    "yielded": False,
+                } if slice_ctx is not None else {}),
                 **({"now": now} if now else {}),
             },
         )

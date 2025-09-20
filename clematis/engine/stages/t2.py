@@ -281,12 +281,28 @@ def t2_semantic(ctx, state, text: str, t1) -> T2Result:
         hybrid_used = False
         hybrid_info = {}
 
+    # --- M5 scheduler slice caps (use-only clamp) ---
+    # We cap how many retrieval hits are **used** downstream in this slice (not how many are fetched).
+    # The full `retrieved` list is kept for metrics/logging and possible caching.
+    caps = getattr(ctx, "slice_budgets", None) or {}
+    _t2_cap = caps.get("t2_k")
+    if _t2_cap is None:
+        used_hits = retrieved
+    else:
+        try:
+            _cap_val = int(_t2_cap)
+            if _cap_val < 0:
+                _cap_val = 0
+        except Exception:
+            _cap_val = 0
+        used_hits = retrieved[:_cap_val]
+
     # Residual propagation: map episode texts back to node labels
     residual_cap = int(cfg_t2.get("residual_cap_per_turn", 32))
     label_map = _build_label_map(state)
     chosen_nodes: List[str] = []
     seen_nodes = set()
-    for ep in retrieved:
+    for ep in used_hits:
         t_low = (ep.text or "").lower()
         # match any label substring inside episode text
         for lb, nid in label_map.items():
@@ -315,7 +331,8 @@ def t2_semantic(ctx, state, text: str, t1) -> T2Result:
     metrics = {
         "tier_sequence": tiers,
         "k_returned": len(retrieved),
-        "k_used": len(graph_deltas_residual),
+        "k_used": len(used_hits),
+        "k_residual": len(graph_deltas_residual),
         "sim_stats": sim_stats,
         "score_stats": score_stats,
         "owner_scope": str(cfg_t2.get("owner_scope", "any")).lower(),
