@@ -30,13 +30,13 @@ cat path/to/your.yaml | python3 scripts/validate_config.py -
 ```
 
 **Expected success output**:
-```
+```text
 OK
 t4.cache: ttl_sec=600 namespaces=['t2:semantic'] cache_bust_mode=on-apply
 ```
 
 **On error** you get explicit field paths, e.g.:
-```
+```text
 t4.weight_min/weight_max must satisfy weight_min < weight_max
 t2.k_retrieval must be >= 1
 ```
@@ -423,11 +423,86 @@ t4:
     ttl_sec: 600
 ```
 
+
 ### Caches (two layers in M4)
 - **Stage‑level** LRU caches in T1/T2 (legacy, per‑stage knobs; `ttl_s`).
 - **Orchestrator‑level** CacheManager around T2 (version‑aware, invalidated on Apply; `ttl_sec`).
 This is intentional for M4; consolidation is a later follow‑up.
 Use the validator to check TTLs and sizes across both layers quickly.
+
+#### Cache coherency: end-to-end walkthrough
+
+This shows how the **orchestrator cache** (version‑aware, wraps T2) and **stage caches** (T1/T2 LRUs) behave across turns.
+
+**Pre‑reqs (config):**
+- `t2.cache.enabled: true`
+- `t4.cache.enabled: true`
+- `t4.cache.namespaces: ["t2:semantic"]`
+- `t4.cache_bust_mode: on-apply`
+- `t4.enabled: true` (so Apply runs and bumps `version_etag`)
+- Optional: `t1.cache.ttl_s` and `t2.cache.ttl_s` > 0
+
+> Tip: run the validator first:
+> ```bash
+> python3 scripts/validate_config.py
+> ```
+> You should see a line like: `t4.cache: ttl_sec=... namespaces=['t2:semantic'] cache_bust_mode=on-apply`.
+
+**Reset environment (fresh logs & snapshots):**
+```bash
+rm -rf ./.logs ./.data/snapshots
+mkdir -p ./.logs
+```
+
+**1) Cold run ⇒ MISS**
+```bash
+python3 scripts/run_demo.py
+# Inspect the latest retrieval log line (MISS expected)
+tail -n 1 ./.logs/t2.jsonl | python3 -c 'import sys,json;print(json.loads(sys.stdin.read()).get("cache_hit"))'
+# → False
+```
+
+**2) Warm run (same input, same version) ⇒ HIT**
+```bash
+python3 scripts/run_demo.py
+# Inspect the latest retrieval log line (HIT expected)
+tail -n 1 ./.logs/t2.jsonl | python3 -c 'import sys,json;print(json.loads(sys.stdin.read()).get("cache_hit"))'
+# → True
+```
+
+**3) Apply occurs (version bump) ⇒ orchestrator invalidates**
+When `t4.enabled=true` and `snapshot_every_n_turns ≥ 1`, Apply runs and bumps `version_etag`. Check `apply.jsonl`:
+```bash
+tail -n 1 ./.logs/apply.jsonl | python3 -c 'import sys,json;d=json.loads(sys.stdin.read());print(d.get("version_etag"), d.get("cache_invalidations"))'
+# → v<N+1> <positive_int>
+```
+
+**4) Next run (same input, new version) ⇒ MISS again**
+```bash
+python3 scripts/run_demo.py
+tail -n 1 ./.logs/t2.jsonl | python3 -c 'import sys,json;print(json.loads(sys.stdin.read()).get("cache_hit"))'
+# → False
+```
+
+**What’s happening**
+- The **orchestrator cache** wraps T2 and keys entries with `(version_etag, input)`. After Apply (version bump), previously cached `(vN, input)` can’t satisfy `(vN+1, input)` ⇒ MISS.
+- **Stage caches** (T1/T2) are independent TTL‑based LRUs. They remain deterministic but can make TTL expectations feel “sticky.” Orchestrator invalidations do **not** forcibly clear stage caches; they prevent reuse of stale *orchestrator‑level* results.
+
+**Variations to try**
+- **Kill‑switch:** set `t4.enabled=false` → no Apply; the version doesn’t change; consecutive runs remain HIT at the orchestrator layer.
+- **No cache bust:** set `t4.cache_bust_mode: none` → orchestrator keys still change (MISS after version bump), but stage caches may still show their own hits.
+- **TTL sensitivity:** set `t2.cache.ttl_s=0` → stage cache effectively disabled; only orchestrator cache HIT/MISS is visible.
+
+**Troubleshooting**
+- Seeing HIT after Apply? Check `t4.cache_bust_mode` (must be `on-apply`) and confirm `apply.jsonl.cache_invalidations > 0`.
+- Seeing perpetual MISS? Ensure `t2.cache.enabled=true` and that inputs are identical across runs.
+- Mixed signals? Remember there are **two** cache layers:
+  - `.logs/t2.jsonl.cache_hit` reflects the stage’s internal cache.
+  - The orchestrator wrapper uses the version‑aware key; MISS after version bump is expected.
+
+**Invariants**
+- Identical inputs + identical `version_etag` ⇒ identical outputs and HIT on second run.
+- After Apply with `on-apply` busting, the *next* identical input run yields MISS due to `version_etag` change.
 
 ## Stage semantics
 
@@ -536,10 +611,8 @@ Use either key in your YAML; the validator will normalize to the canonical form 
 |  | `max_entries` | int ≥ 0 |  |
 |  | `ttl_sec` | int ≥ 0 | `ttl_s` alias accepted |
 | `t4` | `enabled` | bool | kill switch (bypasses T4+Apply) |
-|  | `delta_norm_cap_l2` | number 
-> 0 |  |
-|  | `novelty_cap_per_node` | number 
-> 0 |  |
+|  | `delta_norm_cap_l2` | number > 0 |  |
+|  | `novelty_cap_per_node` | number > 0 |  |
 |  | `churn_cap_edges` | int ≥ 0 |  |
 |  | `cooldowns` | map[str→int ≥ 0] | keys like `EditGraph`, `CreateGraph` |
 |  | `weight_min`, `weight_max` | −1.0 … 1.0 and `min < max` | clamped in Apply |
@@ -657,23 +730,41 @@ Add deterministic property tests for T4 plus opt-in performance checks and a tin
 Property tests run in the normal suite:
 ```bash
 pytest -q tests/test_t4_property.py
+```
 
-Perf tests are opt-in to avoid CI flakiness. Enable via env + mark:
+Perf tests are **opt-in** to avoid CI flakiness. Enable via env + mark:
+```bash
 RUN_PERF=1 pytest -q -m perf tests/test_perf_guardrails.py
+```
+If you see a warning about an unknown `perf` mark, register it once in your test config.
+- **pytest.ini**
+  ```ini
+  [pytest]
+  markers =
+      perf: opt-in performance tests
+  ```
+- **or pyproject.toml**
+  ```toml
+  [tool.pytest.ini_options]
+  markers = [
+    "perf: opt-in performance tests",
+  ]
+  ```
 
-Microbench CLI
-
+### Microbench CLI
 Run synthetic workloads through the T4 meta-filter and print timing stats (median/p95) and approvals.
+```bash
 python3 scripts/bench_t4.py                       # defaults: --num 10000 --runs 5 --seed 1337
 python3 scripts/bench_t4.py --num 20000 --runs 5
 python3 scripts/bench_t4.py --num 8000 --runs 7 --json  # machine-readable output
-
-typical output:
+```
+**Typical output:**
+```text
 N=10000 runs=5 seed=1337  l2=1.5 novelty=0.3 churn=64
 median=42.1ms  p95=44.3ms  min=40.6ms  max=45.0ms  thr≈237800.0 ops/s
 approved median/min/max = 64/64/64
 reasons total: CHURN_CAP_HIT:49312, NOVELTY_SPIKE:...
-
+```
 Notes:
-	•	Workload is deterministic per seed; change --seed to vary.
-	•	Throughput figures are indicative and machine-dependent; use for relative checks only.
+- Workload is deterministic per seed; change `--seed` to vary.
+- Throughput figures are indicative and machine-dependent; use for relative checks only.
