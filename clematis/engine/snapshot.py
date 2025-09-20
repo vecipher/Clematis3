@@ -449,12 +449,50 @@ def _sanitize_gel_for_write(gel: Any, ctx) -> Dict[str, Any]:
     except Exception:
         pass
 
-    return {"nodes": nodes_out, "edges": edges_out}
+    # Meta: preserve if present; otherwise initialize deterministic containers
+    meta_in = {}
+    try:
+        if isinstance(gel, dict):
+            meta_in = gel.get("meta") or {}
+    except Exception:
+        meta_in = {}
+    meta_out: Dict[str, Any] = {}
+    # carry known fields if reasonably shaped
+    for k in ("merges", "splits", "promotions"):
+        v = meta_in.get(k)
+        if isinstance(v, list):
+            meta_out[k] = v
+        else:
+            meta_out[k] = []
+    # counters
+    try:
+        ccount = int(meta_in.get("concept_nodes_count", 0))
+    except Exception:
+        ccount = 0
+    meta_out["concept_nodes_count"] = ccount
+    # always include edges_count for inspector/health
+    meta_out["edges_count"] = len(edges_out)
+    # bump meta schema to reflect v1.1 graph payload
+    meta_out["schema"] = "v1.1"
+
+    return {"nodes": nodes_out, "edges": edges_out, "meta": meta_out}
 
 
 def _sanitize_gel_for_load(gel: Any, ctx) -> Dict[str, Any]:
-    # For now, same rules as write path
-    return _sanitize_gel_for_write(gel, ctx)
+    # For PR24, we preserve meta as well. Reuse write-path normalization and merge meta if provided.
+    out = _sanitize_gel_for_write(gel, ctx)
+    # If input had a meta dict, overlay non-list counters (e.g., last_update) without breaking our defaults
+    try:
+        meta_in = (gel or {}).get("meta") if isinstance(gel, dict) else None
+        if isinstance(meta_in, dict):
+            meta = out.get("meta", {})
+            # carry forward last_update if present in legacy summaries
+            if "last_update" in meta_in and meta.get("last_update") is None:
+                meta["last_update"] = meta_in.get("last_update")
+            out["meta"] = meta
+    except Exception:
+        pass
+    return out
 
 
 def _set_state_field(state, key: str, val: Any) -> None:
@@ -506,7 +544,7 @@ def write_snapshot(ctx, state, version_etag: str, applied: int = 0, deltas=None)
             graph_state = state.get("graph") or state.get("gel")
         else:
             graph_state = getattr(state, "graph", None) or getattr(state, "gel", None)
-        payload["graph_schema_version"] = "v1"
+        payload["graph_schema_version"] = "v1.1"
         gel_out = _sanitize_gel_for_write(graph_state or {"nodes": {}, "edges": {}}, ctx)
         # Normalize edge keys to canonical "src→dst" order (unicode arrow), drop rel from key
         try:
@@ -526,6 +564,14 @@ def write_snapshot(ctx, state, version_etag: str, applied: int = 0, deltas=None)
                     else:
                         new_edges[k] = rec
                 gel_out["edges"] = new_edges
+                # keep meta edges_count in sync after rekeying
+                try:
+                    meta = gel_out.setdefault("meta", {})
+                    meta["edges_count"] = len(new_edges)
+                    if "schema" not in meta:
+                        meta["schema"] = "v1.1"
+                except Exception:
+                    pass
         except Exception:
             pass
         payload["gel"] = gel_out
@@ -545,8 +591,8 @@ def write_snapshot(ctx, state, version_etag: str, applied: int = 0, deltas=None)
         }
     except Exception:
         # Ensure keys exist even if sanitization fails
-        payload.setdefault("graph_schema_version", "v1")
-        payload.setdefault("gel", {"nodes": {}, "edges": {}})
+        payload.setdefault("graph_schema_version", "v1.1")
+        payload.setdefault("gel", {"nodes": {}, "edges": {}, "meta": {"schema": "v1.1", "merges": [], "splits": [], "promotions": [], "concept_nodes_count": 0, "edges_count": 0}})
         payload.setdefault("graph", {"nodes_count": None, "edges_count": None, "meta": {"last_update": None}})
 
     with open(path, "w", encoding="utf-8") as f:
@@ -566,8 +612,9 @@ def load_latest_snapshot(ctx, state) -> Dict[str, Any]:
     path = _pick_latest_snapshot_path(dir_)
 
     # Ensure graph containers exist on state even if nothing loads
-    _set_state_field(state, "graph", {"nodes": {}, "edges": {}})
-    _set_state_field(state, "gel", {"nodes": {}, "edges": {}})
+    empty_meta = {"schema": "v1.1", "merges": [], "splits": [], "promotions": [], "concept_nodes_count": 0, "edges_count": 0}
+    _set_state_field(state, "graph", {"nodes": {}, "edges": {}, "meta": dict(empty_meta)})
+    _set_state_field(state, "gel", {"nodes": {}, "edges": {}, "meta": dict(empty_meta)})
 
     if not path or not os.path.isfile(path):
         return {"loaded": False, "path": None, "version_etag": None}

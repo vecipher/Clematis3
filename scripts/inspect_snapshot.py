@@ -38,38 +38,72 @@ def main(argv=None) -> int:
         print(f"No snapshot found in {args.dir}", file=sys.stderr)
         return 2
 
-    # Enrich counts from the snapshot file itself if missing
+    # Enrich from the snapshot file: nodes/edges, graph schema, and GEL meta counts (PR24)
     try:
-        if info.get("nodes") is None or info.get("edges") is None:
-            with open(info["path"], "r", encoding="utf-8") as fh:
-                payload = json.load(fh)
-            gel = payload.get("gel") or {}
-            graph_summary = payload.get("graph") or {}
-            # Prefer full GEL structure
-            nodes_cnt = None
-            edges_cnt = None
-            if isinstance(gel, dict):
-                nmap = gel.get("nodes")
-                emap = gel.get("edges")
-                if isinstance(nmap, dict):
-                    nodes_cnt = len(nmap)
-                if isinstance(emap, dict):
-                    edges_cnt = len(emap)
-            # Fallback to compact graph summary
-            if nodes_cnt is None:
-                nodes_cnt = graph_summary.get("nodes_count")
-            if edges_cnt is None:
-                edges_cnt = graph_summary.get("edges_count")
-            # Write back if we found anything
+        with open(info["path"], "r", encoding="utf-8") as fh:
+            payload = json.load(fh)
+        gel = payload.get("gel") or {}
+        graph_summary = payload.get("graph") or {}
+
+        # Graph/GEL schema version
+        gsv = payload.get("graph_schema_version")
+        if gsv:
+            info["graph_schema_version"] = gsv
+
+        # Prefer full GEL structure for counts
+        gel_nodes_cnt = None
+        gel_edges_cnt = None
+        if isinstance(gel, dict):
+            nmap = gel.get("nodes")
+            emap = gel.get("edges")
+            if isinstance(nmap, dict):
+                gel_nodes_cnt = len(nmap)
+            if isinstance(emap, dict):
+                gel_edges_cnt = len(emap)
+            meta = gel.get("meta") or {}
+            if isinstance(meta, dict):
+                merges = meta.get("merges")
+                splits = meta.get("splits")
+                promos = meta.get("promotions")
+                concepts = meta.get("concept_nodes_count")
+                mschema = meta.get("schema")
+                if isinstance(merges, list):
+                    info["gel_merges"] = len(merges)
+                if isinstance(splits, list):
+                    info["gel_splits"] = len(splits)
+                if isinstance(promos, list):
+                    info["gel_promotions"] = len(promos)
+                if isinstance(concepts, int):
+                    info["gel_concepts"] = concepts
+                if isinstance(mschema, str):
+                    info["gel_meta_schema"] = mschema
+                # If edges_count present in meta, prefer it for gel_edges when we don't have a dict
+                if gel_edges_cnt is None:
+                    try:
+                        ec_meta = int(meta.get("edges_count"))
+                        gel_edges_cnt = ec_meta
+                    except Exception:
+                        pass
+
+        # Fallback to compact graph summary
+        if gel_nodes_cnt is None:
+            nodes_cnt = graph_summary.get("nodes_count")
             if nodes_cnt is not None:
-                info["nodes"] = nodes_cnt
+                gel_nodes_cnt = nodes_cnt
+        if gel_edges_cnt is None:
+            edges_cnt = graph_summary.get("edges_count")
             if edges_cnt is not None:
-                info["edges"] = edges_cnt
-            # Also expose explicit GEL counts (even if nodes/edges were already set)
-            if nodes_cnt is not None:
-                info["gel_nodes"] = nodes_cnt
-            if edges_cnt is not None:
-                info["gel_edges"] = edges_cnt
+                gel_edges_cnt = edges_cnt
+
+        # Write back if we found anything, without clobbering existing explicit values
+        if info.get("nodes") is None and gel_nodes_cnt is not None:
+            info["nodes"] = gel_nodes_cnt
+        if info.get("edges") is None and gel_edges_cnt is not None:
+            info["edges"] = gel_edges_cnt
+        if gel_nodes_cnt is not None:
+            info["gel_nodes"] = gel_nodes_cnt
+        if gel_edges_cnt is not None:
+            info["gel_edges"] = gel_edges_cnt
     except Exception:
         pass
 
@@ -80,10 +114,27 @@ def main(argv=None) -> int:
     caps = info.get("caps") or {}
     print(f"Snapshot:      {info['path']}")
     print(f"schema_version:{info['schema_version']}")
+    if info.get("graph_schema_version"):
+        print(f"graph schema :{info['graph_schema_version']}")
     print(f"version_etag  :{info['version_etag']}")
     print(f"nodes/edges   :{info['nodes']} / {info['edges']}")
-    if info.get("gel_edges") is not None:
-        print(f"gel edges     :{info['gel_edges']}")
+    if info.get("gel_nodes") is not None or info.get("gel_edges") is not None:
+        print(
+            f"gel nodes/edges:{info.get('gel_nodes')} / {info.get('gel_edges')}"
+        )
+    if (
+        info.get("gel_merges") is not None
+        or info.get("gel_splits") is not None
+        or info.get("gel_promotions") is not None
+        or info.get("gel_concepts") is not None
+    ):
+        print(
+            "gel meta      : "
+            f"merges={info.get('gel_merges')} "
+            f"splits={info.get('gel_splits')} "
+            f"promotions={info.get('gel_promotions')} "
+            f"concepts={info.get('gel_concepts')}"
+        )
     print(f"last_update   :{info['last_update']}")
     print(
         "caps          : "

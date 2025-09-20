@@ -121,7 +121,7 @@ DEFAULTS: Dict[str, Any] = {
             "ttl_sec": 600,
         },
     },
-    # GEL defaults (contracts + PR22)
+    # GEL defaults (contracts + PR22, PR24)
     "graph": {
         "enabled": False,
         "coactivation_threshold": 0.20,
@@ -137,9 +137,27 @@ DEFAULTS: Dict[str, Any] = {
             "half_life_turns": 200,
             "floor": 0.0,
         },
-        # tolerated by contracts (no behavior in PR22)
-        "merge": {"enabled": False, "min_size": 3},
-        "split": {"enabled": False},
+        # PR24: richer defaults for contracts
+        "merge": {
+            "enabled": False,
+            "min_size": 3,
+            "min_avg_w": 0.20,
+            "max_diameter": 2,
+            "cap_per_turn": 4,
+        },
+        "split": {
+            "enabled": False,
+            "weak_edge_thresh": 0.05,
+            "min_component_size": 2,
+            "cap_per_turn": 4,
+        },
+        "promotion": {
+            "enabled": False,
+            "label_mode": "lexmin",     # lexmin | concat_k
+            "topk_label_ids": 3,
+            "attach_weight": 0.5,        # [-1,1]
+            "cap_per_turn": 2,
+        },
     },
 }
 
@@ -172,11 +190,12 @@ ALLOWED_T2_HYBRID = {
     "lambda_graph", "damping", "degree_norm", "max_bonus", "k_max",
 }
 
-ALLOWED_GRAPH = {"enabled", "coactivation_threshold", "observe_top_k", "pair_cap_per_obs", "update", "decay", "merge", "split"}
+ALLOWED_GRAPH = {"enabled", "coactivation_threshold", "observe_top_k", "pair_cap_per_obs", "update", "decay", "merge", "split", "promotion"}
 ALLOWED_GRAPH_UPDATE = {"mode", "alpha", "clamp_min", "clamp_max"}
 ALLOWED_GRAPH_DECAY = {"half_life_turns", "floor"}
-ALLOWED_GRAPH_MERGE = {"enabled", "min_size"}
-ALLOWED_GRAPH_SPLIT = {"enabled"}
+ALLOWED_GRAPH_MERGE = {"enabled", "min_size", "min_avg_w", "max_diameter", "cap_per_turn"}
+ALLOWED_GRAPH_SPLIT = {"enabled", "weak_edge_thresh", "min_component_size", "cap_per_turn"}
+ALLOWED_GRAPH_PROMOTION = {"enabled", "label_mode", "topk_label_ids", "attach_weight", "cap_per_turn"}
 
 def _lev(a: str, b: str) -> int:
     """Tiny Levenshtein distance (edit distance) for did-you-mean suggestions."""
@@ -248,6 +267,7 @@ def validate_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
     raw_graph_decay = _ensure_dict(raw_graph.get("decay"))
     raw_graph_merge = _ensure_dict(raw_graph.get("merge"))
     raw_graph_split = _ensure_dict(raw_graph.get("split"))
+    raw_graph_promotion = _ensure_dict(raw_graph.get("promotion"))
 
     # Unknown key detection (top-level and per-section), with suggestions
     for k in cfg_in.keys():
@@ -342,6 +362,12 @@ def validate_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
             sug = _suggest_key(k, ALLOWED_GRAPH_SPLIT)
             hint = f" (did you mean '{sug}')" if sug else ""
             _err(errors, f"graph.split.{k}", f"unknown key{hint}")
+
+    for k in raw_graph_promotion.keys():
+        if k not in ALLOWED_GRAPH_PROMOTION:
+            sug = _suggest_key(k, ALLOWED_GRAPH_PROMOTION)
+            hint = f" (did you mean '{sug}')" if sug else ""
+            _err(errors, f"graph.promotion.{k}", f"unknown key{hint}")
 
     merged = _deep_merge(cfg_in, DEFAULTS)
 
@@ -597,20 +623,81 @@ def validate_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
         pass
     g["decay"] = gd
 
-    # Merge & split blocks (tolerated for contracts; minimal checks)
+    # Merge block (PR24)
     gm = _ensure_subdict(g, "merge")
-    if "enabled" in gm:
-        gm["enabled"] = _coerce_bool(gm.get("enabled"))
+    gm["enabled"] = _coerce_bool(gm.get("enabled", False))
     if "min_size" in gm:
         gm["min_size"] = _coerce_int(gm.get("min_size"))
         if gm["min_size"] < 2:
             _err(errors, "graph.merge.min_size", "must be >= 2")
+    else:
+        gm["min_size"] = 3
+    if "min_avg_w" in gm:
+        gm["min_avg_w"] = _coerce_float(gm.get("min_avg_w"))
+        if not (0.0 <= gm["min_avg_w"] <= 1.0):
+            _err(errors, "graph.merge.min_avg_w", "must be in [0, 1]")
+    else:
+        gm["min_avg_w"] = 0.20
+    if "max_diameter" in gm:
+        gm["max_diameter"] = _coerce_int(gm.get("max_diameter"))
+        if gm["max_diameter"] < 1:
+            _err(errors, "graph.merge.max_diameter", "must be >= 1")
+    else:
+        gm["max_diameter"] = 2
+    if "cap_per_turn" in gm:
+        gm["cap_per_turn"] = _coerce_int(gm.get("cap_per_turn"))
+        if gm["cap_per_turn"] < 0:
+            _err(errors, "graph.merge.cap_per_turn", "must be >= 0")
+    else:
+        gm["cap_per_turn"] = 4
     g["merge"] = gm
 
+    # Split block (PR24)
     gs = _ensure_subdict(g, "split")
-    if "enabled" in gs:
-        gs["enabled"] = _coerce_bool(gs.get("enabled"))
+    gs["enabled"] = _coerce_bool(gs.get("enabled", False))
+    if "weak_edge_thresh" in gs:
+        gs["weak_edge_thresh"] = _coerce_float(gs.get("weak_edge_thresh"))
+        if not (0.0 <= gs["weak_edge_thresh"] <= 1.0):
+            _err(errors, "graph.split.weak_edge_thresh", "must be in [0, 1]")
+    else:
+        gs["weak_edge_thresh"] = 0.05
+    if "min_component_size" in gs:
+        gs["min_component_size"] = _coerce_int(gs.get("min_component_size"))
+        if gs["min_component_size"] < 2:
+            _err(errors, "graph.split.min_component_size", "must be >= 2")
+    else:
+        gs["min_component_size"] = 2
+    if "cap_per_turn" in gs:
+        gs["cap_per_turn"] = _coerce_int(gs.get("cap_per_turn"))
+        if gs["cap_per_turn"] < 0:
+            _err(errors, "graph.split.cap_per_turn", "must be >= 0")
+    else:
+        gs["cap_per_turn"] = 4
+    # Cross-field sanity: if both thresholds present, weak_edge_thresh should not exceed merge.min_avg_w
+    try:
+        if gs["weak_edge_thresh"] > gm["min_avg_w"]:
+            _err(errors, "graph.split.weak_edge_thresh", "should be <= graph.merge.min_avg_w for consistency")
+    except Exception:
+        pass
     g["split"] = gs
+
+    # Promotion block (PR24)
+    gp = _ensure_subdict(g, "promotion")
+    gp["enabled"] = _coerce_bool(gp.get("enabled", False))
+    mode = str(gp.get("label_mode", "lexmin"))
+    if mode not in {"lexmin", "concat_k"}:
+        _err(errors, "graph.promotion.label_mode", "must be one of {lexmin,concat_k}")
+    gp["label_mode"] = mode
+    gp["topk_label_ids"] = _coerce_int(gp.get("topk_label_ids", 3))
+    if gp["topk_label_ids"] < 1:
+        _err(errors, "graph.promotion.topk_label_ids", "must be >= 1")
+    gp["attach_weight"] = _coerce_float(gp.get("attach_weight", 0.5))
+    if not (-1.0 <= gp["attach_weight"] <= 1.0):
+        _err(errors, "graph.promotion.attach_weight", "must be in [-1, 1]")
+    gp["cap_per_turn"] = _coerce_int(gp.get("cap_per_turn", 2))
+    if gp["cap_per_turn"] < 0:
+        _err(errors, "graph.promotion.cap_per_turn", "must be >= 0")
+    g["promotion"] = gp
 
     # If we collected errors, raise a single ValueError with all messages (stable order)
     if errors:

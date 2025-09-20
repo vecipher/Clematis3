@@ -9,7 +9,16 @@ from .stages.t3 import make_plan_bundle, make_dialog_bundle, deliberate, rag_onc
 from .stages.t4 import t4_filter
 from .apply import apply_changes
 from .snapshot import load_latest_snapshot
-from .gel import observe_retrieval as gel_observe, tick as gel_tick
+from .gel import (
+    observe_retrieval as gel_observe,
+    tick as gel_tick,
+    merge_candidates as gel_merge_candidates,
+    apply_merge as gel_apply_merge,
+    split_candidates as gel_split_candidates,
+    apply_split as gel_apply_split,
+    promote_clusters as gel_promote_clusters,
+    apply_promotion as gel_apply_promotion,
+)
 from ..io.log import append_jsonl
 from .cache import CacheManager
 
@@ -338,6 +347,66 @@ class Orchestrator:
                         **({"now": now} if now else {}),
                     },
                 )
+
+            # --- PR24: GEL merge/split/promotion (optional; deterministic, bounded) ---
+            if graph_enabled2:
+                try:
+                    mg_cfg = (graph_cfg_all2.get("merge") if isinstance(graph_cfg_all2, dict) else {}) or {}
+                    sp_cfg = (graph_cfg_all2.get("split") if isinstance(graph_cfg_all2, dict) else {}) or {}
+                    pr_cfg = (graph_cfg_all2.get("promotion") if isinstance(graph_cfg_all2, dict) else {}) or {}
+
+                    do_merge = bool(mg_cfg.get("enabled", False))
+                    do_split = bool(sp_cfg.get("enabled", False))
+                    do_promo = bool(pr_cfg.get("enabled", False))
+
+                    if do_merge or do_split or do_promo:
+                        t0_msp = time.perf_counter()
+                        merge_attempts = split_attempts = 0
+                        merge_applied = split_applied = promo_applied = 0
+
+                        merges = gel_merge_candidates(ctx, state) if do_merge else []
+                        merge_attempts = len(merges)
+                        if do_merge:
+                            cap_m = int(mg_cfg.get("cap_per_turn", 4))
+                            for m in merges[:cap_m]:
+                                gel_apply_merge(ctx, state, m)
+                                merge_applied += 1
+
+                        splits = gel_split_candidates(ctx, state) if do_split else []
+                        split_attempts = len(splits)
+                        if do_split:
+                            cap_s = int(sp_cfg.get("cap_per_turn", 4))
+                            for s in splits[:cap_s]:
+                                gel_apply_split(ctx, state, s)
+                                split_applied += 1
+
+                        if do_promo:
+                            # Promotions derive from current merge candidates (metadata-based policies can refine later)
+                            clusters = merges if do_merge else []
+                            promos = gel_promote_clusters(ctx, state, clusters)
+                            cap_p = int(pr_cfg.get("cap_per_turn", 2))
+                            for p in promos[:cap_p]:
+                                gel_apply_promotion(ctx, state, p)
+                                promo_applied += 1
+
+                        msp_ms = round((time.perf_counter() - t0_msp) * 1000.0, 3)
+                        append_jsonl(
+                            "gel.jsonl",
+                            {
+                                "turn": turn_id,
+                                "agent": agent_id,
+                                "merge_attempts": merge_attempts,
+                                "merge_applied": merge_applied,
+                                "split_attempts": split_attempts,
+                                "split_applied": split_applied,
+                                "promotion_applied": promo_applied,
+                                "ms": msp_ms,
+                                **({"now": now} if now else {}),
+                            },
+                        )
+                except Exception:
+                    # Never let optional GEL features break the turn
+                    pass
             # --- Apply & persist ---
             t0 = time.perf_counter()
             apply = apply_changes(ctx, state, t4)

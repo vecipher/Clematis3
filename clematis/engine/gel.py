@@ -32,23 +32,60 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 # ---------------------------
 
 def _graph_cfg(ctx: Any) -> Dict[str, Any]:
-    base = getattr(ctx, "config", None) or getattr(ctx, "cfg", None) or {}
-    g = dict((base.get("graph") or {}))
+    # Accept both dict contexts and objects with .config/.cfg
+    if isinstance(ctx, dict):
+        root = ctx
+    else:
+        root = getattr(ctx, "config", None) or getattr(ctx, "cfg", None) or {}
+
+    # Start from any provided graph sub-config
+    base_graph: Dict[str, Any] = {}
+    if isinstance(root, dict):
+        base_graph = dict(root.get("graph") or {})
+
     # Defaults are conservative and deterministic
+    g: Dict[str, Any] = dict(base_graph)
     g.setdefault("enabled", False)
     g.setdefault("coactivation_threshold", 0.20)
     g.setdefault("observe_top_k", 64)
     g.setdefault("pair_cap_per_obs", 2048)
+
     upd = dict(g.get("update") or {})
     upd.setdefault("mode", "additive")  # additive | proportional
     upd.setdefault("alpha", 0.02)
     upd.setdefault("clamp_min", -1.0)
     upd.setdefault("clamp_max", 1.0)
     g["update"] = upd
+
     dec = dict(g.get("decay") or {})
     dec.setdefault("half_life_turns", 200)
     dec.setdefault("floor", 0.0)
     g["decay"] = dec
+
+    # PR24: merge/split/promotion defaults (feature-flagged)
+    mg = dict(g.get("merge") or {})
+    mg.setdefault("enabled", False)
+    mg.setdefault("min_size", 3)
+    mg.setdefault("min_avg_w", 0.20)
+    mg.setdefault("max_diameter", 2)
+    mg.setdefault("cap_per_turn", 4)
+    g["merge"] = mg
+
+    sp = dict(g.get("split") or {})
+    sp.setdefault("enabled", False)
+    sp.setdefault("weak_edge_thresh", 0.05)
+    sp.setdefault("min_component_size", 2)
+    sp.setdefault("cap_per_turn", 4)
+    g["split"] = sp
+
+    pr = dict(g.get("promotion") or {})
+    pr.setdefault("enabled", False)
+    pr.setdefault("label_mode", "lexmin")  # or "concat_k"
+    pr.setdefault("topk_label_ids", 3)
+    pr.setdefault("attach_weight", 0.5)
+    pr.setdefault("cap_per_turn", 2)
+    g["promotion"] = pr
+
     return g
 
 
@@ -78,6 +115,11 @@ def _ensure_graph_store(state: Any) -> Dict[str, Any]:
     store.setdefault("nodes", {})
     store.setdefault("edges", {})
     store.setdefault("meta", {"schema": "v1"})
+    meta = store.setdefault("meta", {"schema": "v1"})
+    meta.setdefault("merges", [])
+    meta.setdefault("splits", [])
+    meta.setdefault("promotions", [])
+    meta.setdefault("concept_nodes_count", 0)
     return store
 
 
@@ -118,6 +160,306 @@ def _as_id_score(item: Any) -> Tuple[str, float]:
             return str(idv), float(score)
     # fallback: stable repr, score 0
     return repr(item), 0.0
+
+
+# ---------------------------
+# Graph utilities for PR24 (deterministic)
+# ---------------------------
+
+def _build_adj(edges: Dict[str, Any], *, nodes: Optional[List[str]] = None, min_w: float = 0.0) -> Dict[str, List[str]]:
+    """Undirected adjacency filtered by |weight| >= min_w; neighbors sorted.
+    If `nodes` provided, restrict to that induced set.
+    """
+    allow = set(nodes) if nodes is not None else None
+    adj: Dict[str, List[str]] = {}
+    if not isinstance(edges, dict):
+        return adj
+    for key, rec in edges.items():
+        if not isinstance(rec, dict):
+            continue
+        try:
+            w = abs(float(rec.get("weight", 0.0)))
+        except Exception:
+            w = 0.0
+        if w < float(min_w):
+            continue
+        a = str(rec.get("src")); b = str(rec.get("dst"))
+        if allow is not None and (a not in allow or b not in allow):
+            continue
+        adj.setdefault(a, [])
+        adj.setdefault(b, [])
+        adj[a].append(b)
+        adj[b].append(a)
+    for k in list(adj.keys()):
+        adj[k] = sorted(set(adj[k]))
+    return adj
+
+
+def _connected_components(adj: Dict[str, List[str]]) -> List[List[str]]:
+    """Lexicographically deterministic connected components from adjacency."""
+    seen: set[str] = set()
+    comps: List[List[str]] = []
+    for start in sorted(adj.keys()):
+        if start in seen:
+            continue
+        stack = [start]
+        seen.add(start)
+        comp: List[str] = []
+        while stack:
+            v = stack.pop()
+            comp.append(v)
+            for u in adj.get(v, []):
+                if u not in seen:
+                    seen.add(u)
+                    stack.append(u)
+        comps.append(sorted(comp))
+    return comps
+
+
+def _component_edges(edges: Dict[str, Any], nodes: List[str]) -> List[float]:
+    """Collect absolute weights for edges whose endpoints are both in `nodes`."""
+    node_set = set(nodes)
+    ws: List[float] = []
+    for key, rec in edges.items():
+        if not isinstance(rec, dict):
+            continue
+        a = str(rec.get("src")); b = str(rec.get("dst"))
+        if a in node_set and b in node_set:
+            try:
+                ws.append(abs(float(rec.get("weight", 0.0))))
+            except Exception:
+                pass
+    return ws
+
+
+def _diameter_unweighted(adj: Dict[str, List[str]], nodes: List[str]) -> int:
+    """Compute unweighted diameter (max shortest-path length) within `nodes`.
+    Uses BFS from each node; bounded by |nodes| and deterministic ordering.
+    Returns 0 for singletons.
+    """
+    if len(nodes) <= 1:
+        return 0
+    node_set = set(nodes)
+    import collections
+    diam = 0
+    for s in nodes:  # nodes already sorted
+        # BFS from s restricted to the component
+        q = collections.deque([s])
+        dist = {s: 0}
+        while q:
+            v = q.popleft()
+            for u in adj.get(v, []):
+                if u in node_set and u not in dist:
+                    dist[u] = dist[v] + 1
+                    q.append(u)
+        if len(dist) < len(nodes):
+            # disconnected in provided adj; treat as infinite => filter elsewhere
+            return 10**9
+        ecc = max(dist.values())
+        if ecc > diam:
+            diam = ecc
+    return diam
+
+
+# ---------------------------
+# PR24: Merge / Split / Promotion (feature-flagged, deterministic)
+# ---------------------------
+
+def merge_candidates(ctx: Any, state: Any) -> List[Dict[str, Any]]:
+    cfg = _graph_cfg(ctx)
+    mg = cfg.get("merge", {})
+    edges = _ensure_graph_store(state).get("edges", {})
+    min_w = float(mg.get("min_avg_w", 0.20))
+    min_size = int(mg.get("min_size", 3))
+    max_d = int(mg.get("max_diameter", 2))
+
+    # Build strong-edge graph and components
+    adj = _build_adj(edges, min_w=min_w)
+    comps = _connected_components(adj)
+
+    out: List[Dict[str, Any]] = []
+    for nodes in comps:
+        if len(nodes) < min_size:
+            continue
+        # diameter on the same strong-edge graph
+        d = _diameter_unweighted(adj, nodes)
+        if d > max_d:
+            continue
+        ws = _component_edges(edges, nodes)
+        avg_w = (sum(ws) / len(ws)) if ws else 0.0
+        sig = "|".join(nodes)
+        out.append({
+            "type": "merge_candidate",
+            "nodes": nodes,
+            "size": len(nodes),
+            "avg_w": avg_w,
+            "diameter": d,
+            "signature": sig,
+        })
+
+    # Deterministic ordering
+    out.sort(key=lambda c: (-float(c["avg_w"]), -int(c["size"]), tuple(c["nodes"])))
+    return out
+
+
+def apply_merge(ctx: Any, state: Any, cluster: Dict[str, Any]) -> Dict[str, Any]:
+    g = _ensure_graph_store(state)
+    meta = g.setdefault("meta", {})
+    merges = meta.setdefault("merges", [])
+    rec = {
+        "nodes": list(cluster.get("nodes", [])),
+        "size": int(cluster.get("size", len(cluster.get("nodes", [])))) ,
+        "avg_w": float(cluster.get("avg_w", 0.0)),
+        "diameter": int(cluster.get("diameter", 0)),
+        "signature": str(cluster.get("signature", "")),
+    }
+    merges.append(rec)
+    return {"event": "merge_applied", "size": rec["size"], "avg_w": rec["avg_w"], "diameter": rec["diameter"]}
+
+
+def split_candidates(ctx: Any, state: Any) -> List[Dict[str, Any]]:
+    cfg = _graph_cfg(ctx)
+    sp = cfg.get("split", {})
+    edges = _ensure_graph_store(state).get("edges", {})
+    weak = float(sp.get("weak_edge_thresh", 0.05))
+    min_comp = int(sp.get("min_component_size", 2))
+
+    # Components on the current nonzero-edge graph
+    adj_all = _build_adj(edges, min_w=0.0)
+    comps = _connected_components(adj_all)
+
+    out: List[Dict[str, Any]] = []
+    for nodes in comps:
+        if len(nodes) < 2:
+            continue
+        # Count edges within this component and those that would be removed
+        node_set = set(nodes)
+        total_in = 0
+        removed = 0
+        for key, rec in edges.items():
+            if not isinstance(rec, dict):
+                continue
+            a = str(rec.get("src")); b = str(rec.get("dst"))
+            if a in node_set and b in node_set:
+                total_in += 1
+                try:
+                    if abs(float(rec.get("weight", 0.0))) < weak:
+                        removed += 1
+                except Exception:
+                    pass
+        # New components after removing weak edges
+        adj_strong = _build_adj(edges, nodes=nodes, min_w=weak)
+        subcomps = _connected_components(adj_strong)
+        if len(subcomps) <= 1:
+            continue
+        # ensure each new component meets size threshold
+        if any(len(c) < min_comp for c in subcomps):
+            continue
+        sig = "|".join(nodes)
+        out.append({
+            "type": "split_candidate",
+            "original": nodes,
+            "parts": subcomps,
+            "removed_edges": int(removed),
+            "orig_edges": int(total_in),
+            "signature": sig,
+        })
+
+    out.sort(key=lambda s: (-int(s["removed_edges"]), tuple(s["original"])))
+    return out
+
+
+def apply_split(ctx: Any, state: Any, split: Dict[str, Any]) -> Dict[str, Any]:
+    g = _ensure_graph_store(state)
+    meta = g.setdefault("meta", {})
+    splits = meta.setdefault("splits", [])
+    rec = {
+        "original": list(split.get("original", [])),
+        "parts": [list(p) for p in split.get("parts", [])],
+        "removed_edges": int(split.get("removed_edges", 0)),
+        "orig_edges": int(split.get("orig_edges", 0)),
+        "signature": str(split.get("signature", "")),
+    }
+    splits.append(rec)
+    return {"event": "split_applied", "removed_edges": rec["removed_edges"], "parts": len(rec["parts"]) }
+
+
+def promote_clusters(ctx: Any, state: Any, clusters: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    cfg = _graph_cfg(ctx)
+    pr = cfg.get("promotion", {})
+    mode = str(pr.get("label_mode", "lexmin"))
+    topk = int(pr.get("topk_label_ids", 3))
+    attach_w = float(pr.get("attach_weight", 0.5))
+    # clamp
+    if attach_w > 1.0:
+        attach_w = 1.0
+    elif attach_w < -1.0:
+        attach_w = -1.0
+
+    promos: List[Dict[str, Any]] = []
+    for c in clusters or []:
+        nodes = list(c.get("nodes", []))
+        if not nodes:
+            continue
+        nodes_sorted = sorted(nodes)
+        cid = f"c::{nodes_sorted[0]}"  # deterministic id by lexmin member
+        if mode == "concat_k":
+            label = "+".join(nodes_sorted[:max(1, topk)])
+        else:
+            label = nodes_sorted[0]
+        promos.append({
+            "concept_id": cid,
+            "label": label,
+            "members": nodes_sorted,
+            "attach_weight": attach_w,
+        })
+    # deterministic order by concept id
+    promos.sort(key=lambda p: p["concept_id"])
+    return promos
+
+
+def apply_promotion(ctx: Any, state: Any, promo: Dict[str, Any]) -> Dict[str, Any]:
+    g = _ensure_graph_store(state)
+    nodes = g.setdefault("nodes", {})
+    edges = g.setdefault("edges", {})
+    meta = g.setdefault("meta", {})
+
+    cid = str(promo.get("concept_id"))
+    label = str(promo.get("label", cid))
+    members = [str(x) for x in promo.get("members", [])]
+    w = float(promo.get("attach_weight", 0.5))
+
+    # Upsert concept node
+    if cid not in nodes:
+        nodes[cid] = {"id": cid, "label": label, "attrs": {"kind": "concept"}}
+        meta["concept_nodes_count"] = int(meta.get("concept_nodes_count", 0)) + 1
+    else:
+        # do not change existing labels deterministically
+        pass
+
+    # Attach edges concept<->member deterministically
+    for m in members:
+        key, src, dst = _edge_key(cid, m)
+        rec = edges.get(key)
+        if rec is None:
+            rec = {
+                "id": key,
+                "src": src,
+                "dst": dst,
+                "weight": w,
+                "rel": "concept",
+                "updated_at": None,
+                "attrs": {},
+            }
+            edges[key] = rec
+        else:
+            # deterministic overwrite to the configured weight
+            rec["rel"] = "concept"
+            rec["weight"] = w
+
+    # keep meta edges_count consistent for inspector/health
+    meta["edges_count"] = len(edges)
+    return {"event": "promotion_applied", "concept": cid, "members": len(members)}
 
 
 # ---------------------------
@@ -288,4 +630,14 @@ def tick(ctx: Any, state: Any, *, decay_dt: int = 1, turn: Optional[int] = None,
     }
 
 
-__all__ = ["observe_retrieval", "tick"]
+__all__ = [
+    "observe_retrieval",
+    "tick",
+    # PR24 APIs
+    "merge_candidates",
+    "apply_merge",
+    "split_candidates",
+    "apply_split",
+    "promote_clusters",
+    "apply_promotion",
+]

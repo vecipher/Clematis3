@@ -1,6 +1,3 @@
-
-
-
 import pytest
 
 from configs.validate import validate_config, validate_config_verbose
@@ -141,3 +138,114 @@ def test_snapshot_every_n_turns_must_be_positive():
     with pytest.raises(ValueError) as ei:
         validate_config(cfg)
     assert "t4.snapshot_every_n_turns" in str(ei.value)
+
+
+# ------------------------------
+# PR24: graph.merge/split/promotion validation
+# ------------------------------
+
+def test_graph_merge_defaults_and_bounds():
+    cfg = {"graph": {"enabled": True}}
+    out = validate_config(cfg)
+    gm = out["graph"]["merge"]
+    assert gm["enabled"] is False  # default OFF even if graph.enabled
+    assert gm["min_size"] == 3
+    assert 0.0 <= gm["min_avg_w"] <= 1.0
+    assert gm["max_diameter"] >= 1
+    assert gm["cap_per_turn"] >= 0
+
+
+def test_graph_merge_invalid_values():
+    # min_size < 2
+    with pytest.raises(ValueError) as ei:
+        validate_config({"graph": {"merge": {"min_size": 1}}})
+    assert "graph.merge.min_size" in str(ei.value)
+    # min_avg_w out of range
+    with pytest.raises(ValueError) as ei:
+        validate_config({"graph": {"merge": {"min_avg_w": 1.5}}})
+    assert "graph.merge.min_avg_w" in str(ei.value)
+    # max_diameter < 1
+    with pytest.raises(ValueError) as ei:
+        validate_config({"graph": {"merge": {"max_diameter": 0}}})
+    assert "graph.merge.max_diameter" in str(ei.value)
+    # cap_per_turn negative
+    with pytest.raises(ValueError) as ei:
+        validate_config({"graph": {"merge": {"cap_per_turn": -1}}})
+    assert "graph.merge.cap_per_turn" in str(ei.value)
+
+
+def test_graph_split_defaults_and_bounds():
+    out = validate_config({"graph": {"split": {"enabled": True}}})
+    gs = out["graph"]["split"]
+    assert gs["enabled"] is True
+    assert 0.0 <= gs["weak_edge_thresh"] <= 1.0
+    assert gs["min_component_size"] >= 2
+    assert gs["cap_per_turn"] >= 0
+
+
+def test_graph_split_invalid_values():
+    # weak_edge_thresh out of range
+    with pytest.raises(ValueError) as ei:
+        validate_config({"graph": {"split": {"weak_edge_thresh": -0.1}}})
+    assert "graph.split.weak_edge_thresh" in str(ei.value)
+    # min_component_size < 2
+    with pytest.raises(ValueError) as ei:
+        validate_config({"graph": {"split": {"min_component_size": 1}}})
+    assert "graph.split.min_component_size" in str(ei.value)
+    # cap_per_turn negative
+    with pytest.raises(ValueError) as ei:
+        validate_config({"graph": {"split": {"cap_per_turn": -2}}})
+    assert "graph.split.cap_per_turn" in str(ei.value)
+
+
+def test_graph_promotion_defaults_and_bounds():
+    out = validate_config({"graph": {"promotion": {"enabled": True}}})
+    gp = out["graph"]["promotion"]
+    assert gp["enabled"] is True
+    assert gp["label_mode"] in {"lexmin", "concat_k"}
+    assert gp["topk_label_ids"] >= 1
+    assert -1.0 <= gp["attach_weight"] <= 1.0
+    assert gp["cap_per_turn"] >= 0
+
+
+def test_graph_promotion_invalid_values():
+    # bad label_mode
+    with pytest.raises(ValueError) as ei:
+        validate_config({"graph": {"promotion": {"label_mode": "weird"}}})
+    assert "graph.promotion.label_mode" in str(ei.value)
+    # topk_label_ids < 1
+    with pytest.raises(ValueError) as ei:
+        validate_config({"graph": {"promotion": {"topk_label_ids": 0}}})
+    assert "graph.promotion.topk_label_ids" in str(ei.value)
+    # attach_weight out of range
+    with pytest.raises(ValueError) as ei:
+        validate_config({"graph": {"promotion": {"attach_weight": 2}}})
+    assert "graph.promotion.attach_weight" in str(ei.value)
+    # cap_per_turn negative
+    with pytest.raises(ValueError) as ei:
+        validate_config({"graph": {"promotion": {"cap_per_turn": -1}}})
+    assert "graph.promotion.cap_per_turn" in str(ei.value)
+
+
+def test_graph_cross_field_consistency():
+    # weak_edge_thresh should be <= merge.min_avg_w
+    bad = {
+        "graph": {
+            "merge": {"min_avg_w": 0.20},
+            "split": {"weak_edge_thresh": 0.50},
+        }
+    }
+    with pytest.raises(ValueError) as ei:
+        validate_config(bad)
+    msg = str(ei.value)
+    assert "graph.split.weak_edge_thresh" in msg
+    assert "<= graph.merge.min_avg_w" in msg
+
+
+def test_graph_unknown_keys_under_promotion():
+    bad = {"graph": {"promotion": {"speed": 1}}}
+    with pytest.raises(ValueError) as ei:
+        validate_config(bad)
+    msg = str(ei.value)
+    assert "graph.promotion.speed" in msg
+    assert "unknown key" in msg
