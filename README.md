@@ -576,3 +576,20 @@ t4.cache.namespaces[t2:semantics] unknown namespace (allowed: ['t2:semantic'])
 - Keep `configs/config.yaml` canonical (use `ttl_s` for T1/T2 caches, `ttl_sec` for T4 cache).
 - Use `python3 scripts/validate_config.py --strict` in CI to fail fast on hygiene regressions.
 - If you add new config fields, update the validator and this section in the same PR.
+
+# PR18 — Snapshot inspector & schema tag
+
+Add a compact CLI to inspect the latest snapshot and tag new snapshots with a schema version. Loader behavior remains non‑fatal for missing/legacy snapshots.
+
+### Inspecting snapshots
+
+```bash
+python3 scripts/inspect_snapshot.py
+python3 scripts/inspect_snapshot.py --dir ./.data/snapshots --format json
+```
+
+- Exit `0` when a snapshot is found; prints a pretty summary by default.
+- Exit `2` if no snapshot exists or cannot be read (runtime remains tolerant).
+- New snapshots include `schema_version: v1`; legacy snapshots may show `unknown`.
+
+**Fields shown** (when available): `schema_version`, `version_etag`, `nodes`, `edges`, `last_update`, and T4 caps (`delta_norm_cap_l2`, `novelty_cap_per_node`, `churn_cap_edges`, `weight_min`, `weight_max`).
