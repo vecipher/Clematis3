@@ -38,6 +38,41 @@ def main(argv=None) -> int:
         print(f"No snapshot found in {args.dir}", file=sys.stderr)
         return 2
 
+    # Enrich counts from the snapshot file itself if missing
+    try:
+        if info.get("nodes") is None or info.get("edges") is None:
+            with open(info["path"], "r", encoding="utf-8") as fh:
+                payload = json.load(fh)
+            gel = payload.get("gel") or {}
+            graph_summary = payload.get("graph") or {}
+            # Prefer full GEL structure
+            nodes_cnt = None
+            edges_cnt = None
+            if isinstance(gel, dict):
+                nmap = gel.get("nodes")
+                emap = gel.get("edges")
+                if isinstance(nmap, dict):
+                    nodes_cnt = len(nmap)
+                if isinstance(emap, dict):
+                    edges_cnt = len(emap)
+            # Fallback to compact graph summary
+            if nodes_cnt is None:
+                nodes_cnt = graph_summary.get("nodes_count")
+            if edges_cnt is None:
+                edges_cnt = graph_summary.get("edges_count")
+            # Write back if we found anything
+            if nodes_cnt is not None:
+                info["nodes"] = nodes_cnt
+            if edges_cnt is not None:
+                info["edges"] = edges_cnt
+            # Also expose explicit GEL counts (even if nodes/edges were already set)
+            if nodes_cnt is not None:
+                info["gel_nodes"] = nodes_cnt
+            if edges_cnt is not None:
+                info["gel_edges"] = edges_cnt
+    except Exception:
+        pass
+
     if args.format == "json":
         print(json.dumps(info, indent=2, sort_keys=True))
         return 0
@@ -47,6 +82,8 @@ def main(argv=None) -> int:
     print(f"schema_version:{info['schema_version']}")
     print(f"version_etag  :{info['version_etag']}")
     print(f"nodes/edges   :{info['nodes']} / {info['edges']}")
+    if info.get("gel_edges") is not None:
+        print(f"gel edges     :{info['gel_edges']}")
     print(f"last_update   :{info['last_update']}")
     print(
         "caps          : "

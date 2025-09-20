@@ -531,8 +531,12 @@ JSONL files are written to `.logs/`:
 - `t3_dialogue.jsonl` — dialogue synthesis metrics
 - `t4.jsonl` — meta‑filter approvals/rejections
 - `apply.jsonl` — state changes summary (includes `cache_invalidations: int`)
+- **gel.jsonl** — Graph Evolution Layer events (only when `graph.enabled=true`)
+  - `observe_retrieval` fields: `turn`, `agent`, `k_in`, `k_used`, `pairs_updated`, `threshold`, `mode`, `alpha`, `ms`
+  - `edge_decay` fields: `turn`, `agent`, `decayed_edges`, `dropped_edges`, `half_life_turns`, `floor`, `ms`
 - `turn.jsonl` — per‑turn roll‑up (durations, key metrics)
 - `health.jsonl` — guardrail flags
+# HS1:
 
 ## Development tips
 
@@ -768,3 +772,53 @@ reasons total: CHURN_CAP_HIT:49312, NOVELTY_SPIKE:...
 Notes:
 - Workload is deterministic per seed; change `--seed` to vary.
 - Throughput figures are indicative and machine-dependent; use for relative checks only.
+
+## PR22 — GEL (Graph Evolution Layer): Edge update + decay
+
+Deterministic, bounded-cost graph co-activation edges with exponential decay. **Default: OFF** — enabling this does not change core T1–T4 behavior; it only records co-activation structure and decay when turned on.
+
+### What it does
+- **observe_retrieval** (after T2): builds/updates undirected edges between top‑K retrieved items above a threshold. Weight updates are deterministic and clamped.
+- **tick** (before Apply): decays all edge weights by half-life; drops edges under a floor. Decay happens before snapshot so it’s captured in `state_*`.
+- **Snapshot schema**: snapshots include `graph_schema_version: "v1"` and a `gel` block `{nodes: {}, edges: {}}` with canonical edge keys `src→dst` (unicode arrow). A compact `graph` summary with counts is also written for legacy readers.
+- **Logs**: events are written to `gel.jsonl` (see **Logs** section for fields).
+
+### Configuration (YAML)
+Add under top-level `graph:` in your config. All keys are validated by `scripts/validate_config.py`.
+
+```yaml
+# configs/config.yaml
+graph:
+  enabled: false                 # default OFF; set true to enable GEL
+  coactivation_threshold: 0.20   # keep retrieved items with score ≥ threshold
+  observe_top_k: 64              # consider at most K items (sorted by -score, id)
+  pair_cap_per_obs: 2048         # global cap on pairs per observation
+  update:
+    mode: additive               # or "proportional"
+    alpha: 0.02                  # additive step or proportional factor
+    clamp_min: -1.0
+    clamp_max: 1.0
+  decay:
+    half_life_turns: 200         # turns for weight to halve
+    floor: 0.0                   # drop edges with |weight| < floor
+  # tolerated (contracts; no behavior here)
+  merge: { enabled: false, min_size: 3 }
+  split: { enabled: false }
+```
+
+**Determinism & bounds**
+- No RNG; stable ordering and canonicalized edge keys (`a→b` where `a < b`).
+- Observe work is bounded by `observe_top_k` and `pair_cap_per_obs` (prefix traversal of the K list).
+- Decay is linear in current edge count and performed once per turn when Apply runs.
+
+**Wiring (already done)**
+- Orchestrator calls:
+  - After T2: `gel.observe_retrieval(ctx, state, t2.retrieved, turn=turn_id, agent=agent)`
+  - Before Apply: `gel.tick(ctx, state, decay_dt=1, turn=turn_id, agent=agent)`
+
+**Inspector**
+- `scripts/inspect_snapshot.py` now shows `schema_version`, counts, and (when present) `gel edges`.
+
+**Tests**
+- `tests/test_gel_update_decay.py` — updates, clamping, proportional mode, key canonicalization, decay + floor.
+- `tests/test_snapshot_gel_roundtrip.py` — round‑trip snapshot/loader; legacy fallback tolerates missing `gel`.

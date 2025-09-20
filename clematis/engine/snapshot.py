@@ -500,17 +500,54 @@ def write_snapshot(ctx, state, version_etag: str, applied: int = 0, deltas=None)
 
     # Include GEL (Graph Evolution Layer) section and schema tag; tolerate absence
     try:
-        gel_state = None
+        # Prefer runtime store at state.graph; fall back to state.gel for compatibility
+        graph_state = None
         if isinstance(state, dict):
-            gel_state = state.get("gel")
+            graph_state = state.get("graph") or state.get("gel")
         else:
-            gel_state = getattr(state, "gel", None)
+            graph_state = getattr(state, "graph", None) or getattr(state, "gel", None)
         payload["graph_schema_version"] = "v1"
-        payload["gel"] = _sanitize_gel_for_write(gel_state or {"nodes": {}, "edges": {}}, ctx)
+        gel_out = _sanitize_gel_for_write(graph_state or {"nodes": {}, "edges": {}}, ctx)
+        # Normalize edge keys to canonical "src→dst" order (unicode arrow), drop rel from key
+        try:
+            edges = gel_out.get("edges", {})
+            if isinstance(edges, dict):
+                new_edges = {}
+                for k, rec in edges.items():
+                    if not isinstance(rec, dict):
+                        continue
+                    src = str(rec.get("src")) if rec.get("src") is not None else None
+                    dst = str(rec.get("dst")) if rec.get("dst") is not None else None
+                    if src and dst:
+                        key = f"{src}→{dst}" if src <= dst else f"{dst}→{src}"
+                        rec = dict(rec)
+                        rec["id"] = key
+                        new_edges[key] = rec
+                    else:
+                        new_edges[k] = rec
+                gel_out["edges"] = new_edges
+        except Exception:
+            pass
+        payload["gel"] = gel_out
+
+        # Back-compat summary: also include a compact `graph` meta with counts so
+        # older inspectors can read sizes without duplicating the whole structure.
+        try:
+            nodes_cnt = len(gel_out.get("nodes", {}))
+            edges_cnt = len(gel_out.get("edges", {}))
+        except Exception:
+            nodes_cnt = None
+            edges_cnt = None
+        payload["graph"] = {
+            "nodes_count": nodes_cnt,
+            "edges_count": edges_cnt,
+            "meta": {"last_update": None},
+        }
     except Exception:
         # Ensure keys exist even if sanitization fails
         payload.setdefault("graph_schema_version", "v1")
         payload.setdefault("gel", {"nodes": {}, "edges": {}})
+        payload.setdefault("graph", {"nodes_count": None, "edges_count": None, "meta": {"last_update": None}})
 
     with open(path, "w", encoding="utf-8") as f:
         json.dump(payload, f)
@@ -520,13 +557,19 @@ def write_snapshot(ctx, state, version_etag: str, applied: int = 0, deltas=None)
 
 def load_latest_snapshot(ctx, state) -> Dict[str, Any]:
     """
-    Load the latest snapshot for this agent from t4.snapshot_dir.
+    Load the latest snapshot from the configured directory.
     Returns {"loaded": bool, "path": str|None, "version_etag": str|None}.
-    Tolerates both PR13-lite and PR14-enriched snapshot schemas.
+    Tolerates both legacy and enriched schemas.
     """
     cfg = _get_cfg(ctx)
-    path = _snapshot_path(cfg, ctx)
-    if not os.path.isfile(path):
+    dir_ = cfg["snapshot_dir"]
+    path = _pick_latest_snapshot_path(dir_)
+
+    # Ensure graph containers exist on state even if nothing loads
+    _set_state_field(state, "graph", {"nodes": {}, "edges": {}})
+    _set_state_field(state, "gel", {"nodes": {}, "edges": {}})
+
+    if not path or not os.path.isfile(path):
         return {"loaded": False, "path": None, "version_etag": None}
 
     try:
@@ -537,25 +580,49 @@ def load_latest_snapshot(ctx, state) -> Dict[str, Any]:
 
     ver = data.get("version_etag")
     if ver is not None:
-        # set version_etag on state in a dict/attr-safe way
         if isinstance(state, dict):
             state["version_etag"] = str(ver)
         else:
             setattr(state, "version_etag", str(ver))
 
+    # Import store if present and compatible
     store = getattr(state, "store", None) if not isinstance(state, dict) else state.get("store")
     loaded_store = False
     snap_store = data.get("store")
     if store is not None and snap_store is not None:
         loaded_store = _import_store_from_snapshot(store, snap_store)
 
-    # GEL restore (tolerant): always set a well-formed gel container
+    # GEL restore (tolerant): prefer `gel`, fall back to `graph`; normalize keys to "src→dst"
+    gel_out = {"nodes": {}, "edges": {}}
     try:
         snap_gel = data.get("gel")
+        if snap_gel is None:
+            snap_gel = data.get("graph")
         gel_out = _sanitize_gel_for_load(snap_gel or {"nodes": {}, "edges": {}}, ctx)
+        try:
+            edges = gel_out.get("edges", {})
+            if isinstance(edges, dict):
+                new_edges = {}
+                for k, rec in edges.items():
+                    if not isinstance(rec, dict):
+                        continue
+                    src = str(rec.get("src")) if rec.get("src") is not None else None
+                    dst = str(rec.get("dst")) if rec.get("dst") is not None else None
+                    if src and dst:
+                        key = f"{src}→{dst}" if src <= dst else f"{dst}→{src}"
+                        rec = dict(rec)
+                        rec["id"] = key
+                        new_edges[key] = rec
+                    else:
+                        new_edges[k] = rec
+                gel_out["edges"] = new_edges
+        except Exception:
+            pass
+        _set_state_field(state, "graph", gel_out)
         _set_state_field(state, "gel", gel_out)
     except Exception:
-        # On any error, still ensure field presence to avoid attribute errors downstream
-        _set_state_field(state, "gel", {"nodes": {}, "edges": {}})
+        # defaults are already set above
+        pass
 
-    return {"loaded": bool(loaded_store or ver is not None), "path": path, "version_etag": ver}
+    loaded_flag = bool(loaded_store or ver is not None or gel_out.get("edges"))
+    return {"loaded": loaded_flag, "path": path, "version_etag": ver}

@@ -9,6 +9,7 @@ from .stages.t3 import make_plan_bundle, make_dialog_bundle, deliberate, rag_onc
 from .stages.t4 import t4_filter
 from .apply import apply_changes
 from .snapshot import load_latest_snapshot
+from .gel import observe_retrieval as gel_observe, tick as gel_tick
 from ..io.log import append_jsonl
 from .cache import CacheManager
 
@@ -122,6 +123,29 @@ class Orchestrator:
                 **({"now": now} if now else {}),
             },
         )
+
+        # --- GEL observe (optional; gated by graph.enabled) ---
+        graph_cfg_all = (_get_cfg(ctx).get("graph") if isinstance(_get_cfg(ctx), dict) else {}) or {}
+        graph_enabled = bool(graph_cfg_all.get("enabled", False)) if isinstance(graph_cfg_all, dict) else False
+        if graph_enabled:
+            t0_gel = time.perf_counter()
+            items = getattr(t2, "retrieved", []) or []  # gel adapts dicts/objs/tuples
+            try:
+                turn_idx = int(turn_id)
+            except Exception:
+                turn_idx = None
+            gel_metrics = gel_observe(ctx, state, items, turn=turn_idx, agent=agent_id)
+            gel_ms = round((time.perf_counter() - t0_gel) * 1000.0, 3)
+            append_jsonl(
+                "gel.jsonl",
+                {
+                    "turn": turn_id,
+                    "agent": agent_id,
+                    **gel_metrics,
+                    "ms": gel_ms,
+                    **({"now": now} if now else {}),
+                },
+            )
 
         # --- T3 (deliberation → optional one-shot RAG → dialogue) ---
         # All pure stage functions; only logging here does I/O.
@@ -293,6 +317,27 @@ class Orchestrator:
                     **({"now": now} if now else {}),
                 },
             )
+            # --- GEL decay tick (optional; run before Apply so snapshot includes decay) ---
+            graph_cfg_all2 = (_get_cfg(ctx).get("graph") if isinstance(_get_cfg(ctx), dict) else {}) or {}
+            graph_enabled2 = bool(graph_cfg_all2.get("enabled", False)) if isinstance(graph_cfg_all2, dict) else False
+            if graph_enabled2:
+                t0_decay = time.perf_counter()
+                try:
+                    turn_idx2 = int(turn_id)
+                except Exception:
+                    turn_idx2 = None
+                decay_metrics = gel_tick(ctx, state, decay_dt=1, turn=turn_idx2, agent=agent_id)
+                decay_ms = round((time.perf_counter() - t0_decay) * 1000.0, 3)
+                append_jsonl(
+                    "gel.jsonl",
+                    {
+                        "turn": turn_id,
+                        "agent": agent_id,
+                        **decay_metrics,
+                        "ms": decay_ms,
+                        **({"now": now} if now else {}),
+                    },
+                )
             # --- Apply & persist ---
             t0 = time.perf_counter()
             apply = apply_changes(ctx, state, t4)

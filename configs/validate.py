@@ -109,6 +109,26 @@ DEFAULTS: Dict[str, Any] = {
             "ttl_sec": 600,
         },
     },
+    # GEL defaults (contracts + PR22)
+    "graph": {
+        "enabled": False,
+        "coactivation_threshold": 0.20,
+        "observe_top_k": 64,
+        "pair_cap_per_obs": 2048,
+        "update": {
+            "mode": "additive",          # additive | proportional
+            "alpha": 0.02,
+            "clamp_min": -1.0,
+            "clamp_max": 1.0,
+        },
+        "decay": {
+            "half_life_turns": 200,
+            "floor": 0.0,
+        },
+        # tolerated by contracts (no behavior in PR22)
+        "merge": {"enabled": False, "min_size": 3},
+        "split": {"enabled": False},
+    },
 }
 
 
@@ -120,7 +140,7 @@ DEFAULTS: Dict[str, Any] = {
 KNOWN_CACHE_NAMESPACES = {"t2:semantic"}
 
 # Allowed key sets per section
-ALLOWED_TOP = {"t1", "t2", "t3", "t4", "k_surface", "surface_method", "budgets", "flags"}
+ALLOWED_TOP = {"t1", "t2", "t3", "t4", "graph", "k_surface", "surface_method", "budgets", "flags"}
 ALLOWED_T1 = {"cache", "iter_cap", "queue_budget", "node_budget", "decay", "edge_type_mult", "radius_cap"}
 ALLOWED_T2 = {"backend", "k_retrieval", "sim_threshold", "cache", "ranking",
               "tiers", "exact_recent_days", "clusters_top_m", "owner_scope",
@@ -134,6 +154,12 @@ ALLOWED_T4 = {
 }
 ALLOWED_CACHE_FIELDS = {"enabled", "namespaces", "max_entries", "ttl_sec", "ttl_s"}
 ALLOWED_RANKING_FIELDS = {"alpha_sim", "beta_recency", "gamma_importance"}
+
+ALLOWED_GRAPH = {"enabled", "coactivation_threshold", "observe_top_k", "pair_cap_per_obs", "update", "decay", "merge", "split"}
+ALLOWED_GRAPH_UPDATE = {"mode", "alpha", "clamp_min", "clamp_max"}
+ALLOWED_GRAPH_DECAY = {"half_life_turns", "floor"}
+ALLOWED_GRAPH_MERGE = {"enabled", "min_size"}
+ALLOWED_GRAPH_SPLIT = {"enabled"}
 
 def _lev(a: str, b: str) -> int:
     """Tiny Levenshtein distance (edit distance) for did-you-mean suggestions."""
@@ -199,6 +225,11 @@ def validate_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
     raw_t2_cache = _ensure_dict(raw_t2.get("cache"))
     raw_t2_ranking = _ensure_dict(raw_t2.get("ranking"))
     raw_t4_cache = _ensure_dict(raw_t4.get("cache"))
+    raw_graph = _ensure_dict(cfg_in.get("graph"))
+    raw_graph_update = _ensure_dict(raw_graph.get("update"))
+    raw_graph_decay = _ensure_dict(raw_graph.get("decay"))
+    raw_graph_merge = _ensure_dict(raw_graph.get("merge"))
+    raw_graph_split = _ensure_dict(raw_graph.get("split"))
 
     # Unknown key detection (top-level and per-section), with suggestions
     for k in cfg_in.keys():
@@ -256,6 +287,37 @@ def validate_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
             sug = _suggest_key(k, ALLOWED_CACHE_FIELDS)
             hint = f" (did you mean '{sug}')" if sug else ""
             _err(errors, f"t4.cache.{k}", f"unknown key{hint}")
+
+    # Graph (GEL) unknown key checks
+    for k in raw_graph.keys():
+        if k not in ALLOWED_GRAPH:
+            sug = _suggest_key(k, ALLOWED_GRAPH)
+            hint = f" (did you mean '{sug}')" if sug else ""
+            _err(errors, f"graph.{k}", f"unknown key{hint}")
+
+    for k in raw_graph_update.keys():
+        if k not in ALLOWED_GRAPH_UPDATE:
+            sug = _suggest_key(k, ALLOWED_GRAPH_UPDATE)
+            hint = f" (did you mean '{sug}')" if sug else ""
+            _err(errors, f"graph.update.{k}", f"unknown key{hint}")
+
+    for k in raw_graph_decay.keys():
+        if k not in ALLOWED_GRAPH_DECAY:
+            sug = _suggest_key(k, ALLOWED_GRAPH_DECAY)
+            hint = f" (did you mean '{sug}')" if sug else ""
+            _err(errors, f"graph.decay.{k}", f"unknown key{hint}")
+
+    for k in raw_graph_merge.keys():
+        if k not in ALLOWED_GRAPH_MERGE:
+            sug = _suggest_key(k, ALLOWED_GRAPH_MERGE)
+            hint = f" (did you mean '{sug}')" if sug else ""
+            _err(errors, f"graph.merge.{k}", f"unknown key{hint}")
+
+    for k in raw_graph_split.keys():
+        if k not in ALLOWED_GRAPH_SPLIT:
+            sug = _suggest_key(k, ALLOWED_GRAPH_SPLIT)
+            hint = f" (did you mean '{sug}')" if sug else ""
+            _err(errors, f"graph.split.{k}", f"unknown key{hint}")
 
     merged = _deep_merge(cfg_in, DEFAULTS)
 
@@ -421,6 +483,70 @@ def validate_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
     # write-back: ensure normalized cache is attached
     t4["cache"] = c4
 
+
+    # ---- GRAPH (GEL) ----
+    g = _ensure_subdict(merged, "graph")
+    g["enabled"] = _coerce_bool(g.get("enabled", False))
+
+    # Scalars
+    g["coactivation_threshold"] = _coerce_float(g.get("coactivation_threshold", 0.20))
+    if not (0.0 <= g["coactivation_threshold"] <= 1.0):
+        _err(errors, "graph.coactivation_threshold", "must be in [0, 1]")
+
+    g["observe_top_k"] = _coerce_int(g.get("observe_top_k", 64))
+    if g["observe_top_k"] < 1:
+        _err(errors, "graph.observe_top_k", "must be >= 1")
+
+    g["pair_cap_per_obs"] = _coerce_int(g.get("pair_cap_per_obs", 2048))
+    if g["pair_cap_per_obs"] < 0:
+        _err(errors, "graph.pair_cap_per_obs", "must be >= 0")
+
+    # Update sub-block
+    gu = _ensure_subdict(g, "update")
+    gu_mode = str(gu.get("mode", "additive"))
+    if gu_mode not in {"additive", "proportional"}:
+        _err(errors, "graph.update.mode", "must be one of {additive,proportional}")
+    gu["mode"] = gu_mode
+    gu["alpha"] = _coerce_float(gu.get("alpha", 0.02))
+    if not (gu["alpha"] > 0.0):
+        _err(errors, "graph.update.alpha", "must be > 0")
+    gu["clamp_min"] = _coerce_float(gu.get("clamp_min", -1.0))
+    gu["clamp_max"] = _coerce_float(gu.get("clamp_max", 1.0))
+    if not (gu["clamp_min"] < gu["clamp_max"]):
+        _err(errors, "graph.update.clamp_min/clamp_max", "must satisfy clamp_min < clamp_max")
+    g["update"] = gu
+
+    # Decay sub-block
+    gd = _ensure_subdict(g, "decay")
+    gd["half_life_turns"] = _coerce_int(gd.get("half_life_turns", 200))
+    if gd["half_life_turns"] < 1:
+        _err(errors, "graph.decay.half_life_turns", "must be >= 1")
+    gd["floor"] = _coerce_float(gd.get("floor", 0.0))
+    if gd["floor"] < 0:
+        _err(errors, "graph.decay.floor", "must be >= 0")
+    # floor should not exceed clamp_max if both present
+    try:
+        if gd["floor"] > gu["clamp_max"]:
+            _err(errors, "graph.decay.floor", "must be <= graph.update.clamp_max")
+    except Exception:
+        pass
+    g["decay"] = gd
+
+    # Merge & split blocks (tolerated for contracts; minimal checks)
+    gm = _ensure_subdict(g, "merge")
+    if "enabled" in gm:
+        gm["enabled"] = _coerce_bool(gm.get("enabled"))
+    if "min_size" in gm:
+        gm["min_size"] = _coerce_int(gm.get("min_size"))
+        if gm["min_size"] < 2:
+            _err(errors, "graph.merge.min_size", "must be >= 2")
+    g["merge"] = gm
+
+    gs = _ensure_subdict(g, "split")
+    if "enabled" in gs:
+        gs["enabled"] = _coerce_bool(gs.get("enabled"))
+    g["split"] = gs
+
     # If we collected errors, raise a single ValueError with all messages (stable order)
     if errors:
         raise ValueError("\n".join(errors))
@@ -430,6 +556,7 @@ def validate_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
     merged["t2"] = t2
     merged["t3"] = t3
     merged["t4"] = t4
+    merged["graph"] = g
     return merged
 
 
