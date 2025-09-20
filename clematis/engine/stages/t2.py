@@ -6,6 +6,7 @@ from ...adapters.embeddings import BGEAdapter
 from ...memory.index import InMemoryIndex
 import numpy as np
 import datetime as dt
+from .hybrid import rerank_with_gel
 
 # Config-driven cache (constructed lazily per cfg)
 _T2_CACHE = None
@@ -252,6 +253,34 @@ def t2_semantic(ctx, state, text: str, t1) -> T2Result:
     # Deterministic ordering by combined score desc, then id asc
     rescored.sort(key=lambda t: (-t[1], t[0].id))
     retrieved = [r for (r, _, _) in rescored]
+
+    # --- Optional GEL-based hybrid re-ranking (feature-flagged) ---
+    # Prepare hybrid placeholders; we will attach them to `metrics` later
+    hybrid_used = False
+    hybrid_info: Dict[str, Any] = {}
+    try:
+        new_items, hmetrics = rerank_with_gel(ctx, state, retrieved)
+        retrieved = new_items
+        hybrid_used = bool(hmetrics.get("hybrid_used", False))
+        hybrid_info = {
+            k: hmetrics.get(k)
+            for k in (
+                "anchor_top_m",
+                "walk_hops",
+                "edge_threshold",
+                "lambda_graph",
+                "damping",
+                "degree_norm",
+                "k_max",
+                "k_considered",
+                "k_reordered",
+            )
+            if k in hmetrics
+        }
+    except Exception:
+        hybrid_used = False
+        hybrid_info = {}
+
     # Residual propagation: map episode texts back to node labels
     residual_cap = int(cfg_t2.get("residual_cap_per_turn", 32))
     label_map = _build_label_map(state)
@@ -300,6 +329,9 @@ def t2_semantic(ctx, state, text: str, t1) -> T2Result:
     }
     if backend_fallback_reason:
         metrics["backend_fallback_reason"] = str(backend_fallback_reason)
+    metrics["hybrid_used"] = hybrid_used
+    if hybrid_info:
+        metrics["hybrid"] = hybrid_info
     result = T2Result(retrieved=retrieved, graph_deltas_residual=graph_deltas_residual, metrics=metrics)
     if cache is not None:
         cache.put(ckey, result)

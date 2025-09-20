@@ -821,4 +821,81 @@ graph:
 
 **Tests**
 - `tests/test_gel_update_decay.py` — updates, clamping, proportional mode, key canonicalization, decay + floor.
-- `tests/test_snapshot_gel_roundtrip.py` — round‑trip snapshot/loader; legacy fallback tolerates missing `gel`.
+
+
+## PR23 — Hybrid dense+graph re‑ranking (optional)
+
+Blend dense similarity (T2) with evidence from the Graph Evolution Layer (GEL) to reorder only the **top‑K** results. Default is **OFF**; enabling this keeps determinism and bounded work.
+
+### What it does
+- Takes the T2 list (already sorted by `(-score, id)`), considers at most `k_max` items, and computes a **graph bonus** per item using GEL edges.
+- **Anchors**: the first `anchor_top_m` items act as anchors.
+- **1‑hop sum**: sum of anchor→item edge weights above `edge_threshold` (disabled when `walk_hops=2`).
+- **2‑hop best path** (optional): best `anchor→w→item` product, scaled by `damping`.
+- **Degree normalization** (optional): divide bonus by item degree (`invdeg`).
+- **Clamp** the bonus to `max_bonus` and combine: `hybrid_score = sim + lambda_graph * bonus`.
+- Reorder indices **1..k-1** by `(-hybrid_score, id)`; index `0` (the top dense item) is **pinned**.
+
+### Configuration (YAML)
+Add under `t2.hybrid:` (all keys validated by `scripts/validate_config.py`). Defaults shown below:
+
+```yaml
+# configs/config.yaml
+t2:
+  ...
+  hybrid:
+    enabled: false      # default OFF
+    use_graph: true     # read from GEL edges (state.graph.edges)
+    k_max: 128          # only re-rank within the top-K slice
+    anchor_top_m: 8     # number of anchors from the top of the list
+    walk_hops: 1        # 1 or 2; when 2, 1-hop is disabled
+    edge_threshold: 0.10
+    lambda_graph: 0.25  # blend weight for graph bonus
+    damping: 0.50       # scales the 2-hop best-path term
+    degree_norm: none   # or "invdeg"
+    max_bonus: 0.50     # clamp on absolute graph bonus
+```
+
+**Notes & invariants**
+- With `enabled=false` **or** when the GEL edge map is empty, order is unchanged; metrics record `hybrid_used=false`.
+- When `walk_hops=2`, **1‑hop** is intentionally disabled; only 2‑hop contributes (matches tests and keeps behavior intuitive).
+- With a single anchor (`anchor_top_m=1`) and `walk_hops=1`, 1‑hop is disabled to avoid trivial self‑reordering.
+- Sort is stable and ties break by `id` ascending. Inputs are never mutated.
+
+### Where it lives
+- Pure function: `clematis/engine/stages/hybrid.py` → `rerank_with_gel(ctx, state, items)`.
+- Wired in `clematis/engine/stages/t2.py` **after** dense rescoring and **before** residuals/logging.
+
+### Observability
+Adds compact fields to `t2.jsonl`:
+```json
+{
+  "hybrid_used": true,
+  "hybrid": {
+    "k_considered": 32,
+    "k_reordered": 5,
+    "anchor_top_m": 8,
+    "walk_hops": 2,
+    "edge_threshold": 0.1,
+    "lambda_graph": 0.25,
+    "damping": 0.5,
+    "degree_norm": "invdeg",
+    "k_max": 128
+  }
+}
+```
+
+### Caches & freshness
+- The **stage cache (T2)** stores the post‑hybrid list. If GEL edges evolve between identical queries **without an Apply**, you may see a **stale re‑rank** until the stage cache TTL expires or the orchestrator cache key changes.
+- The **orchestrator cache (PR15)** remains version‑aware and invalidated on Apply; enabling hybrid doesn’t change those semantics.
+
+### Tests
+- Unit: `tests/test_t2_hybrid.py` — disabled path, no‑edges path, rank‑shift with edges, 2‑hop behavior, tie‑break, clamps, degree normalization.
+
+### Enable and try it
+```bash
+# In configs/config.yaml
+# t2.hybrid.enabled: true
+python3 scripts/run_demo.py
+jq '.hybrid_used, .hybrid' < ./.logs/t2.jsonl | tail -n2
+```

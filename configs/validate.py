@@ -82,6 +82,18 @@ DEFAULTS: Dict[str, Any] = {
         "sim_threshold": 0.0,
         "cache": {"max_entries": 512, "ttl_s": 300},
         "ranking": {"alpha_sim": 1.0, "beta_recency": 0.0, "gamma_importance": 0.0},
+        "hybrid": {
+            "enabled": False,
+            "use_graph": True,
+            "anchor_top_m": 8,
+            "walk_hops": 1,                 # 1 or 2
+            "edge_threshold": 0.10,         # [0,1]
+            "lambda_graph": 0.25,           # [0,1]
+            "damping": 0.50,                # [0,1], used when walk_hops=2
+            "degree_norm": "none",          # none | invdeg
+            "max_bonus": 0.50,              # >= 0
+            "k_max": 128,                   # >= 1 (cap work)
+        },
     },
     "t3": {
         "max_rag_loops": 1,
@@ -142,7 +154,7 @@ KNOWN_CACHE_NAMESPACES = {"t2:semantic"}
 # Allowed key sets per section
 ALLOWED_TOP = {"t1", "t2", "t3", "t4", "graph", "k_surface", "surface_method", "budgets", "flags"}
 ALLOWED_T1 = {"cache", "iter_cap", "queue_budget", "node_budget", "decay", "edge_type_mult", "radius_cap"}
-ALLOWED_T2 = {"backend", "k_retrieval", "sim_threshold", "cache", "ranking",
+ALLOWED_T2 = {"backend", "k_retrieval", "sim_threshold", "cache", "ranking", "hybrid",
               "tiers", "exact_recent_days", "clusters_top_m", "owner_scope",
               "residual_cap_per_turn", "lancedb", "archive"}
 ALLOWED_T3 = {"max_rag_loops", "max_ops_per_turn", "backend",
@@ -154,6 +166,11 @@ ALLOWED_T4 = {
 }
 ALLOWED_CACHE_FIELDS = {"enabled", "namespaces", "max_entries", "ttl_sec", "ttl_s"}
 ALLOWED_RANKING_FIELDS = {"alpha_sim", "beta_recency", "gamma_importance"}
+
+ALLOWED_T2_HYBRID = {
+    "enabled", "use_graph", "anchor_top_m", "walk_hops", "edge_threshold",
+    "lambda_graph", "damping", "degree_norm", "max_bonus", "k_max",
+}
 
 ALLOWED_GRAPH = {"enabled", "coactivation_threshold", "observe_top_k", "pair_cap_per_obs", "update", "decay", "merge", "split"}
 ALLOWED_GRAPH_UPDATE = {"mode", "alpha", "clamp_min", "clamp_max"}
@@ -224,6 +241,7 @@ def validate_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
     raw_t1_cache = _ensure_dict(raw_t1.get("cache"))
     raw_t2_cache = _ensure_dict(raw_t2.get("cache"))
     raw_t2_ranking = _ensure_dict(raw_t2.get("ranking"))
+    raw_t2_hybrid = _ensure_dict(raw_t2.get("hybrid"))
     raw_t4_cache = _ensure_dict(raw_t4.get("cache"))
     raw_graph = _ensure_dict(cfg_in.get("graph"))
     raw_graph_update = _ensure_dict(raw_graph.get("update"))
@@ -281,6 +299,12 @@ def validate_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
             sug = _suggest_key(k, ALLOWED_RANKING_FIELDS)
             hint = f" (did you mean '{sug}')" if sug else ""
             _err(errors, f"t2.ranking.{k}", f"unknown key{hint}")
+
+    for k in raw_t2_hybrid.keys():
+        if k not in ALLOWED_T2_HYBRID:
+            sug = _suggest_key(k, ALLOWED_T2_HYBRID)
+            hint = f" (did you mean '{sug}')" if sug else ""
+            _err(errors, f"t2.hybrid.{k}", f"unknown key{hint}")
 
     for k in raw_t4_cache.keys():
         if k not in ALLOWED_CACHE_FIELDS:
@@ -390,6 +414,47 @@ def validate_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
     # write-back: ensure normalized subdicts are attached
     t2["cache"] = c2
     t2["ranking"] = r2
+
+    # hybrid re-ranker (PR23)
+    h2 = _ensure_subdict(t2, "hybrid")
+    h2["enabled"] = _coerce_bool(h2.get("enabled", False))
+    h2["use_graph"] = _coerce_bool(h2.get("use_graph", True))
+
+    h2["anchor_top_m"] = _coerce_int(h2.get("anchor_top_m", 8))
+    if h2["anchor_top_m"] < 1:
+        _err(errors, "t2.hybrid.anchor_top_m", "must be >= 1")
+
+    h2["walk_hops"] = _coerce_int(h2.get("walk_hops", 1))
+    if h2["walk_hops"] not in {1, 2}:
+        _err(errors, "t2.hybrid.walk_hops", "must be 1 or 2")
+
+    h2["edge_threshold"] = _coerce_float(h2.get("edge_threshold", 0.10))
+    if not (0.0 <= h2["edge_threshold"] <= 1.0):
+        _err(errors, "t2.hybrid.edge_threshold", "must be in [0, 1]")
+
+    h2["lambda_graph"] = _coerce_float(h2.get("lambda_graph", 0.25))
+    if not (0.0 <= h2["lambda_graph"] <= 1.0):
+        _err(errors, "t2.hybrid.lambda_graph", "must be in [0, 1]")
+
+    h2["damping"] = _coerce_float(h2.get("damping", 0.50))
+    if not (0.0 <= h2["damping"] <= 1.0):
+        _err(errors, "t2.hybrid.damping", "must be in [0, 1]")
+
+    deg = str(h2.get("degree_norm", "none"))
+    if deg not in {"none", "invdeg"}:
+        _err(errors, "t2.hybrid.degree_norm", "must be one of {none,invdeg}")
+    h2["degree_norm"] = deg
+
+    h2["max_bonus"] = _coerce_float(h2.get("max_bonus", 0.50))
+    if h2["max_bonus"] < 0.0:
+        _err(errors, "t2.hybrid.max_bonus", "must be >= 0")
+
+    h2["k_max"] = _coerce_int(h2.get("k_max", 128))
+    if h2["k_max"] < 1:
+        _err(errors, "t2.hybrid.k_max", "must be >= 1")
+
+    # write back
+    t2["hybrid"] = h2
 
     # ---- T3 ----
     t3 = _ensure_subdict(merged, "t3")
