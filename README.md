@@ -643,3 +643,37 @@ python3 scripts/rotate_logs.py --dir ./.logs --pattern '*.jsonl' --max-bytes 10_
 - Keeps `--backups` generations: `.1`, `.2`, … (oldest dropped).
 - No recursion; only files directly under `--dir` are considered.
 - The script does **not** append—only rotates existing files. Wire‑in is optional and non‑disruptive.
+
+## PR20 — Performance guardrails & T4 fuzz invariants (opt-in)
+
+Add deterministic property tests for T4 plus opt-in performance checks and a tiny microbench CLI. **No runtime behavior changes.**
+
+### What landed
+- `tests/test_t4_property.py` — deterministic fuzz/property tests (always run).
+- `tests/test_perf_guardrails.py` — opt-in perf checks (skipped by default).
+- `scripts/bench_t4.py` — microbench CLI for manual runs.
+
+### Running the tests
+Property tests run in the normal suite:
+```bash
+pytest -q tests/test_t4_property.py
+
+Perf tests are opt-in to avoid CI flakiness. Enable via env + mark:
+RUN_PERF=1 pytest -q -m perf tests/test_perf_guardrails.py
+
+Microbench CLI
+
+Run synthetic workloads through the T4 meta-filter and print timing stats (median/p95) and approvals.
+python3 scripts/bench_t4.py                       # defaults: --num 10000 --runs 5 --seed 1337
+python3 scripts/bench_t4.py --num 20000 --runs 5
+python3 scripts/bench_t4.py --num 8000 --runs 7 --json  # machine-readable output
+
+typical output:
+N=10000 runs=5 seed=1337  l2=1.5 novelty=0.3 churn=64
+median=42.1ms  p95=44.3ms  min=40.6ms  max=45.0ms  thr≈237800.0 ops/s
+approved median/min/max = 64/64/64
+reasons total: CHURN_CAP_HIT:49312, NOVELTY_SPIKE:...
+
+Notes:
+	•	Workload is deterministic per seed; change --seed to vary.
+	•	Throughput figures are indicative and machine-dependent; use for relative checks only.
