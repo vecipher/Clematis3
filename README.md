@@ -1,4 +1,4 @@
-# Clematis v2 — Scaffold (M1 + M2)
+# Clematis v3 — Scaffold (M1 + M2)
 
 Minimal scaffold matching the Clematis v2 steering capsule. Stages are pure; the orchestrator handles I/O and logging.  
 The demo exercises the canonical turn loop and writes structured JSONL logs for first‑class observability.
