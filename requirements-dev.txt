@@ -1,4 +1,5 @@
 pytest
 numpy
+pyyaml>=6.0.1
 setuptools>=68
 wheel
