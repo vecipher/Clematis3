@@ -94,7 +94,7 @@ jobs:
 
             # Run the disabled-path demo to generate fresh logs
             if [ -f scripts/run_demo.py ]; then
-              python3 scripts/run_demo.py --config .ci/disabled_path_config.yaml || true
+              python3 scripts/run_demo.py --config .ci/disabled_path_config.yaml --policy round_robin --agents "A,AgentA" --steps 6 || true
             else
               echo "scripts/run_demo.py not found; cannot produce logs" && exit 1
             fi
