@@ -1,0 +1,102 @@
+
+
+name: disabled-path-identity
+
+on:
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  identity:
+    name: Verify disabled-path identity (M6 guard)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements*.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install dependencies (best-effort)
+        run: |
+          set -euxo pipefail
+          if [ -f requirements.txt ]; then
+            python -m pip install --upgrade pip
+            pip install -r requirements.txt
+          else
+            python -m pip install --upgrade pip
+            pip install pytest pyyaml numpy
+          fi
+
+      - name: Validate repo config (non-strict if missing)
+        run: |
+          set -euxo pipefail
+          if [ -f scripts/validate_config.py ]; then
+            if [ -f configs/config.yaml ]; then
+              python scripts/validate_config.py configs/config.yaml || (echo "Repo config has warnings/errors (non-strict step), continuing"; true)
+            fi
+          else
+            echo "scripts/validate_config.py not found; skipping"
+          fi
+
+      - name: Validate disabled-path config (STRICT)
+        run: |
+          set -euxo pipefail
+          if [ -f scripts/validate_config.py ]; then
+            python scripts/validate_config.py .ci/disabled_path_config.yaml --strict
+          else
+            echo "scripts/validate_config.py not found; failing strict step"
+            exit 1
+          fi
+
+      - name: Run identity unit test
+        run: |
+          set -euxo pipefail
+          if [ -d tests ]; then
+            pytest -q tests/test_identity_disabled_path.py::test_disabled_perf_and_quality_identity_to_base
+          else
+            echo "tests/ directory not found"; exit 1
+          fi
+
+      - name: CLI validator smoke (quiet config)
+        run: |
+          set -euxo pipefail
+          if [ -d tests ]; then
+            pytest -q tests/test_config_perf_quality.py::test_cli_validator_smoke
+          else
+            echo "tests/ directory not found"; exit 1
+          fi
+
+      - name: Optional golden diff (skips if goldens or demo absent)
+        run: |
+          set -euxo pipefail
+          if [ -d tests/goldens/pr29 ]; then
+            echo "Goldens detected; attempting to run demo and diff"
+            # Try a demo run that respects the disabled-path config if available
+            if [ -f scripts/run_demo.py ]; then
+              python scripts/run_demo.py --config .ci/disabled_path_config.yaml || true
+            fi
+            # Determine output directory candidates
+            OUTDIR="./.logs"
+            GOLDEN="tests/goldens/pr29"
+            if [ -d "$OUTDIR" ]; then
+              echo "Diffing $OUTDIR against $GOLDEN (recursive)"
+              diff -ru "$OUTDIR" "$GOLDEN/.logs"
+            else
+              echo "No .logs produced; skipping diff"
+            fi
+          else
+            echo "No goldens found (tests/goldens/pr29); skipping diff"
+          fi

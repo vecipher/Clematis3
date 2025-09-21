@@ -93,3 +93,59 @@ flags: {enable_world_memory: true, allow_reflection: true}
 #   fairness:
 #     max_consecutive_turns: 1  # enforced in PR27
 #     aging_ms: 200              # bucket size for fair-queue priority
+
+# -----------------------------------------------------------------------------
+# M6 Performance & Compaction (defaults OFF) — Commented example only
+# -----------------------------------------------------------------------------
+# perf:
+#   enabled: false
+#   t1:
+#     queue_cap: 10000            # frontier/visited max sizes (deterministic evict)
+#     dedupe_window: 8192         # ring buffer for recent-node dedupe
+#     cache:
+#       max_entries: 512
+#       max_bytes: 64000000       # soft cap; LRU beyond this
+#   t2:
+#     embed_dtype: "fp32"          # compute dtype (math)
+#     embed_store_dtype: "fp32"    # storage dtype; PR33 may set "fp16"
+#     precompute_norms: true       # keep fp32 norms when store is fp16
+#     cache:
+#       max_entries: 512
+#       max_bytes: 128000000
+#   snapshots:
+#     compression: "zstd"          # "none" | "zstd"
+#     level: 3
+#     delta_mode: false            # if true, writer may emit delta snapshots
+#     every_n_turns: 1
+#   metrics:
+#     report_memory: true          # gated emission of memory counters
+
+# -----------------------------------------------------------------------------
+# M7 Retrieval Quality — Prep only (no runtime wiring in M6)
+# -----------------------------------------------------------------------------
+# t2:
+#   quality:
+#     enabled: false               # must remain false in M6
+#     normalizer:
+#       stopwords: builtin         # or path: "examples/quality/stopwords.txt"
+#       stemmer: none              # or "porter-lite"
+#       min_token_len: 2
+#     aliasing:
+#       enabled: false
+#       map_path: examples/quality/aliases.yaml
+#       max_expansions_per_token: 2
+#     lexical:
+#       enabled: true
+#       bm25: { k1: 1.2, b: 0.75, doclen_floor: 10 }
+#     fusion:
+#       enabled: true
+#       alpha_semantic: 0.70
+#       score_norm: zscore         # or "minmax"
+#     mmr:
+#       enabled: true
+#       lambda_relevance: 0.75
+#       diversity_by_owner: true
+#       diversity_by_token: true
+#       k_final: 64
+#     cache:
+#       salt: ""                   # optional; noop in M6

@@ -132,6 +132,22 @@ def main(argv: list[str]) -> int:
             ttl=cache.get("ttl_sec"), ns=cache.get("namespaces"), mode=t4.get("cache_bust_mode")
         )
     )
+    # PR30: extra summary for perf + RQ prep (informational only)
+    perf_cfg = normalized.get("perf", {}) or {}
+    perf_t2 = perf_cfg.get("t2", {}) or {}
+    perf_snap = perf_cfg.get("snapshots", {}) or {}
+    perf_metrics = perf_cfg.get("metrics", {}) or {}
+    q_cfg = (normalized.get("t2", {}) or {}).get("quality", {}) or {}
+
+    print(
+        "perf: enabled={pe} report_memory={rm} embed_store_dtype={esd} snapshots.compression={comp}".format(
+            pe=perf_cfg.get("enabled"),
+            rm=perf_metrics.get("report_memory"),
+            esd=perf_t2.get("embed_store_dtype"),
+            comp=perf_snap.get("compression"),
+        )
+    )
+    print("t2.quality: enabled={qe}  # prep-only in M6".format(qe=q_cfg.get("enabled")))
     # Print warnings (if any) without failing the run
     for w in sorted(warnings):
         print(w)
