@@ -1140,3 +1140,7 @@ Invariants & rollback
 	•	Determinism holds: same inputs + same config ⇒ identical picks/yields and identical logs.
 	•	Stages remain pure; only immutable per-slice budgets are injected.
 	•	Rollback is trivial: set scheduler.enabled=false. CI enforces that disabled-path logs match golden.
+
+## Changelog & Releases
+- See the [CHANGELOG](./CHANGELOG.md) for notable changes.
+- Binary / source packages and release notes are on the [Releases] page.
