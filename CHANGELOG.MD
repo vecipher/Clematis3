@@ -34,12 +34,31 @@ All notable changes to this project will be documented in this file.
 - `tests/config/test_validate_perf_t1_caps.py` — CLI strict/invalid/warning scenarios.
 - `tests/stages/test_t1_compaction.py` — placeholder (skipped) until a stable T1 graph fixture is exposed.
 
+
 ### Changed (PR31)
 - `engine/stages/t1.py` wired to use the new caps and dedupe **behind gates**; default behavior/logs remain identical to PR29 goldens (identity CI).
 - Metrics only emit when `perf.enabled=true` **and** `perf.metrics.report_memory=true`:
   - `t1_frontier_evicted`, `t1_dedup_hits`, `t1_visited_evicted`.
 
-### Developer Notes
+### Added (PR32 — Size‑aware caches for T1/T2; defaults OFF)
+- **Utility:** `engine/util/lru_bytes.py` — `LRUBytes` (deterministic LRU‑by‑bytes with `(max_entries, max_bytes)`, oversize insert rejection, optional `on_evict`).
+- **Stages:**
+  - `engine/stages/t1.py` — PR32‑aware cache selector prefers `perf.t1.cache` (bytes) when `perf.enabled=true` and caps > 0; legacy LRU fallback preserved.
+  - `engine/stages/t2.py` — wired to `perf.t2.cache` (bytes) with deterministic cost estimation; legacy LRU+TTL fallback preserved.
+- **Validator:** accepts `perf.t1.cache.{max_entries,max_bytes}` and `perf.t2.cache.{max_entries,max_bytes}` (≥ 0) and warns when configured while `perf.enabled=false` (identity path).
+- **Docs:** README section “M6 — Perf & Compaction (PR32: Size‑aware caches for T1/T2; OFF by default)”.
+
+### Tests (PR32)
+- `tests/util/test_lru_bytes.py` — sizes, multi‑eviction, MRU on get/put, oversize reject, clear.
+- `tests/config/test_validate_perf_cache_pr32.py` — strict acceptance, disabled‑perf warnings, zero‑caps disabled.
+- `tests/stages/test_t2_cache_smoke.py` — bytes‑mode selection and eviction math; metrics smoke is skipped pending a stable fixture.
+
+### Changed (PR32)
+- **Identity preserved:** with `perf.enabled=false` or zero/absent caps, behavior and logs remain identical to PR29/PR31 disabled path.
+- **Metrics (gated):** new counters only when `perf.enabled=true` **and** `perf.metrics.report_memory=true`:
+  - `t1.cache_evictions`, `t1.cache_bytes`
+  - `t2.cache_evictions`, `t2.cache_bytes`
+
 - Local smoke:
   ```bash
   pytest -q

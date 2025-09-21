@@ -1,29 +1,81 @@
 from __future__ import annotations
 from typing import Dict, Any, List
 from ..types import T2Result, EpisodeRef
-from ..cache import LRUCache, stable_key
+from ..cache import stable_key
+from ..util.lru_bytes import LRUBytes
 from ...adapters.embeddings import BGEAdapter
 from ...memory.index import InMemoryIndex
 import numpy as np
 import datetime as dt
 from .hybrid import rerank_with_gel
 
+def _cfg_get(obj, path, default=None):
+    cur = obj
+    for i, key in enumerate(path):
+        try:
+            if isinstance(cur, dict):
+                cur = cur.get(key, {} if i < len(path) - 1 else default)
+            else:
+                cur = getattr(cur, key)
+        except Exception:
+            return default
+    return cur
+
+def _estimate_result_cost(retrieved, metrics):
+    """Deterministic, conservative byte estimate for caching a T2Result."""
+    try:
+        texts_sum = sum(len(getattr(ep, "text", "") or "") for ep in (retrieved or []))
+        ids_sum = sum(len(getattr(ep, "id", "") or "") for ep in (retrieved or []))
+        base = 16 * len(retrieved or [])
+        metric_overhead = 64
+        # Include small dependency on k_used/k_returned to keep estimates monotonic
+        k_used = int((metrics or {}).get("k_used", 0)) if isinstance(metrics, dict) else 0
+        k_ret = int((metrics or {}).get("k_returned", 0)) if isinstance(metrics, dict) else 0
+        return texts_sum + ids_sum + base + metric_overhead + 8 * (k_used + k_ret)
+    except Exception:
+        return 1024
+
 # Config-driven cache (constructed lazily per cfg)
 _T2_CACHE = None
 _T2_CACHE_CFG = None
+_T2_CACHE_KIND = None
 
-def _get_cache(cfg_t2: dict):
-    c = cfg_t2.get("cache", {})
+def _get_cache(ctx, cfg_t2: dict):
+    """PR32-aware cache selection.
+    Priority:
+      1) perf.t2.cache (LRU-by-bytes) when perf.enabled and caps > 0.
+      2) legacy t2.cache (LRU with TTL) for backward compatibility.
+    Returns: (cache, kind_str) where kind_str in {"bytes", "lru"} or (None, None).
+    """
+    perf_on = bool(_cfg_get(ctx, ["cfg", "perf", "enabled"], False))
+    max_e = int(_cfg_get(ctx, ["cfg", "perf", "t2", "cache", "max_entries"], 0) or 0)
+    max_b = int(_cfg_get(ctx, ["cfg", "perf", "t2", "cache", "max_bytes"], 0) or 0)
+    global _T2_CACHE, _T2_CACHE_CFG, _T2_CACHE_KIND
+    # PR32 path: size-aware cache behind perf gate
+    if perf_on and (max_e > 0 or max_b > 0):
+        cfg_tuple = ("bytes", max_e, max_b)
+        if _T2_CACHE is None or _T2_CACHE_CFG != cfg_tuple:
+            _T2_CACHE = LRUBytes(max_entries=max_e, max_bytes=max_b)
+            _T2_CACHE_CFG = cfg_tuple
+            _T2_CACHE_KIND = "bytes"
+        return _T2_CACHE, _T2_CACHE_KIND
+    # Legacy fallback (pre-PR32 semantics) using t2.cache
+    c = cfg_t2.get("cache", {}) or {}
     enabled = bool(c.get("enabled", True))
     if not enabled:
-        return None
+        return None, None
+    try:
+        from ..cache import LRUCache  # local import to avoid global import when unused
+    except Exception:
+        return None, None
     max_entries = int(c.get("max_entries", 512))
     ttl_s = int(c.get("ttl_s", 300))
-    global _T2_CACHE, _T2_CACHE_CFG
-    if _T2_CACHE is None or _T2_CACHE_CFG != (max_entries, ttl_s):
+    cfg_tuple = ("lru", max_entries, ttl_s)
+    if _T2_CACHE is None or _T2_CACHE_CFG != cfg_tuple:
         _T2_CACHE = LRUCache(max_entries=max_entries, ttl_s=ttl_s)
-        _T2_CACHE_CFG = (max_entries, ttl_s)
-    return _T2_CACHE
+        _T2_CACHE_CFG = cfg_tuple
+        _T2_CACHE_KIND = "lru"
+    return _T2_CACHE, _T2_CACHE_KIND
 
 def _gather_changed_labels(state: dict, t1) -> List[str]:
     """Collect labels for nodes touched by T1 across active graphs, deterministically sorted."""
@@ -145,7 +197,7 @@ def t2_semantic(ctx, state, text: str, t1) -> T2Result:
     clusters_top_m: int = int(cfg_t2.get("clusters_top_m", 3))
     now_str = getattr(ctx, "now", None)
     # Cache setup
-    cache = _get_cache(cfg_t2)
+    cache, cache_kind = _get_cache(ctx, cfg_t2)
     try:
         index_ver = int(index.index_version())
     except Exception:
@@ -161,6 +213,10 @@ def t2_semantic(ctx, state, text: str, t1) -> T2Result:
         }),
         index_ver,
     )
+    perf_enabled = bool(_cfg_get(ctx, ["cfg", "perf", "enabled"], False))
+    metrics_enabled = bool(_cfg_get(ctx, ["cfg", "perf", "metrics", "report_memory"], False))
+    cache_evicted_n = 0
+    cache_evicted_b = 0
     cache_used = False
     cache_hits = 0
     cache_misses = 0
@@ -351,7 +407,19 @@ def t2_semantic(ctx, state, text: str, t1) -> T2Result:
         metrics["hybrid"] = hybrid_info
     result = T2Result(retrieved=retrieved, graph_deltas_residual=graph_deltas_residual, metrics=metrics)
     if cache is not None:
-        cache.put(ckey, result)
+        if cache_kind == "bytes":
+            cost = _estimate_result_cost(retrieved, metrics)
+            ev_n, ev_b = cache.put(ckey, result, cost)
+            cache_evicted_n += int(ev_n or 0)
+            cache_evicted_b += int(ev_b or 0)
+        else:
+            # legacy LRU (no size accounting)
+            cache.put(ckey, result)
+        # sync simple hit/miss counters for continuity with older logs
         result.metrics["cache_used"] = True
         result.metrics["cache_misses"] = result.metrics.get("cache_misses", 0) + 1
+        # gated perf counters (new keys only when both gates are ON)
+        if perf_enabled and metrics_enabled and cache_kind == "bytes":
+            result.metrics["t2.cache_evictions"] = result.metrics.get("t2.cache_evictions", 0) + cache_evicted_n
+            result.metrics["t2.cache_bytes"] = result.metrics.get("t2.cache_bytes", 0) + cache_evicted_b
     return result

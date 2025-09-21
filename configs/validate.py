@@ -1146,6 +1146,14 @@ def validate_config_verbose(cfg: Dict[str, Any]) -> Tuple[Dict[str, Any], List[s
                     _coerce_int(capsv.get("frontier", 0)) > 0 or
                     _coerce_int(capsv.get("visited", 0)) > 0):
                     warnings.append("W[perf.t1]: caps/dedupe configured while perf.enabled=false; features remain disabled (identity path).")
+                # PR32: caches configured while perf is disabled → identity path (no effect)
+                pt1c = _ensure_dict(pt1v.get("cache"))
+                pt2 = _ensure_dict(perf.get("t2"))
+                pt2c = _ensure_dict(pt2.get("cache"))
+                if (_coerce_int(pt1c.get("max_entries", 0)) > 0 or _coerce_int(pt1c.get("max_bytes", 0)) > 0):
+                    warnings.append("W[perf.t1.cache]: cache configured while perf.enabled=false; cache remains disabled (identity path).")
+                if (_coerce_int(pt2c.get("max_entries", 0)) > 0 or _coerce_int(pt2c.get("max_bytes", 0)) > 0):
+                    warnings.append("W[perf.t2.cache]: cache configured while perf.enabled=false; cache remains disabled (identity path).")
             # Warn if both legacy and new frontier caps are present
             if "queue_cap" in pt1v and "frontier" in capsv:
                 warnings.append("W[perf.t1]: both queue_cap and caps.frontier set; caps.frontier will be used by runtime.")

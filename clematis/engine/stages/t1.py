@@ -6,27 +6,43 @@ from ..types import T1Result
 from ..cache import LRUCache, stable_key
 from ..util.ring import DedupeRing
 from ..util.lru_det import DeterministicLRUSet
+from ..util.lru_bytes import LRUBytes
 
 # module-level cache holder configured via Config.t1.cache
 _T1_CACHE = None
 _T1_CACHE_CFG = None
+_T1_CACHE_KIND = None
 
-def _get_cache(cfg_t1: dict):
+def _get_cache(ctx, cfg_t1: dict):
     """
-    Return an LRUCache configured by cfg_t1['cache'] or None if disabled.
-    Recreate the cache if max_entries/ttl_s changed since last call.
+    PR32-aware cache selection for T1 results.
+    Returns: (cache, kind_str) where kind_str in {"bytes", "lru"} or (None, None).
     """
-    c = cfg_t1.get("cache", {})
+    perf_on = bool(_cfg_get(ctx, ["cfg", "perf", "enabled"], False))
+    max_e = int(_cfg_get(ctx, ["cfg", "perf", "t1", "cache", "max_entries"], 0) or 0)
+    max_b = int(_cfg_get(ctx, ["cfg", "perf", "t1", "cache", "max_bytes"], 0) or 0)
+    global _T1_CACHE, _T1_CACHE_CFG, _T1_CACHE_KIND
+    # PR32 path: size-aware cache behind perf gate
+    if perf_on and (max_e > 0 or max_b > 0):
+        cfg_tuple = ("bytes", max_e, max_b)
+        if _T1_CACHE is None or _T1_CACHE_CFG != cfg_tuple:
+            _T1_CACHE = LRUBytes(max_entries=max_e, max_bytes=max_b)
+            _T1_CACHE_CFG = cfg_tuple
+            _T1_CACHE_KIND = "bytes"
+        return _T1_CACHE, _T1_CACHE_KIND
+    # Legacy fallback (pre-PR32 semantics) using t1.cache (LRU with TTL)
+    c = cfg_t1.get("cache", {}) or {}
     enabled = bool(c.get("enabled", True))
     if not enabled:
-        return None
+        return None, None
     max_entries = int(c.get("max_entries", 512))
     ttl_s = int(c.get("ttl_s", 300))
-    global _T1_CACHE, _T1_CACHE_CFG
-    if _T1_CACHE is None or _T1_CACHE_CFG != (max_entries, ttl_s):
+    cfg_tuple = ("lru", max_entries, ttl_s)
+    if _T1_CACHE is None or _T1_CACHE_CFG != cfg_tuple:
         _T1_CACHE = LRUCache(max_entries=max_entries, ttl_s=ttl_s)
-        _T1_CACHE_CFG = (max_entries, ttl_s)
-    return _T1_CACHE
+        _T1_CACHE_CFG = cfg_tuple
+        _T1_CACHE_KIND = "lru"
+    return _T1_CACHE, _T1_CACHE_KIND
 
 EPS = 1e-6
 
@@ -45,6 +61,24 @@ def _cfg_get(obj, path, default=None):
             return default
     return cur
 
+def _estimate_t1_cost(deltas, metrics_dict):
+    """Deterministic, conservative byte estimate for caching a T1 result."""
+    try:
+        n = len(deltas or [])
+        id_bytes = 0
+        for d in (deltas or []):
+            if isinstance(d, dict):
+                v = d.get("id")
+                if v is not None:
+                    id_bytes += len(str(v))
+        # Base overhead per entry + metrics terms
+        base = 24 * n
+        metric_overhead = 64
+        pops = int((metrics_dict or {}).get("pops", 0)) if isinstance(metrics_dict, dict) else 0
+        props = int((metrics_dict or {}).get("propagations", 0)) if isinstance(metrics_dict, dict) else 0
+        return id_bytes + base + metric_overhead + 8 * (pops + props)
+    except Exception:
+        return 1024
 
 def _match_keywords(text: str, labels: List[Tuple[str, str]]) -> Dict[str, float]:
     """
@@ -71,7 +105,7 @@ def _compute_decay(distance: int, cfg_t1: dict) -> float:
 
 def t1_propagate(ctx, state, text: str) -> T1Result:
     cfg_t1 = ctx.cfg.t1
-    cache = _get_cache(cfg_t1)
+    cache, cache_kind = _get_cache(ctx, cfg_t1)
     edge_mult = cfg_t1.get("edge_type_mult", {"supports": 1.0, "associates": 0.6, "contradicts": 0.8})
     queue_budget = int(cfg_t1.get("queue_budget", 10_000))
     node_budget = float(cfg_t1.get("node_budget", 1.5))
@@ -109,6 +143,7 @@ def t1_propagate(ctx, state, text: str) -> T1Result:
     t1_frontier_evicted = 0
     t1_dedup_hits = 0
     t1_visited_evicted = 0
+    t1_cache_evicted = 0; t1_cache_bytes = 0
 
     store = state.get("store")
     active_graphs = state.get("active_graphs", [])
@@ -274,7 +309,13 @@ def t1_propagate(ctx, state, text: str) -> T1Result:
         }
         result = {"deltas": deltas_for_gid, "metrics": result_metrics}
         if cache is not None:
-            cache.put(ckey, result)
+            if cache_kind == "bytes":
+                cost = _estimate_t1_cost(deltas_for_gid, result_metrics)
+                ev_n, ev_b = cache.put(ckey, result, cost)
+                t1_cache_evicted += int(ev_n or 0)
+                t1_cache_bytes += int(ev_b or 0)
+            else:
+                cache.put(ckey, result)
         all_deltas.extend(deltas_for_gid)
         total_pops += pops
         total_iters += result_metrics["iters"]
@@ -299,5 +340,7 @@ def t1_propagate(ctx, state, text: str) -> T1Result:
             "t1_frontier_evicted": t1_frontier_evicted,
             "t1_dedup_hits": t1_dedup_hits,
             "t1_visited_evicted": t1_visited_evicted,
+            "t1.cache_evictions": t1_cache_evicted,
+            "t1.cache_bytes": t1_cache_bytes,
         })
     return T1Result(graph_deltas=all_deltas, metrics=metrics)

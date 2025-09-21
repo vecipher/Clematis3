@@ -1141,7 +1141,7 @@ Invariants & rollback
 	•	Stages remain pure; only immutable per-slice budgets are injected.
 	•	Rollback is trivial: set scheduler.enabled=false. CI enforces that disabled-path logs match golden.
 
--## M6 — Perf & Compaction (PR31: T1 caps + dedupe; OFF by default)
+## M6 — Perf & Compaction (PR31: T1 caps + dedupe; OFF by default)
 
 PR31 introduces **deterministic T1 compaction** controls that bound memory without changing behavior unless explicitly enabled. Defaults preserve the **disabled‑path identity** used by CI.
 
@@ -1190,6 +1190,55 @@ python3 scripts/validate_config.py --strict configs/config.yaml
 - Do **not** set `frontier/visited/dedupe_window` to `0` in strict configs; omit the keys instead to disable.
 - When both `t1.queue_budget` and `perf.t1.caps.frontier` are present, T1 respects the stricter bound.
 - Disabled path remains identical: with `perf.enabled=false` (or no perf keys), no new metrics keys appear and logs match PR29 goldens after normalization.
+
+```
+
+## M6 — Perf & Compaction (PR32: Size‑aware caches for T1/T2; OFF by default)
+
+PR32 adds a deterministic **LRU‑by‑bytes** cache utility and wires it behind `perf.t1.cache` and `perf.t2.cache`. These caches **only avoid recomputation**; enabling them **does not** change outputs or ordering. Defaults keep the **disabled‑path identity** used by CI.
+
+**What lands**
+- Shared utility `LRUBytes(max_entries, max_bytes)` with deterministic LRU order (no clocks/RNG).
+- T1/T2 size‑aware caches selected when `perf.enabled=true` **and** either cap > 0. Otherwise, legacy stage caches remain as shipped.
+- Oversized insertions (`cost_bytes > max_bytes`) are **rejected** to prevent thrash.
+
+**Identity by default**
+- Keep `perf.enabled: false` or set caps to `0` (or omit) to stay byte‑for‑byte identical to PR29 goldens (and PR31 disabled path).
+- New metrics appear **only** when both `perf.enabled=true` and `perf.metrics.report_memory=true`.
+
+**Config (enable example)**
+```yaml
+# configs/config.yaml
+perf:
+  enabled: true
+  metrics: { report_memory: true }
+  t1:
+    cache: { max_entries: 512, max_bytes: 2_000_000 }
+  t2:
+    cache: { max_entries: 512, max_bytes: 8_000_000 }
+```
+
+**Metrics (gated)**
+- `t1.cache_evictions`, `t1.cache_bytes`
+- `t2.cache_evictions`, `t2.cache_bytes`
+
+**Determinism & behavior**
+- Eviction is strictly LRU→MRU (unique positions), with stable tie‑break by order; no randomness or clocks.
+- Keys must be stable strings (the stages provide canonical keys; no action needed for default demo).
+- With caches ON vs OFF, **results are identical**; only performance changes.
+
+**Validator**
+- Accepts `perf.t1.cache.{max_entries,max_bytes}` and `perf.t2.cache.{max_entries,max_bytes}` (≥ 0).
+- Warns if any caps are set while `perf.enabled=false` (identity path; caches disabled).
+
+**Tests**
+- Utility: `tests/util/test_lru_bytes.py` (sizes, multi‑eviction, MRU on get/put, oversize reject).
+- Config: `tests/config/test_validate_perf_cache_pr32.py` (strict acceptance, disabled‑perf warnings, zero‑caps disabled).
+- Stage: `tests/stages/test_t2_cache_smoke.py` (bytes‑mode selection, eviction math); metrics smoke is skipped pending a stable fixture.
+
+**Gotchas**
+- Don’t set negative caps (validator rejects); use `0` or omit to disable.
+- If you enable both **legacy** stage caches and **perf** caches, behavior is still deterministic, but you may see overlapping effects; prefer one layer for clarity.
 ```
 
 ## Changelog & Releases
