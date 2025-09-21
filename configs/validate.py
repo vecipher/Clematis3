@@ -216,8 +216,9 @@ _ALLOWED_SCHED_POLICIES = {"round_robin", "fair_queue"}
 
 # PERF (M6) allowed keys
 ALLOWED_PERF = {"enabled", "t1", "t2", "snapshots", "metrics"}
-ALLOWED_PERF_T1 = {"queue_cap", "dedupe_window", "cache"}
+ALLOWED_PERF_T1 = {"queue_cap", "dedupe_window", "cache", "caps"}
 ALLOWED_PERF_T1_CACHE = {"max_entries", "max_bytes"}
+ALLOWED_PERF_T1_CAPS = {"frontier", "visited"}
 ALLOWED_PERF_T2 = {"embed_dtype", "embed_store_dtype", "precompute_norms", "cache"}
 ALLOWED_PERF_T2_CACHE = {"max_entries", "max_bytes"}
 ALLOWED_PERF_SNAP = {"compression", "level", "delta_mode", "every_n_turns"}
@@ -309,6 +310,7 @@ def validate_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
     raw_perf = _ensure_dict(cfg_in.get("perf"))
     raw_perf_t1 = _ensure_dict(raw_perf.get("t1"))
     raw_perf_t1_cache = _ensure_dict(raw_perf_t1.get("cache"))
+    raw_perf_t1_caps = _ensure_dict(raw_perf_t1.get("caps"))
     raw_perf_t2 = _ensure_dict(raw_perf.get("t2"))
     raw_perf_t2_cache = _ensure_dict(raw_perf_t2.get("cache"))
     raw_perf_snap = _ensure_dict(raw_perf.get("snapshots"))
@@ -438,6 +440,10 @@ def validate_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
             if k not in ALLOWED_PERF_T1_CACHE:
                 sug = _suggest_key(k, ALLOWED_PERF_T1_CACHE); hint = f" (did you mean '{sug}')" if sug else ""
                 _err(errors, f"perf.t1.cache.{k}", f"unknown key{hint}")
+        for k in raw_perf_t1_caps.keys():
+            if k not in ALLOWED_PERF_T1_CAPS:
+                sug = _suggest_key(k, ALLOWED_PERF_T1_CAPS); hint = f" (did you mean '{sug}')" if sug else ""
+                _err(errors, f"perf.t1.caps.{k}", f"unknown key{hint}")
         for k in raw_perf_t2.keys():
             if k not in ALLOWED_PERF_T2:
                 sug = _suggest_key(k, ALLOWED_PERF_T2); hint = f" (did you mean '{sug}')" if sug else ""
@@ -875,14 +881,33 @@ def validate_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
         # perf.t1
         if raw_perf_t1:
             pt1: Dict[str, Any] = {}
+            # caps sub-block (PR31)
+            caps_out: Dict[str, Any] = {}
+            if raw_perf_t1_caps:
+                if "frontier" in raw_perf_t1_caps:
+                    qc = _coerce_int(raw_perf_t1_caps.get("frontier"))
+                    if qc < 1: _err(errors, "perf.t1.caps.frontier", "must be >= 1")
+                    caps_out["frontier"] = qc
+                if "visited" in raw_perf_t1_caps:
+                    vc = _coerce_int(raw_perf_t1_caps.get("visited"))
+                    if vc < 1: _err(errors, "perf.t1.caps.visited", "must be >= 1")
+                    caps_out["visited"] = vc
+            # legacy queue_cap → caps.frontier (if caps.frontier not provided)
             if "queue_cap" in raw_perf_t1:
-                qc = _coerce_int(raw_perf_t1.get("queue_cap"))
-                if qc < 1: _err(errors, "perf.t1.queue_cap", "must be >= 1")
-                pt1["queue_cap"] = qc
+                qc_legacy = _coerce_int(raw_perf_t1.get("queue_cap"))
+                if qc_legacy < 1: _err(errors, "perf.t1.queue_cap", "must be >= 1")
+                # keep legacy key in normalized output (for transparency)
+                pt1["queue_cap"] = qc_legacy
+                if "frontier" not in caps_out:
+                    caps_out["frontier"] = qc_legacy
+            if caps_out:
+                pt1["caps"] = caps_out
+            # dedupe window
             if "dedupe_window" in raw_perf_t1:
                 dw = _coerce_int(raw_perf_t1.get("dedupe_window"))
                 if dw < 1: _err(errors, "perf.t1.dedupe_window", "must be >= 1")
                 pt1["dedupe_window"] = dw
+            # optional local cache fields under perf.t1
             if raw_perf_t1_cache:
                 pc: Dict[str, Any] = {}
                 if "max_entries" in raw_perf_t1_cache:
@@ -1111,6 +1136,19 @@ def validate_config_verbose(cfg: Dict[str, Any]) -> Tuple[Dict[str, Any], List[s
     try:
         perf = _ensure_dict(normalized.get("perf"))
         if perf:
+            pt1v = _ensure_dict(perf.get("t1"))
+            capsv = _ensure_dict(pt1v.get("caps"))
+            perf_on = _coerce_bool(perf.get("enabled", False))
+            # Warn if caps/dedupe configured while perf is disabled
+            if not perf_on:
+                if (_coerce_int(pt1v.get("queue_cap", 0)) > 0 or
+                    _coerce_int(pt1v.get("dedupe_window", 0)) > 0 or
+                    _coerce_int(capsv.get("frontier", 0)) > 0 or
+                    _coerce_int(capsv.get("visited", 0)) > 0):
+                    warnings.append("W[perf.t1]: caps/dedupe configured while perf.enabled=false; features remain disabled (identity path).")
+            # Warn if both legacy and new frontier caps are present
+            if "queue_cap" in pt1v and "frontier" in capsv:
+                warnings.append("W[perf.t1]: both queue_cap and caps.frontier set; caps.frontier will be used by runtime.")
             pt2 = _ensure_dict(perf.get("t2"))
             esd = str(pt2.get("embed_store_dtype", "")).lower()
             pre = _coerce_bool(pt2.get("precompute_norms", False))
@@ -1126,7 +1164,7 @@ def validate_config_verbose(cfg: Dict[str, Any]) -> Tuple[Dict[str, Any], List[s
                 a = _coerce_float(qf.get("alpha_semantic"))
                 if not (0.0 <= a <= 1.0):
                     warnings.append("W[t2.quality.fusion.alpha_semantic]: expected in [0,1].")
-            qm = _ensure_dict(q.get("mmr"))
+            qm = _ensure_subdict(q, "mmr")
             if "lambda_relevance" in qm:
                 lam = _coerce_float(qm.get("lambda_relevance"))
                 if not (0.0 <= lam <= 1.0):

@@ -4,6 +4,8 @@ import heapq
 from typing import Dict, Any, List, Tuple
 from ..types import T1Result
 from ..cache import LRUCache, stable_key
+from ..util.ring import DedupeRing
+from ..util.lru_det import DeterministicLRUSet
 
 # module-level cache holder configured via Config.t1.cache
 _T1_CACHE = None
@@ -27,6 +29,22 @@ def _get_cache(cfg_t1: dict):
     return _T1_CACHE
 
 EPS = 1e-6
+
+def _cfg_get(obj, path, default=None):
+    """
+    Safe nested config getter that works with both dict-like and attribute-like cfg objects.
+    """
+    cur = obj
+    for i, key in enumerate(path):
+        try:
+            if isinstance(cur, dict):
+                cur = cur.get(key, {} if i < len(path) - 1 else default)
+            else:
+                cur = getattr(cur, key)
+        except Exception:
+            return default
+    return cur
+
 
 def _match_keywords(text: str, labels: List[Tuple[str, str]]) -> Dict[str, float]:
     """
@@ -75,6 +93,23 @@ def t1_propagate(ctx, state, text: str) -> T1Result:
     effective_iter_cap_layers = base_iter_cap_layers if slice_t1_iters is None else min(base_iter_cap_layers, int(slice_t1_iters))
     effective_queue_budget    = queue_budget if slice_t1_pops is None else min(queue_budget, int(slice_t1_pops))
 
+    # ---- PR31 perf caps & dedupe (disabled-path default OFF) ----
+    perf_enabled = bool(_cfg_get(ctx.cfg, ["perf", "enabled"], False))
+    metrics_enabled = bool(_cfg_get(ctx.cfg, ["perf", "metrics", "report_memory"], False))
+    frontier_cap_cfg = int(_cfg_get(ctx.cfg, ["perf", "t1", "caps", "frontier"], 0) or 0)
+    visited_cap_cfg = int(_cfg_get(ctx.cfg, ["perf", "t1", "caps", "visited"], 0) or 0)
+    dedupe_window_cfg = int(_cfg_get(ctx.cfg, ["perf", "t1", "dedupe_window"], 0) or 0)
+
+    # Frontier cap acts in addition to effective_queue_budget; take the stricter bound
+    effective_frontier_cap = None
+    if perf_enabled and frontier_cap_cfg > 0:
+        effective_frontier_cap = min(frontier_cap_cfg, effective_queue_budget)
+
+    # PR31 counters (only emitted when both gates are ON)
+    t1_frontier_evicted = 0
+    t1_dedup_hits = 0
+    t1_visited_evicted = 0
+
     store = state.get("store")
     active_graphs = state.get("active_graphs", [])
     total_pops = 0
@@ -109,6 +144,12 @@ def t1_propagate(ctx, state, text: str) -> T1Result:
             "queue_budget": effective_queue_budget,
             "node_budget": node_budget,
         }
+        # PR31: include perf caps in cache key to avoid cross-mode reuse
+        policy_caps.update({
+            "frontier_cap": int(frontier_cap_cfg or 0),
+            "visited_cap": int(visited_cap_cfg or 0),
+            "dedupe_window": int(dedupe_window_cfg or 0),
+        })
         ckey = ("t1", gid, etag, stable_key(decay_cfg), stable_key(edge_mult), stable_key(policy_caps), tuple(seed_ids))
         if cache is not None:
             hit = cache.get(ckey)
@@ -131,10 +172,26 @@ def t1_propagate(ctx, state, text: str) -> T1Result:
         layers_processed = 0    # unique layers beyond seeds we actually explored
         propagations = 0
         
+        # PR31 structures (only used when enabled)
+        ring = DedupeRing(dedupe_window_cfg) if (perf_enabled and dedupe_window_cfg > 0) else None
+        visited_lru = DeterministicLRUSet(visited_cap_cfg) if (perf_enabled and visited_cap_cfg > 0) else None
+
         # max-heap by remaining magnitude (use negative for heapq)
         pq: List[Tuple[float, str, str, float]] = []
         for nid, w in seeds.items():
-            heapq.heappush(pq, (-abs(w), nid, nid, float(w)))
+            item = (-abs(w), nid, nid, float(w))
+            if ring and ring.contains(nid):
+                t1_dedup_hits += 1
+            else:
+                heapq.heappush(pq, item)
+                if effective_frontier_cap is not None and len(pq) > effective_frontier_cap:
+                    ev = len(pq) - effective_frontier_cap
+                    # Keep the top 'cap' items by the existing comparator (min-heap on (-abs, node_id))
+                    pq = heapq.nsmallest(effective_frontier_cap, pq)
+                    heapq.heapify(pq)
+                    t1_frontier_evicted += ev
+                if ring:
+                    ring.add(nid)
             acc[nid] += w
             dist[nid] = 0
             max_delta = max(max_delta, abs(w))
@@ -142,6 +199,11 @@ def t1_propagate(ctx, state, text: str) -> T1Result:
         while pq and pops < effective_queue_budget:
             _, node_key, u, w = heapq.heappop(pq)
             pops += 1
+            if visited_lru and visited_lru.contains(u):
+                continue
+            if visited_lru:
+                if visited_lru.add(u):
+                    t1_visited_evicted += 1
             layer = dist.get(u, 0)  # 0 for seeds, 1 for first neighbors, etc.
         
             # Update layers_processed (count each depth beyond seeds once)
@@ -178,7 +240,18 @@ def t1_propagate(ctx, state, text: str) -> T1Result:
                 if (v not in dist) or (d < dist[v]):
                     dist[v] = d
                 if abs(acc[v]) < node_budget:
-                    heapq.heappush(pq, (-abs(contrib), v, v, contrib))
+                    item2 = (-abs(contrib), v, v, contrib)
+                    if ring and ring.contains(v):
+                        t1_dedup_hits += 1
+                    else:
+                        heapq.heappush(pq, item2)
+                        if effective_frontier_cap is not None and len(pq) > effective_frontier_cap:
+                            ev = len(pq) - effective_frontier_cap
+                            pq = heapq.nsmallest(effective_frontier_cap, pq)
+                            heapq.heapify(pq)
+                            t1_frontier_evicted += ev
+                        if ring:
+                            ring.add(v)
         
                 if relax_cap is not None and propagations >= relax_cap:
                     stop_relax = True
@@ -221,4 +294,10 @@ def t1_propagate(ctx, state, text: str) -> T1Result:
         "cache_used": cache_hits > 0,
         "cache_enabled": cache is not None,
     }
+    if perf_enabled and metrics_enabled:
+        metrics.update({
+            "t1_frontier_evicted": t1_frontier_evicted,
+            "t1_dedup_hits": t1_dedup_hits,
+            "t1_visited_evicted": t1_visited_evicted,
+        })
     return T1Result(graph_deltas=all_deltas, metrics=metrics)

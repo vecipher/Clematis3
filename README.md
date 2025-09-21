@@ -1141,6 +1141,57 @@ Invariants & rollback
 	•	Stages remain pure; only immutable per-slice budgets are injected.
 	•	Rollback is trivial: set scheduler.enabled=false. CI enforces that disabled-path logs match golden.
 
+-## M6 — Perf & Compaction (PR31: T1 caps + dedupe; OFF by default)
+
+PR31 introduces **deterministic T1 compaction** controls that bound memory without changing behavior unless explicitly enabled. Defaults preserve the **disabled‑path identity** used by CI.
+
+**What lands**
+- **Frontier cap**: keeps the T1 priority queue size ≤ `caps.frontier` (in addition to `t1.queue_budget`; the effective limit is `min(queue_budget, caps.frontier)`).
+- **Visited cap**: bounds the visited set using a deterministic FIFO‑on‑first‑visit set.
+- **Dedupe ring**: short‑horizon push deduplication window to avoid thrash.
+- **Determinism**: no RNG, no wall clock; tie‑breaks are lexicographic on `node_id`.
+
+**Identity by default**
+- Leave PR31 keys **absent** or set `perf.enabled: false` to keep byte‑for‑byte identity with PR29 goldens.
+- The validator treats absent keys as disabled; when present, numeric values must be **≥ 1**.
+
+**Config (enable example)**
+```yaml
+# configs/config.yaml
+perf:
+  enabled: true
+  metrics:
+    report_memory: true   # emit counters only when both gates are true
+  t1:
+    caps:
+      frontier: 1000      # PQ cap (effective = min(queue_budget, frontier))
+      visited: 5000       # visited bound (FIFO on first-visit)
+    dedupe_window: 128    # recent-push window
+```
+
+**Validator**
+- Strict mode enforces bounds and hygiene:
+```bash
+python3 scripts/validate_config.py --strict configs/config.yaml
+```
+- If `perf.enabled=false` but caps/dedupe are configured, the validator emits a warning (identity path remains in effect).
+
+**Metrics (only when `perf.enabled` **and** `perf.metrics.report_memory` are true)**
+- `t1_frontier_evicted` — number of PQ evictions performed to respect `caps.frontier`.
+- `t1_dedup_hits` — pushes skipped because the node id was within the dedupe window.
+- `t1_visited_evicted` — entries evicted from the bounded visited set.
+
+**Tests**
+- Data structures: `tests/util/test_ring.py` (dedupe ring), `tests/util/test_lru_det.py` (deterministic LRU set/map).
+- Validator: `tests/config/test_validate_perf_t1_caps.py`.
+- Stage smoke (placeholder): `tests/stages/test_t1_compaction.py` (skipped until a stable test graph fixture is exposed).
+
+**Gotchas**
+- Do **not** set `frontier/visited/dedupe_window` to `0` in strict configs; omit the keys instead to disable.
+- When both `t1.queue_budget` and `perf.t1.caps.frontier` are present, T1 respects the stricter bound.
+- Disabled path remains identical: with `perf.enabled=false` (or no perf keys), no new metrics keys appear and logs match PR29 goldens after normalization.
+```
+
 ## Changelog & Releases
 - See the [CHANGELOG](./CHANGELOG.md) for notable changes.
 - Binary / source packages and release notes are on the [Releases] page.
