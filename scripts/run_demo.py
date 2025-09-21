@@ -1,6 +1,8 @@
 import os
 import sys
-
+import time
+import argparse
+from typing import Any, List, Dict
 
 # Ensure the project root is importable before loading clematis modules.
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -8,11 +10,13 @@ if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
 from clematis.io.config import load_config
+from clematis.io.log import append_jsonl
+from clematis.io.paths import logs_dir
 from clematis.world.scenario import run_one_turn
+from clematis.scheduler import init_scheduler_state, next_turn, on_yield
 
 
 # --- Begin helpers for CLI overrides (object/dict safe) ---
-from typing import Any, List
 
 def _ensure_child(obj: Any, key: str) -> Any:
     """Ensure obj[key] (for dict) or obj.key (for object) exists and is a dict; return it.
@@ -31,8 +35,6 @@ def _ensure_child(obj: Any, key: str) -> Any:
         try:
             setattr(obj, key, val)
         except Exception:
-            # As a fallback, if setting attribute fails, wrap into a dict on a side-car mapping
-            # but in most configs this path won't be taken.
             pass
     return val
 
@@ -65,7 +67,6 @@ def _maybe_override_cfg_inplace(cfg: Any, args: Any) -> Any:
             try:
                 setattr(target, key, value)
             except Exception:
-                # Fall back to dict semantics if attribute setting fails
                 d = getattr(target, "__dict__", None)
                 if isinstance(d, dict):
                     d[key] = value
@@ -86,36 +87,119 @@ def _maybe_override_cfg_inplace(cfg: Any, args: Any) -> Any:
 # --- End helpers ---
 
 
+class DemoCtx:
+    def now_ms(self) -> int:
+        return int(time.time() * 1000)
+
+
+def _parse_args() -> argparse.Namespace:
+    p = argparse.ArgumentParser(description="Clematis demo: scheduler rotation + driver-authored logs")
+    p.add_argument("--config", default=os.path.join(REPO_ROOT, "configs", "config.yaml"),
+                   help="Path to config.yaml (default: configs/config.yaml)")
+    p.add_argument("--agents", default="AgentA,AgentB,AgentC",
+                   help="Comma-separated agent ids (default: AgentA,AgentB,AgentC)")
+    p.add_argument("--text", default="hello world",
+                   help="Input text for each turn (default: 'hello world')")
+    p.add_argument("--steps", type=int, default=6,
+                   help="Number of selections/turns to run (default: 6)")
+    p.add_argument("--policy", choices=["round_robin", "fair_queue"], default=None,
+                   help="Override scheduler.policy (default: use config)")
+    # Optional budget / timing overrides
+    p.add_argument("--quantum-ms", type=int, default=None, help="Override scheduler.quantum_ms")
+    p.add_argument("--wall-ms", type=int, default=None, help="Override scheduler.budgets.wall_ms")
+    p.add_argument("--t1-iters", type=int, default=None, help="Override scheduler.budgets.t1_iters")
+    p.add_argument("--t1-pops", type=int, default=None, help="Override scheduler.budgets.t1_pops")
+    p.add_argument("--t2-k", type=int, default=None, help="Override scheduler.budgets.t2_k")
+    p.add_argument("--t3-ops", type=int, default=None, help="Override scheduler.budgets.t3_ops")
+    return p.parse_args()
+
+
 def main():
-    cfg = load_config(os.path.join(os.path.dirname(__file__), "..", "configs", "config.yaml"))
-    # If you want to support CLI overrides, you'd parse args here and pass to _maybe_override_cfg_inplace.
-    # For demo purposes, we use a dummy object for args (no overrides).
-    class DummyArgs:
-        policy = None
-        quantum_ms = None
-        wall_ms = None
-        t1_iters = None
-        t1_pops = None
-        t2_k = None
-        t3_ops = None
-    args = DummyArgs()
+    args = _parse_args()
+    cfg = load_config(args.config)
     cfg = _maybe_override_cfg_inplace(cfg, args)
-    state = {}
-    # Demo: get policy and fairness using new helpers
-    policy = _get_path(cfg, ["scheduler", "policy"], "round_robin")
+
+    agents = sorted([a.strip() for a in args.agents.split(",") if a.strip()])
+    if not agents:
+        print("No agents provided. Exiting.")
+        return
+
+    # Initialize scheduler state with canonical lex order
+    sched_state = init_scheduler_state(agents, now_ms=int(time.time() * 1000))
+    state: Dict[str, Any] = {}
+
+    demo_ctx = DemoCtx()
+    policy = args.policy or _get_path(cfg, ["scheduler", "policy"], "round_robin")
     fairness = _get_path(cfg, ["scheduler", "fairness"], {}) or {}
 
-    # PR28: Provide a simple, deterministic pick_reason for logging.
-    # In a real multi-agent loop this would come from scheduler.next_turn(...).
-    if isinstance(policy, str):
-        pick_reason = "ROUND_ROBIN" if policy == "round_robin" else ("AGING_BOOST" if policy == "fair_queue" else "ROUND_ROBIN")
-    else:
-        pick_reason = "ROUND_ROBIN"
+    print(f"Demo: policy={policy}, agents={agents}, steps={args.steps}")
+    print(f"Logs dir: {logs_dir()}")
+    print("---")
 
-    line = run_one_turn("AgentA", state, "hello world", cfg, pick_reason=pick_reason)
-    print("Utterance:", line)
+    for step in range(1, args.steps + 1):
+        agent_id, _, pick_reason = next_turn(demo_ctx, sched_state, policy=policy, fairness_cfg=fairness)
+        if not agent_id:
+            print(f"[{step}] No eligible agent.")
+            break
+
+        queue_before = list(sched_state["queue"]) if policy == "round_robin" else []
+        capture: Dict[str, Any] = {}
+
+        # Run one turn; orchestrator will capture boundary event instead of writing scheduler.jsonl
+        line = run_one_turn(
+            agent_id,
+            state,
+            args.text,
+            cfg,
+            pick_reason=pick_reason,
+            driver_logging=True,
+            capture=capture,
+        )
+
+        yielded = bool(capture)
+
+        if yielded:
+            # Update fairness clocks/counters; reset on saturation
+            reset = (pick_reason == "RESET_CONSEC")
+            on_yield(demo_ctx, sched_state, agent_id, consumed=capture.get("consumed", {}),
+                     reason=capture.get("reason", ""), fairness_cfg=fairness, reset=reset)
+
+            # Perform deterministic RR rotation (head -> tail) only for round_robin
+            if policy == "round_robin":
+                q = sched_state["queue"]
+                try:
+                    q.remove(agent_id)
+                    q.append(agent_id)
+                except ValueError:
+                    pass
+                queue_after = list(q)
+            else:
+                queue_after = []
+
+            # Driver-authored enriched scheduler log (merge captured event)
+            event = dict(capture)
+            # Ensure pick_reason is present; orchestrator may have included it already
+            event.setdefault("pick_reason", pick_reason)
+            if policy == "round_robin":
+                event["queue_before"] = queue_before
+                event["queue_after"] = queue_after
+            else:
+                event["queue_before"] = []
+                event["queue_after"] = []
+            append_jsonl("scheduler.jsonl", event)
+
+            # Print concise summary
+            if policy == "round_robin":
+                print(f"[{step}] YIELD agent={agent_id} pick={pick_reason}  queue: {queue_before} -> {event['queue_after']}  | utter={line!r}")
+            else:
+                print(f"[{step}] YIELD agent={agent_id} pick={pick_reason}  | utter={line!r}")
+        else:
+            print(f"[{step}] NO-YIELD agent={agent_id} pick={pick_reason}  | utter={line!r}")
+
     repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    print("---")
     print("Logs written to:", os.path.join(repo_root, ".logs"))
+
 
 if __name__ == "__main__":
     # Add repo root to sys.path to simplify running without install

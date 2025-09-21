@@ -11,11 +11,18 @@ def run_one_turn(
     cfg: Config,
     *,
     pick_reason: str | None = None,
+    driver_logging: bool = False,
+    capture: dict | None = None,
 ) -> str:
     ctx = TurnCtx(turn_id="demo-1", agent_id=agent_id, scene_tags=["demo"], now=datetime.now(timezone.utc).isoformat(), cfg=cfg)
     if pick_reason is not None:
         # PR28: allow driver/demo to propagate selection rationale into scheduler logs
         setattr(ctx, "_sched_pick_reason", str(pick_reason))
+    # PR29: if the driver wants to author scheduler.jsonl, instruct the orchestrator to capture
+    if driver_logging:
+        setattr(ctx, "_driver_writes_scheduler_log", True)
+        if capture is not None:
+            setattr(ctx, "_sched_capture", capture)
     # Ensure a graph store & a tiny surface graph for the demo
     store = state.setdefault("store", InMemoryGraphStore())
     g = store.ensure("g:surface")

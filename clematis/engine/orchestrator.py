@@ -134,6 +134,26 @@ def _get_pick_reason(ctx) -> str | None:
         return None
 
 
+# --- Helper to write or capture scheduler events (PR29) ---
+
+def _write_or_capture_scheduler_event(ctx, event: Dict[str, Any]) -> None:
+    """If driver logging is enabled on ctx, capture event instead of writing.
+    Otherwise, append to scheduler.jsonl.
+    """
+    try:
+        if getattr(ctx, "_driver_writes_scheduler_log", False):
+            cap = getattr(ctx, "_sched_capture", None)
+            if isinstance(cap, dict):
+                cap.clear()
+                cap.update(event)
+            return
+    except Exception:
+        # Fall back to writing
+        pass
+    append_jsonl("scheduler.jsonl", event)
+
+
+
 class Orchestrator:
     """Single canonical turn loop with first-class observability.
 
@@ -241,7 +261,7 @@ class Orchestrator:
                 pass
             reason = _should_yield(slice_ctx, consumed)
             if reason:
-                append_jsonl("scheduler.jsonl", {
+                event = {
                     "turn": turn_id,
                     "slice": slice_ctx["slice_idx"],
                     "agent": agent_id,
@@ -256,7 +276,8 @@ class Orchestrator:
                     "consumed": consumed,
                     "queued": [],  # external loop owns the queue
                     "ms": 0,
-                })
+                } 
+                _write_or_capture_scheduler_event(ctx,event)
                 total_ms_now = round((time.perf_counter() - total_t0) * 1000.0, 3)
                 append_jsonl(
                     "turn.jsonl",
@@ -326,7 +347,7 @@ class Orchestrator:
                 pass
             reason = _should_yield(slice_ctx, consumed)
             if reason:
-                append_jsonl("scheduler.jsonl", {
+                event = {
                     "turn": turn_id,
                     "slice": slice_ctx["slice_idx"],
                     "agent": agent_id,
@@ -341,7 +362,8 @@ class Orchestrator:
                     "consumed": consumed,
                     "queued": [],
                     "ms": 0,
-                })
+                }
+                _write_or_capture_scheduler_event(ctx, event)
                 total_ms_now = round((time.perf_counter() - total_t0) * 1000.0, 3)
                 append_jsonl(
                     "turn.jsonl",
@@ -414,7 +436,7 @@ class Orchestrator:
                 pass
             reason = _should_yield(slice_ctx, consumed)
             if reason:
-                append_jsonl("scheduler.jsonl", {
+                event = {
                     "turn": turn_id,
                     "slice": slice_ctx["slice_idx"],
                     "agent": agent_id,
@@ -429,7 +451,8 @@ class Orchestrator:
                     "consumed": consumed,
                     "queued": [],
                     "ms": 0,
-                })
+                }
+                _write_or_capture_scheduler_event(ctx, event)
                 total_ms_now = round((time.perf_counter() - total_t0) * 1000.0, 3)
                 append_jsonl(
                     "turn.jsonl",
@@ -621,7 +644,7 @@ class Orchestrator:
                 }
                 reason = _should_yield(slice_ctx, consumed)
                 if reason:
-                    append_jsonl("scheduler.jsonl", {
+                    event = {
                         "turn": turn_id,
                         "slice": slice_ctx["slice_idx"],
                         "agent": agent_id,
@@ -636,7 +659,8 @@ class Orchestrator:
                         "consumed": consumed,
                         "queued": [],
                         "ms": 0,
-                    })
+                    }
+                    _write_or_capture_scheduler_event(ctx, event)
                     total_ms_now = round((time.perf_counter() - total_t0) * 1000.0, 3)
                     append_jsonl(
                         "turn.jsonl",
@@ -771,7 +795,7 @@ class Orchestrator:
                 }
                 reason = _should_yield(slice_ctx, consumed)
                 if reason:
-                    append_jsonl("scheduler.jsonl", {
+                    event = {
                         "turn": turn_id,
                         "slice": slice_ctx["slice_idx"],
                         "agent": agent_id,
@@ -786,7 +810,8 @@ class Orchestrator:
                         "consumed": consumed,
                         "queued": [],
                         "ms": 0,
-                    })
+                    }
+                    _write_or_capture_scheduler_event(ctx, event)
                     total_ms_now = round((time.perf_counter() - total_t0) * 1000.0, 3)
                     append_jsonl(
                         "turn.jsonl",

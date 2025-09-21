@@ -1075,3 +1075,68 @@ python3 scripts/run_demo.py --config examples/scheduler/quantum_vs_wall.yaml \
 
 **Next (PR29)**
 - Single-source `scheduler.jsonl` records authored by the driver, including `queue_before/queue_after` in addition to `pick_reason`.
+
+M5 — Scheduler (PR29 driver-authored logs + CI golden identity; OFF by default)
+
+PR29 finishes M5 by (1) making the driver the single source of truth for scheduler.jsonl and (2) adding a CI Golden Identity Guard that ensures scheduler.enabled=false stays byte-for-byte identical to pre-M5 (after normalization).
+
+What changed
+	•	Orchestrator suppression/capture: when TurnCtx has _driver_writes_scheduler_log=True and a dict on _sched_capture, the orchestrator captures the boundary event and does not write scheduler.jsonl.
+	•	Driver-authored record: the driver/demo writes one enriched scheduler.jsonl entry per enforced yield:
+	•	Always includes: turn, slice, agent, policy, reason, enforced:true, stage_end, quantum_ms, wall_ms, budgets, consumed, ms.
+	•	Adds pick_reason (ROUND_ROBIN | AGING_BOOST | RESET_CONSEC).
+	•	For round_robin only: adds queue_before and queue_after (head→tail rotation on yield). For fair_queue, these arrays are omitted/empty.
+	•	Disabled path identity: with scheduler.enabled=false, no scheduler.jsonl is written. CI verifies that normalized logs match golden fixtures.
+
+How to use (driver-authored logging)
+
+The demo already enables capture and authors the record:
+capture = {}
+line = run_one_turn(agent, state, text, cfg,
+                    pick_reason=pick_reason,
+                    driver_logging=True,
+                    capture=capture)
+# on yield: rotate (RR), then write a single enriched record
+event = {**capture, "pick_reason": pick_reason}
+if policy == "round_robin":
+    event["queue_before"] = queue_before
+    event["queue_after"]  = queue_after
+append_jsonl("scheduler.jsonl", event)
+
+Enriched record (RR example)
+{
+  "turn": 123,
+  "slice": 2,
+  "agent": "Ambrose",
+  "policy": "round_robin",
+  "pick_reason": "ROUND_ROBIN",
+  "reason": "BUDGET_T2_K",
+  "enforced": true,
+  "stage_end": "T2",
+  "quantum_ms": 20,
+  "wall_ms": 200,
+  "budgets": {"t1_iters": 50, "t2_k": 64, "t3_ops": 3},
+  "consumed": {"ms": 19, "t1_iters": 12, "t2_k": 64, "t3_ops": 0},
+  "queue_before": ["Ambrose","Kafka","Ringer"],
+  "queue_after":  ["Kafka","Ringer","Ambrose"],
+  "ms": 0
+}
+
+For policy: fair_queue, queue_before/after are omitted or [].
+
+CI Golden Identity Guard (disabled path)
+	•	Script: scripts/ci_compare_golden.py runs one disabled turn, normalizes logs, and compares against fixtures in tests/golden/pre_m5_disabled/.
+	•	Workflow: .github/workflows/ci.yml job golden_disabled_identity runs after tests and fails on any diff.
+	•	Normalization: drops only volatile keys: ms, now, timestamp, ts, elapsed_ms, durations_ms, uuid, run_id.
+	•	Update flow (local):
+rm -rf ./.logs
+python3 scripts/ci_compare_golden.py --update            # writes fixtures under tests/golden/pre_m5_disabled/
+git add tests/golden/pre_m5_disabled
+git commit -m "refresh disabled-path golden"
+
+	•	Pass criteria: with scheduler.enabled=false, scheduler.jsonl must not exist and normalized .logs/* match golden exactly.
+
+Invariants & rollback
+	•	Determinism holds: same inputs + same config ⇒ identical picks/yields and identical logs.
+	•	Stages remain pure; only immutable per-slice budgets are injected.
+	•	Rollback is trivial: set scheduler.enabled=false. CI enforces that disabled-path logs match golden.
