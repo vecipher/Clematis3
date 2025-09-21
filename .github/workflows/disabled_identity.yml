@@ -1,5 +1,3 @@
-
-
 name: disabled-path-identity
 
 on:
@@ -11,6 +9,8 @@ jobs:
   identity:
     name: Verify disabled-path identity (M6 guard)
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
 
     steps:
       - name: Checkout
@@ -25,7 +25,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements*.txt') }}
+          key: "${{ runner.os }}-pip-${{ hashFiles('**/requirements*.txt') }}"
           restore-keys: |
             ${{ runner.os }}-pip-
 
@@ -33,33 +33,36 @@ jobs:
         run: |
           set -euxo pipefail
           if [ -f requirements.txt ]; then
-            python -m pip install --upgrade pip
-            pip install -r requirements.txt
+            python3 -m pip install --upgrade pip
+            python3 -m pip install -r requirements.txt
           else
-            python -m pip install --upgrade pip
-            pip install pytest pyyaml numpy
+            python3 -m pip install --upgrade pip
+            python3 -m pip install pytest pyyaml numpy
           fi
+        shell: bash
 
       - name: Validate repo config (non-strict if missing)
         run: |
           set -euxo pipefail
           if [ -f scripts/validate_config.py ]; then
             if [ -f configs/config.yaml ]; then
-              python scripts/validate_config.py configs/config.yaml || (echo "Repo config has warnings/errors (non-strict step), continuing"; true)
+              python3 scripts/validate_config.py configs/config.yaml || (echo "Repo config has warnings/errors (non-strict step), continuing"; true)
             fi
           else
             echo "scripts/validate_config.py not found; skipping"
           fi
+        shell: bash
 
-      - name: Validate disabled-path config (STRICT)
+      - name: Validate strict (quiet) config
         run: |
           set -euxo pipefail
           if [ -f scripts/validate_config.py ]; then
-            python scripts/validate_config.py .ci/disabled_path_config.yaml --strict
+            python3 scripts/validate_config.py .ci/validator_strict_quiet.yaml --strict
           else
             echo "scripts/validate_config.py not found; failing strict step"
             exit 1
           fi
+        shell: bash
 
       - name: Run identity unit test
         run: |
@@ -69,6 +72,7 @@ jobs:
           else
             echo "tests/ directory not found"; exit 1
           fi
+        shell: bash
 
       - name: CLI validator smoke (quiet config)
         run: |
@@ -78,25 +82,36 @@ jobs:
           else
             echo "tests/ directory not found"; exit 1
           fi
+        shell: bash
 
-      - name: Optional golden diff (skips if goldens or demo absent)
+      - name: Normalize and diff logs (strict)
         run: |
           set -euxo pipefail
-          if [ -d tests/goldens/pr29 ]; then
-            echo "Goldens detected; attempting to run demo and diff"
-            # Try a demo run that respects the disabled-path config if available
+          GOLD_DIR="tests/goldens/pr29/.logs"
+          if [ -d "$GOLD_DIR" ]; then
+            # Re-run demo in disabled mode to produce ./.logs (if not already run)
             if [ -f scripts/run_demo.py ]; then
-              python scripts/run_demo.py --config .ci/disabled_path_config.yaml || true
+              python3 scripts/run_demo.py --config .ci/disabled_path_config.yaml || true
             fi
-            # Determine output directory candidates
-            OUTDIR="./.logs"
-            GOLDEN="tests/goldens/pr29"
-            if [ -d "$OUTDIR" ]; then
-              echo "Diffing $OUTDIR against $GOLDEN (recursive)"
-              diff -ru "$OUTDIR" "$GOLDEN/.logs"
-            else
-              echo "No .logs produced; skipping diff"
-            fi
+
+            mkdir -p ./.norm ./.gold_norm
+            shopt -s nullglob
+
+            # Normalize current logs: drop volatile fields, sort keys, sort lines
+            for f in ./.logs/*.jsonl; do
+              b="$(basename "$f")"
+              jq -c -S 'del(.now) | with_entries(select(.key | endswith("_ms") | not))' "$f" | LC_ALL=C sort > "./.norm/$b" || true
+            done
+
+            # Normalize golden logs
+            for f in tests/goldens/pr29/.logs/*.jsonl; do
+              b="$(basename "$f")"
+              jq -c -S 'del(.now) | with_entries(select(.key | endswith("_ms") | not))' "$f" | LC_ALL=C sort > "./.gold_norm/$b" || true
+            done
+
+            # Strict diff on normalized logs; any structural change will fail the job
+            diff -ru ./.norm ./.gold_norm
           else
-            echo "No goldens found (tests/goldens/pr29); skipping diff"
+            echo "No goldens found at tests/goldens/pr29/.logs; skipping diff"
           fi
+        shell: bash
