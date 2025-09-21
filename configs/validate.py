@@ -190,7 +190,7 @@ ALLOWED_TOP = {"t1", "t2", "t3", "t4", "graph", "k_surface", "surface_method", "
 ALLOWED_T1 = {"cache", "iter_cap", "queue_budget", "node_budget", "decay", "edge_type_mult", "radius_cap"}
 ALLOWED_T2 = {"backend", "k_retrieval", "sim_threshold", "cache", "ranking", "hybrid",
               "tiers", "exact_recent_days", "clusters_top_m", "owner_scope",
-              "residual_cap_per_turn", "lancedb", "archive", "quality"}
+              "residual_cap_per_turn", "lancedb", "archive", "quality", "embed_root", "reader_batch"}
 ALLOWED_T3 = {"max_rag_loops", "max_ops_per_turn", "backend",
               "tokens", "temp", "allow_reflection", "dialogue", "policy", "llm"}
 ALLOWED_T4 = {
@@ -219,8 +219,10 @@ ALLOWED_PERF = {"enabled", "t1", "t2", "snapshots", "metrics"}
 ALLOWED_PERF_T1 = {"queue_cap", "dedupe_window", "cache", "caps"}
 ALLOWED_PERF_T1_CACHE = {"max_entries", "max_bytes"}
 ALLOWED_PERF_T1_CAPS = {"frontier", "visited"}
-ALLOWED_PERF_T2 = {"embed_dtype", "embed_store_dtype", "precompute_norms", "cache"}
+ALLOWED_PERF_T2 = {"embed_dtype", "embed_store_dtype", "precompute_norms", "cache", "reader"}
 ALLOWED_PERF_T2_CACHE = {"max_entries", "max_bytes"}
+ALLOWED_PERF_T2_READER = {"partitions"}
+ALLOWED_PERF_T2_READER_PARTITIONS = {"enabled", "layout", "path"}
 ALLOWED_PERF_SNAP = {"compression", "level", "delta_mode", "every_n_turns"}
 ALLOWED_PERF_METRICS = {"report_memory"}
 
@@ -313,6 +315,8 @@ def validate_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
     raw_perf_t1_caps = _ensure_dict(raw_perf_t1.get("caps"))
     raw_perf_t2 = _ensure_dict(raw_perf.get("t2"))
     raw_perf_t2_cache = _ensure_dict(raw_perf_t2.get("cache"))
+    raw_perf_t2_reader = _ensure_dict(raw_perf_t2.get("reader"))
+    raw_perf_t2_reader_partitions = _ensure_dict(raw_perf_t2_reader.get("partitions"))
     raw_perf_snap = _ensure_dict(raw_perf.get("snapshots"))
     raw_perf_metrics = _ensure_dict(raw_perf.get("metrics"))
 
@@ -452,6 +456,14 @@ def validate_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
             if k not in ALLOWED_PERF_T2_CACHE:
                 sug = _suggest_key(k, ALLOWED_PERF_T2_CACHE); hint = f" (did you mean '{sug}')" if sug else ""
                 _err(errors, f"perf.t2.cache.{k}", f"unknown key{hint}")
+        for k in raw_perf_t2_reader.keys():
+            if k not in ALLOWED_PERF_T2_READER:
+                sug = _suggest_key(k, ALLOWED_PERF_T2_READER); hint = f" (did you mean '{sug}')" if sug else ""
+                _err(errors, f"perf.t2.reader.{k}", f"unknown key{hint}")
+        for k in raw_perf_t2_reader_partitions.keys():
+            if k not in ALLOWED_PERF_T2_READER_PARTITIONS:
+                sug = _suggest_key(k, ALLOWED_PERF_T2_READER_PARTITIONS); hint = f" (did you mean '{sug}')" if sug else ""
+                _err(errors, f"perf.t2.reader.partitions.{k}", f"unknown key{hint}")
         for k in raw_perf_snap.keys():
             if k not in ALLOWED_PERF_SNAP:
                 sug = _suggest_key(k, ALLOWED_PERF_SNAP); hint = f" (did you mean '{sug}')" if sug else ""
@@ -544,6 +556,17 @@ def validate_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
     t2["sim_threshold"] = _coerce_float(t2.get("sim_threshold", 0.0))
     if not (-1.0 <= t2["sim_threshold"] <= 1.0):
         _err(errors, "t2.sim_threshold", "must be in [-1.0, 1.0]")
+    # Optional PR33 knobs (only validate if provided)
+    if "reader_batch" in t2:
+        t2["reader_batch"] = _coerce_int(t2.get("reader_batch", 8192))
+        if t2["reader_batch"] < 1:
+            _err(errors, "t2.reader_batch", "must be >= 1")
+    if "embed_root" in t2:
+        er = t2.get("embed_root")
+        if not isinstance(er, str) or not er.strip():
+            _err(errors, "t2.embed_root", "must be a non-empty string path")
+        else:
+            t2["embed_root"] = er
 
     c2 = _ensure_subdict(t2, "cache")
     c2["max_entries"] = _coerce_int(c2.get("max_entries", 512))
@@ -947,6 +970,29 @@ def validate_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
                     if mb2 < 0: _err(errors, "perf.t2.cache.max_bytes", "must be >= 0")
                     pc2["max_bytes"] = mb2
                 if pc2: pt2["cache"] = pc2
+            # reader (PR33): partitions config
+            raw_perf_t2_reader = _ensure_dict(raw_perf_t2.get("reader"))
+            if raw_perf_t2_reader:
+                rd_out: Dict[str, Any] = {}
+                prt = _ensure_dict(raw_perf_t2_reader.get("partitions"))
+                if prt:
+                    pp_out: Dict[str, Any] = {}
+                    if "enabled" in prt:
+                        pp_out["enabled"] = _coerce_bool(prt.get("enabled"))
+                    if "layout" in prt:
+                        lay = str(prt.get("layout")).lower()
+                        if lay not in {"owner_quarter", "none"}:
+                            _err(errors, "perf.t2.reader.partitions.layout", "must be one of {owner_quarter,none}")
+                        pp_out["layout"] = lay
+                    if "path" in prt:
+                        pth = prt.get("path")
+                        if not isinstance(pth, str) or not pth.strip():
+                            _err(errors, "perf.t2.reader.partitions.path", "must be a non-empty string")
+                        pp_out["path"] = pth
+                    if pp_out:
+                        rd_out["partitions"] = pp_out
+                if rd_out:
+                    pt2["reader"] = rd_out
             if pt2: p["t2"] = pt2
 
         # perf.snapshots
@@ -1154,6 +1200,11 @@ def validate_config_verbose(cfg: Dict[str, Any]) -> Tuple[Dict[str, Any], List[s
                     warnings.append("W[perf.t1.cache]: cache configured while perf.enabled=false; cache remains disabled (identity path).")
                 if (_coerce_int(pt2c.get("max_entries", 0)) > 0 or _coerce_int(pt2c.get("max_bytes", 0)) > 0):
                     warnings.append("W[perf.t2.cache]: cache configured while perf.enabled=false; cache remains disabled (identity path).")
+                # PR33: reader partitions configured while perf is disabled → identity path (no effect)
+                pt2r = _ensure_dict(pt2.get("reader"))
+                prt = _ensure_dict(pt2r.get("partitions"))
+                if _coerce_bool(prt.get("enabled", False)):
+                    warnings.append("W[perf.t2.reader]: partitions configured while perf.enabled=false; reader remains disabled (identity path).")
             # Warn if both legacy and new frontier caps are present
             if "queue_cap" in pt1v and "frontier" in capsv:
                 warnings.append("W[perf.t1]: both queue_cap and caps.frontier set; caps.frontier will be used by runtime.")

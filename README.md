@@ -1241,6 +1241,90 @@ perf:
 - If you enable both **legacy** stage caches and **perf** caches, behavior is still deterministic, but you may see overlapping effects; prefer one layer for clarity.
 ```
 
+## M6 — Perf & Compaction (PR33: T2 fp16 store + fp32 math + partition-friendly reader; opt-in runtime)
+
+PR33 introduces a compact on-disk embedding store for T2 with **fp16 storage** and **fp32 math**, plus a **partition-friendly reader**. Defaults preserve the disabled-path identity; the runtime reader is **opt-in**.
+
+**What lands**
+- `engine/util/embed_store.py`
+  - `write_shard(dir, ids, embeds, *, dtype="fp16|fp32", precompute_norms: bool)`
+  - `open_reader(root, partitions={enabled, layout, path}) -> EmbedReader`
+  - `EmbedReader.iter_blocks(batch)` yields `(ids, embeds_fp32, norms_fp32)` deterministically; no RNG/clocks.
+- `engine/stages/t2.py`
+  - Reads PR33 config and **emits gated metrics** about store dtype, partition layout, and shard count when enabled.
+  - **Opt-in runtime wiring**: when `perf.enabled=true` **and** `perf.t2.reader.partitions.enabled=true`, T2 retrieves **directly from the on-disk embed store** (cosine in fp32). Metrics reflect `tier_sequence: ["embed_store"]`. When disabled, the legacy in-memory path is used.
+- `configs/validate.py`
+  - Accepts `perf.t2.embed_store_dtype: {fp32, fp16}` and `perf.t2.precompute_norms: bool`.
+  - Accepts `perf.t2.reader.partitions.{enabled, layout, path}` with `layout ∈ {owner_quarter, none}`.
+  - Accepts T2 stage knobs: `t2.reader_batch` (≥ 1) and `t2.embed_root` (non-empty string path).
+  - Warns when `embed_store_dtype=fp16` and `precompute_norms=false` (parity is better with fp32 norms).
+
+**Identity by default**
+- With `perf.enabled: false` (or when reader/partitions are disabled), T2 uses the existing in-memory store and logs remain identical to PR29/PR31/PR32 disabled path.
+
+**Config (opt-in runtime reader; identity remains default)**
+```yaml
+perf:
+  enabled: true
+  metrics: { report_memory: true }
+  t2:
+    embed_store_dtype: fp16        # or fp32 (identity)
+    precompute_norms: true         # recommended for parity
+    reader:
+      partitions:
+        enabled: true
+        layout: owner_quarter      # or "none"
+        path: ./data/t2            # root dir for shards
+t2:
+  reader_batch: 4096               # optional; default 8192
+  embed_root: ./data/t2            # optional; overrides default root when set
+
+Shard layout
+	•	meta.json {schema:"t2:1", embed_dtype:"fp16|fp32", norms:bool, dim:int, count:int}
+	•	embeddings.bin float16|float32 [N,D] (row-major)
+	•	ids.tsv one id per line (lex-stable)
+	•	norms.bin optional float32 [N] when precompute_norms=true
+
+Partitions (deterministic discovery)
+	•	layout: owner_quarter supports either shard subdirs or meta.json directly under the quarter path:
+	•	<root>/<owner>/<quarter>/<shard-*>/meta.json
+	•	<root>/<owner>/<quarter>/meta.json
+
+Parity guarantees
+	•	Math is performed in fp32; fp16 storage is cast up when read.
+	•	Tests enforce Top-K identical to an fp32 baseline and score drift ≤ 1e-6.
+	•	Ordering is stable: sort by (-score, id).
+
+How to Use: (offline tooling)
+from clematis.engine.util.embed_store import write_shard, open_reader
+# Write
+write_shard("./data/t2/shard-000", ids, embeds, dtype="fp16", precompute_norms=True)
+# Read
+reader = open_reader("./data/t2", partitions={"enabled": True, "layout": "owner_quarter"})
+for ids_b, vecs_b, norms_b in reader.iter_blocks(batch=1024):
+    ...  # feed your retrieval/scoring code
+
+Metrics (gated; appear only if perf.enabled=true and report_memory=true)
+	•	t2.embed_dtype = fp32
+	•	t2.embed_store_dtype = fp16|fp32 (from shard meta if discovered)
+	•	t2.precompute_norms = true|false
+	•	t2.reader_shards = shard count (when reader is enabled)
+	•	t2.partition_layout = owner_quarter|none
+	•	t2.tier_sequence = ["embed_store"] when the reader is active
+
+Tests
+	•	Parity: tests/t2/test_fp16_parity.py
+	•	Partitions: tests/t2/test_partition_reader.py
+	•	Back-compat: tests/t2/test_reader_backcompat.py
+	•	Integration (runtime flip): tests/stages/test_t2_reader_integration.py
+	•	Metrics (placeholder, skipped until stage fixture is exposed): tests/t2/test_metrics_gated.py
+	•	Validator for PR33 keys: tests/config/test_validate_perf_t2_fp16.py, tests/config/test_validate_t2_reader_batch.py
+
+Gotchas
+	•	If you use fp16, prefer precompute_norms: true for best parity.
+	•	Reader currently requires meta.json; shards without it will be rejected.
+	•	Disabled path remains the default; enabling the reader is opt-in and gated under perf.enabled=true.
+
 ## Changelog & Releases
 - See the [CHANGELOG](./CHANGELOG.md) for notable changes.
 - Binary / source packages and release notes are on the [Releases] page.

@@ -3,6 +3,7 @@ from typing import Dict, Any, List
 from ..types import T2Result, EpisodeRef
 from ..cache import stable_key
 from ..util.lru_bytes import LRUBytes
+from ..util.embed_store import open_reader
 from ...adapters.embeddings import BGEAdapter
 from ...memory.index import InMemoryIndex
 import numpy as np
@@ -179,6 +180,11 @@ def _init_index_from_cfg(state: dict, cfg_t2: dict):
 def t2_semantic(ctx, state, text: str, t1) -> T2Result:
     cfg = ctx.cfg
     cfg_t2 = cfg.t2
+    # PR33 config (identity-safe; metrics only unless explicitly wired)
+    embed_store_dtype_cfg = str(_cfg_get(ctx, ["cfg", "perf", "t2", "embed_store_dtype"], "fp32") or "fp32").lower()
+    precompute_norms_cfg = bool(_cfg_get(ctx, ["cfg", "perf", "t2", "precompute_norms"], False))
+    partitions_cfg = _cfg_get(ctx, ["cfg", "perf", "t2", "reader", "partitions"], {}) or {}
+    embed_root = str(getattr(cfg_t2, "embed_root", "./.data/t2"))
     # Ensure a memory index exists in state, honoring backend selection with safe fallback
     index, backend_selected, backend_fallback_reason = _init_index_from_cfg(state, cfg_t2)
     # Query text = user text + labels changed by T1
@@ -188,9 +194,27 @@ def t2_semantic(ctx, state, text: str, t1) -> T2Result:
         q_text = (q_text + " " + " ".join(sorted(t1_labels))).strip()
     # Deterministic embedding
     enc = BGEAdapter(dim=int(cfg.k_surface) if hasattr(cfg, 'k_surface') else 32)
-    q_vec = enc.encode([q_text])[0]
+    enc_obj = getattr(ctx, "enc", None) or enc
+    q_vec = enc_obj.encode([q_text])[0] 
+    # PR33: discover shards (for metrics only; retrieval path remains unchanged)
+    pr33_reader = None
+    pr33_layout = "none"
+    pr33_shards = 0
+    pr33_store_dtype = embed_store_dtype_cfg
+    perf_on_tmp = bool(_cfg_get(ctx, ["cfg", "perf", "enabled"], False))
+    if perf_on_tmp and isinstance(partitions_cfg, dict) and partitions_cfg.get("enabled", False):
+        try:
+            pr33_reader = open_reader(embed_root, partitions=partitions_cfg)
+            pr33_layout = pr33_reader.meta.get("partition_layout", "none")
+            pr33_shards = int(pr33_reader.meta.get("shards", 0))
+            pr33_store_dtype = str(pr33_reader.meta.get("embed_store_dtype", pr33_store_dtype)).lower()
+        except Exception:
+            pr33_reader = None
+    # PR33: gate for reader-backed retrieval
+    use_reader = bool(perf_on_tmp and pr33_reader is not None and isinstance(partitions_cfg, dict) and partitions_cfg.get("enabled", False))
     # Tiered retrieval
-    tiers: List[str] = list(cfg_t2.get("tiers", ["exact_semantic", "cluster_semantic", "archive"]))
+    tiers_all: List[str] = list(cfg_t2.get("tiers", ["exact_semantic", "cluster_semantic", "archive"]))
+    tiers: List[str] = ["embed_store"] if use_reader else tiers_all
     k_retrieval: int = int(cfg_t2.get("k_retrieval", 64))
     exact_recent_days: int = int(cfg_t2.get("exact_recent_days", 30))
     sim_threshold: float = float(cfg_t2.get("sim_threshold", 0.3))
@@ -202,15 +226,22 @@ def t2_semantic(ctx, state, text: str, t1) -> T2Result:
         index_ver = int(index.index_version())
     except Exception:
         index_ver = len(getattr(index, "_eps", []))
+    ckey_payload = {
+        "q": q_text,
+        "exact_recent_days": exact_recent_days,
+        "sim_threshold": sim_threshold,
+        "clusters_top_m": clusters_top_m,
+    }
+    if use_reader:
+        ckey_payload["embed_store"] = {
+            "dtype": pr33_store_dtype,
+            "layout": pr33_layout,
+            "shards": pr33_shards,
+        }
     ckey = (
         "t2",
         tuple(tiers),
-        stable_key({
-            "q": q_text,
-            "exact_recent_days": exact_recent_days,
-            "sim_threshold": sim_threshold,
-            "clusters_top_m": clusters_top_m,
-        }),
+        stable_key(ckey_payload),
         index_ver,
     )
     perf_enabled = bool(_cfg_get(ctx, ["cfg", "perf", "enabled"], False))
@@ -237,38 +268,77 @@ def t2_semantic(ctx, state, text: str, t1) -> T2Result:
     # Execute tiers with dedupe
     retrieved = []  # List[EpisodeRef]
     seen_ids = set()
-    tier_sequence: List[str] = []
-    for tier in tiers:
-        tier_sequence.append(tier)
-        hints: Dict[str, Any] = {"sim_threshold": sim_threshold}
-        if tier == "exact_semantic":
-            hints.update({"recent_days": exact_recent_days})
-        elif tier == "cluster_semantic":
-            hints.update({"clusters_top_m": clusters_top_m})
-        elif tier == "archive":
-            # no extra hints by default
-            pass
-        else:
-            continue
-        owner_query = _owner_for_query(ctx, cfg_t2)
-        if now_str:
-            hints["now"] = now_str
-        hits = index.search_tiered(owner=owner_query, q_vec=q_vec, k=k_retrieval, tier=tier, hints=hints)
-        for h in hits:
-            if isinstance(h, dict):
-                hid = str(h.get("id"))
-                raw_hits_by_id[hid] = h
-                ref = _EpRefShim(h)
-            else:
-                ref = h
+    # If PR33 reader is enabled, perform retrieval directly from the embed store (cosine over shards)
+    if use_reader:
+        tier_sequence: List[str] = ["embed_store"]
+        # Build a local id->episode map to hydrate texts where possible
+        _eps_local = getattr(index, "_eps", [])
+        _ep_map = {str(e.get("id")): e for e in _eps_local} if isinstance(_eps_local, list) else {}
+        retrieved = []
+        seen_ids = set()
+        # Deterministic cosine scores in fp32
+        q = np.asarray(q_vec, dtype=np.float32)
+        qn = float(np.linalg.norm(q, ord=2))
+        if qn == 0.0:
+            qn = 1.0
+        items = []
+        batch_sz = int(cfg_t2.get("reader_batch", 8192))
+        for ids_b, vecs_b, norms_b in pr33_reader.iter_blocks(batch=batch_sz):
+            denom = norms_b * qn
+            denom = np.where(denom == 0.0, 1.0, denom)
+            scores_b = (vecs_b @ q) / denom
+            # Accumulate tuples for deterministic final sort
+            for i, _id in enumerate(ids_b):
+                items.append((-float(scores_b[i]), _id, float(scores_b[i])))
+        # Stable ordering: (-score, lex(id))
+        items.sort(key=lambda t: (t[0], t[1]))
+        for _, _id, sc in items[:k_retrieval]:
+            src = _ep_map.get(_id, {"id": _id, "text": "", "score": sc})
+            ref = _EpRefShim(src if isinstance(src, dict) else {"id": _id, "text": "", "score": sc})
+            # Ensure cosine score is set
+            try:
+                ref.score = float(sc)
+            except Exception:
+                pass
             if ref.id in seen_ids:
                 continue
             retrieved.append(ref)
             seen_ids.add(ref.id)
+        # Skip legacy tiered retrieval
+        pass
+    else:
+        tier_sequence: List[str] = []
+        for tier in tiers:
+            tier_sequence.append(tier)
+            hints: Dict[str, Any] = {"sim_threshold": sim_threshold}
+            if tier == "exact_semantic":
+                hints.update({"recent_days": exact_recent_days})
+            elif tier == "cluster_semantic":
+                hints.update({"clusters_top_m": clusters_top_m})
+            elif tier == "archive":
+                # no extra hints by default
+                pass
+            else:
+                continue
+            owner_query = _owner_for_query(ctx, cfg_t2)
+            if now_str:
+                hints["now"] = now_str
+            hits = index.search_tiered(owner=owner_query, q_vec=q_vec, k=k_retrieval, tier=tier, hints=hints)
+            for h in hits:
+                if isinstance(h, dict):
+                    hid = str(h.get("id"))
+                    raw_hits_by_id[hid] = h
+                    ref = _EpRefShim(h)
+                else:
+                    ref = h
+                if ref.id in seen_ids:
+                    continue
+                retrieved.append(ref)
+                seen_ids.add(ref.id)
+                if len(retrieved) >= k_retrieval:
+                    break
             if len(retrieved) >= k_retrieval:
                 break
-        if len(retrieved) >= k_retrieval:
-            break
     # --- Combined scoring (alpha * cosine + beta * recency + gamma * importance) ---
     ranking = cfg_t2.get("ranking", {})
     alpha = float(ranking.get("alpha_sim", 0.75))
@@ -385,7 +455,7 @@ def t2_semantic(ctx, state, text: str, t1) -> T2Result:
         "max": float(np.max(combined_scores)) if combined_scores else 0.0,
     }
     metrics = {
-        "tier_sequence": tiers,
+        "tier_sequence": tier_sequence if 'tier_sequence' in locals() and tier_sequence else tiers,
         "k_returned": len(retrieved),
         "k_used": len(used_hits),
         "k_residual": len(graph_deltas_residual),
@@ -405,6 +475,15 @@ def t2_semantic(ctx, state, text: str, t1) -> T2Result:
     metrics["hybrid_used"] = hybrid_used
     if hybrid_info:
         metrics["hybrid"] = hybrid_info
+    # PR33: gated metrics (no new keys on disabled path)
+    if perf_enabled and metrics_enabled:
+        metrics["t2.embed_dtype"] = "fp32"
+        # Prefer discovered store dtype/layout if available
+        metrics["t2.embed_store_dtype"] = pr33_store_dtype
+        metrics["t2.precompute_norms"] = bool(precompute_norms_cfg)
+        if pr33_reader is not None:
+            metrics["t2.reader_shards"] = pr33_shards
+            metrics["t2.partition_layout"] = pr33_layout
     result = T2Result(retrieved=retrieved, graph_deltas_residual=graph_deltas_residual, metrics=metrics)
     if cache is not None:
         if cache_kind == "bytes":
