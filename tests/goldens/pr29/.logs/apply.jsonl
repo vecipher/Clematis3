@@ -1,0 +1,6 @@
+{"turn": "demo-1", "agent": "AgentA", "applied": 0, "clamps": 0, "version_etag": "52", "snapshot": "./.data/snapshots/state_AgentA.json", "cache_invalidations": 0, "ms": 0.126, "now": "2025-09-21T06:42:45.289588+00:00"}
+{"turn": "demo-1", "agent": "AgentA", "applied": 0, "clamps": 0, "version_etag": "53", "snapshot": "./.data/snapshots/state_AgentA.json", "cache_invalidations": 0, "ms": 0.108, "now": "2025-09-21T06:42:45.291623+00:00"}
+{"turn": "demo-1", "agent": "AgentA", "applied": 0, "clamps": 0, "version_etag": "54", "snapshot": "./.data/snapshots/state_AgentA.json", "cache_invalidations": 0, "ms": 0.1, "now": "2025-09-21T06:42:45.292340+00:00"}
+{"turn": "demo-1", "agent": "AgentA", "applied": 0, "clamps": 0, "version_etag": "55", "snapshot": "./.data/snapshots/state_AgentA.json", "cache_invalidations": 0, "ms": 0.16, "now": "2025-09-21T06:42:45.292984+00:00"}
+{"turn": "demo-1", "agent": "AgentA", "applied": 0, "clamps": 0, "version_etag": "56", "snapshot": "./.data/snapshots/state_AgentA.json", "cache_invalidations": 0, "ms": 0.094, "now": "2025-09-21T06:42:45.293890+00:00"}
+{"turn": "demo-1", "agent": "AgentA", "applied": 0, "clamps": 0, "version_etag": "57", "snapshot": "./.data/snapshots/state_AgentA.json", "cache_invalidations": 0, "ms": 0.096, "now": "2025-09-21T06:42:45.294512+00:00"}

@@ -186,11 +186,11 @@ DEFAULTS: Dict[str, Any] = {
 KNOWN_CACHE_NAMESPACES = {"t2:semantic"}
 
 # Allowed key sets per section
-ALLOWED_TOP = {"t1", "t2", "t3", "t4", "graph", "k_surface", "surface_method", "budgets", "flags", "scheduler"}
+ALLOWED_TOP = {"t1", "t2", "t3", "t4", "graph", "k_surface", "surface_method", "budgets", "flags", "scheduler", "perf"}
 ALLOWED_T1 = {"cache", "iter_cap", "queue_budget", "node_budget", "decay", "edge_type_mult", "radius_cap"}
 ALLOWED_T2 = {"backend", "k_retrieval", "sim_threshold", "cache", "ranking", "hybrid",
               "tiers", "exact_recent_days", "clusters_top_m", "owner_scope",
-              "residual_cap_per_turn", "lancedb", "archive"}
+              "residual_cap_per_turn", "lancedb", "archive", "quality"}
 ALLOWED_T3 = {"max_rag_loops", "max_ops_per_turn", "backend",
               "tokens", "temp", "allow_reflection", "dialogue", "policy", "llm"}
 ALLOWED_T4 = {
@@ -213,6 +213,25 @@ ALLOWED_GRAPH_MERGE = {"enabled", "min_size", "min_avg_w", "max_diameter", "cap_
 ALLOWED_GRAPH_SPLIT = {"enabled", "weak_edge_thresh", "min_component_size", "cap_per_turn"}
 ALLOWED_GRAPH_PROMOTION = {"enabled", "label_mode", "topk_label_ids", "attach_weight", "cap_per_turn"}
 _ALLOWED_SCHED_POLICIES = {"round_robin", "fair_queue"}
+
+# PERF (M6) allowed keys
+ALLOWED_PERF = {"enabled", "t1", "t2", "snapshots", "metrics"}
+ALLOWED_PERF_T1 = {"queue_cap", "dedupe_window", "cache"}
+ALLOWED_PERF_T1_CACHE = {"max_entries", "max_bytes"}
+ALLOWED_PERF_T2 = {"embed_dtype", "embed_store_dtype", "precompute_norms", "cache"}
+ALLOWED_PERF_T2_CACHE = {"max_entries", "max_bytes"}
+ALLOWED_PERF_SNAP = {"compression", "level", "delta_mode", "every_n_turns"}
+ALLOWED_PERF_METRICS = {"report_memory"}
+
+# T2.quality (RQ prep only) allowed keys
+ALLOWED_T2_QUALITY = {"enabled", "normalizer", "aliasing", "lexical", "fusion", "mmr", "cache"}
+ALLOWED_T2_QUALITY_NORMALIZER = {"stopwords", "stemmer", "min_token_len"}
+ALLOWED_T2_QUALITY_ALIASING = {"enabled", "map_path", "max_expansions_per_token"}
+ALLOWED_T2_QUALITY_LEXICAL = {"enabled", "bm25"}
+ALLOWED_T2_QUALITY_BM25 = {"k1", "b", "doclen_floor"}
+ALLOWED_T2_QUALITY_FUSION = {"enabled", "alpha_semantic", "score_norm"}
+ALLOWED_T2_QUALITY_MMR = {"enabled", "lambda_relevance", "diversity_by_owner", "diversity_by_token", "k_final"}
+ALLOWED_T2_QUALITY_CACHE = {"salt"}
 
 def _lev(a: str, b: str) -> int:
     """Tiny Levenshtein distance (edit distance) for did-you-mean suggestions."""
@@ -285,6 +304,24 @@ def validate_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
     raw_graph_merge = _ensure_dict(raw_graph.get("merge"))
     raw_graph_split = _ensure_dict(raw_graph.get("split"))
     raw_graph_promotion = _ensure_dict(raw_graph.get("promotion"))
+
+    # PERF and T2.quality raw captures
+    raw_perf = _ensure_dict(cfg_in.get("perf"))
+    raw_perf_t1 = _ensure_dict(raw_perf.get("t1"))
+    raw_perf_t1_cache = _ensure_dict(raw_perf_t1.get("cache"))
+    raw_perf_t2 = _ensure_dict(raw_perf.get("t2"))
+    raw_perf_t2_cache = _ensure_dict(raw_perf_t2.get("cache"))
+    raw_perf_snap = _ensure_dict(raw_perf.get("snapshots"))
+    raw_perf_metrics = _ensure_dict(raw_perf.get("metrics"))
+
+    raw_t2_quality = _ensure_dict(raw_t2.get("quality"))
+    raw_q_norm = _ensure_dict(raw_t2_quality.get("normalizer"))
+    raw_q_alias = _ensure_dict(raw_t2_quality.get("aliasing"))
+    raw_q_lex = _ensure_dict(raw_t2_quality.get("lexical"))
+    raw_q_bm25 = _ensure_dict(raw_q_lex.get("bm25"))
+    raw_q_fusion = _ensure_dict(raw_t2_quality.get("fusion"))
+    raw_q_mmr = _ensure_dict(raw_t2_quality.get("mmr"))
+    raw_q_cache = _ensure_dict(raw_t2_quality.get("cache"))
 
     # Unknown key detection (top-level and per-section), with suggestions
     for k in cfg_in.keys():
@@ -385,6 +422,73 @@ def validate_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
             sug = _suggest_key(k, ALLOWED_GRAPH_PROMOTION)
             hint = f" (did you mean '{sug}')" if sug else ""
             _err(errors, f"graph.promotion.{k}", f"unknown key{hint}")
+
+    # PERF unknown key checks
+    if raw_perf:
+        for k in raw_perf.keys():
+            if k not in ALLOWED_PERF:
+                sug = _suggest_key(k, ALLOWED_PERF)
+                hint = f" (did you mean '{sug}')" if sug else ""
+                _err(errors, f"perf.{k}", f"unknown key{hint}")
+        for k in raw_perf_t1.keys():
+            if k not in ALLOWED_PERF_T1:
+                sug = _suggest_key(k, ALLOWED_PERF_T1); hint = f" (did you mean '{sug}')" if sug else ""
+                _err(errors, f"perf.t1.{k}", f"unknown key{hint}")
+        for k in raw_perf_t1_cache.keys():
+            if k not in ALLOWED_PERF_T1_CACHE:
+                sug = _suggest_key(k, ALLOWED_PERF_T1_CACHE); hint = f" (did you mean '{sug}')" if sug else ""
+                _err(errors, f"perf.t1.cache.{k}", f"unknown key{hint}")
+        for k in raw_perf_t2.keys():
+            if k not in ALLOWED_PERF_T2:
+                sug = _suggest_key(k, ALLOWED_PERF_T2); hint = f" (did you mean '{sug}')" if sug else ""
+                _err(errors, f"perf.t2.{k}", f"unknown key{hint}")
+        for k in raw_perf_t2_cache.keys():
+            if k not in ALLOWED_PERF_T2_CACHE:
+                sug = _suggest_key(k, ALLOWED_PERF_T2_CACHE); hint = f" (did you mean '{sug}')" if sug else ""
+                _err(errors, f"perf.t2.cache.{k}", f"unknown key{hint}")
+        for k in raw_perf_snap.keys():
+            if k not in ALLOWED_PERF_SNAP:
+                sug = _suggest_key(k, ALLOWED_PERF_SNAP); hint = f" (did you mean '{sug}')" if sug else ""
+                _err(errors, f"perf.snapshots.{k}", f"unknown key{hint}")
+        for k in raw_perf_metrics.keys():
+            if k not in ALLOWED_PERF_METRICS:
+                sug = _suggest_key(k, ALLOWED_PERF_METRICS); hint = f" (did you mean '{sug}')" if sug else ""
+                _err(errors, f"perf.metrics.{k}", f"unknown key{hint}")
+
+    # T2.quality unknown key checks (RQ prep only)
+    if raw_t2_quality:
+        for k in raw_t2_quality.keys():
+            if k not in ALLOWED_T2_QUALITY:
+                sug = _suggest_key(k, ALLOWED_T2_QUALITY); hint = f" (did you mean '{sug}')" if sug else ""
+                _err(errors, f"t2.quality.{k}", f"unknown key{hint}")
+        for k in raw_q_norm.keys():
+            if k not in ALLOWED_T2_QUALITY_NORMALIZER:
+                sug = _suggest_key(k, ALLOWED_T2_QUALITY_NORMALIZER); hint = f" (did you mean '{sug}')" if sug else ""
+                _err(errors, f"t2.quality.normalizer.{k}", f"unknown key{hint}")
+        for k in raw_q_alias.keys():
+            if k not in ALLOWED_T2_QUALITY_ALIASING:
+                sug = _suggest_key(k, ALLOWED_T2_QUALITY_ALIASING); hint = f" (did you mean '{sug}')" if sug else ""
+                _err(errors, f"t2.quality.aliasing.{k}", f"unknown key{hint}")
+        for k in raw_q_lex.keys():
+            if k not in ALLOWED_T2_QUALITY_LEXICAL:
+                sug = _suggest_key(k, ALLOWED_T2_QUALITY_LEXICAL); hint = f" (did you mean '{sug}')" if sug else ""
+                _err(errors, f"t2.quality.lexical.{k}", f"unknown key{hint}")
+        for k in raw_q_bm25.keys():
+            if k not in ALLOWED_T2_QUALITY_BM25:
+                sug = _suggest_key(k, ALLOWED_T2_QUALITY_BM25); hint = f" (did you mean '{sug}')" if sug else ""
+                _err(errors, f"t2.quality.lexical.bm25.{k}", f"unknown key{hint}")
+        for k in raw_q_fusion.keys():
+            if k not in ALLOWED_T2_QUALITY_FUSION:
+                sug = _suggest_key(k, ALLOWED_T2_QUALITY_FUSION); hint = f" (did you mean '{sug}')" if sug else ""
+                _err(errors, f"t2.quality.fusion.{k}", f"unknown key{hint}")
+        for k in raw_q_mmr.keys():
+            if k not in ALLOWED_T2_QUALITY_MMR:
+                sug = _suggest_key(k, ALLOWED_T2_QUALITY_MMR); hint = f" (did you mean '{sug}')" if sug else ""
+                _err(errors, f"t2.quality.mmr.{k}", f"unknown key{hint}")
+        for k in raw_q_cache.keys():
+            if k not in ALLOWED_T2_QUALITY_CACHE:
+                sug = _suggest_key(k, ALLOWED_T2_QUALITY_CACHE); hint = f" (did you mean '{sug}')" if sug else ""
+                _err(errors, f"t2.quality.cache.{k}", f"unknown key{hint}")
 
     merged = _deep_merge(cfg_in, DEFAULTS)
 
@@ -763,6 +867,192 @@ def validate_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
         _err(errors, "scheduler.fairness.aging_ms", "must be >= 0")
     s["fairness"] = sf
 
+    # ---- PERF (M6; config-only) ----
+    if raw_perf:
+        p: Dict[str, Any] = {}
+        p["enabled"] = _coerce_bool(raw_perf.get("enabled", False))
+
+        # perf.t1
+        if raw_perf_t1:
+            pt1: Dict[str, Any] = {}
+            if "queue_cap" in raw_perf_t1:
+                qc = _coerce_int(raw_perf_t1.get("queue_cap"))
+                if qc < 1: _err(errors, "perf.t1.queue_cap", "must be >= 1")
+                pt1["queue_cap"] = qc
+            if "dedupe_window" in raw_perf_t1:
+                dw = _coerce_int(raw_perf_t1.get("dedupe_window"))
+                if dw < 1: _err(errors, "perf.t1.dedupe_window", "must be >= 1")
+                pt1["dedupe_window"] = dw
+            if raw_perf_t1_cache:
+                pc: Dict[str, Any] = {}
+                if "max_entries" in raw_perf_t1_cache:
+                    me = _coerce_int(raw_perf_t1_cache.get("max_entries"))
+                    if me < 0: _err(errors, "perf.t1.cache.max_entries", "must be >= 0")
+                    pc["max_entries"] = me
+                if "max_bytes" in raw_perf_t1_cache:
+                    mb = _coerce_int(raw_perf_t1_cache.get("max_bytes"))
+                    if mb < 0: _err(errors, "perf.t1.cache.max_bytes", "must be >= 0")
+                    pc["max_bytes"] = mb
+                if pc: pt1["cache"] = pc
+            if pt1: p["t1"] = pt1
+
+        # perf.t2
+        if raw_perf_t2:
+            pt2: Dict[str, Any] = {}
+            if "embed_dtype" in raw_perf_t2:
+                ed = str(raw_perf_t2.get("embed_dtype")).lower()
+                if ed not in {"fp32", "fp16"}:
+                    _err(errors, "perf.t2.embed_dtype", "must be one of {fp32,fp16}")
+                pt2["embed_dtype"] = ed
+            if "embed_store_dtype" in raw_perf_t2:
+                esd = str(raw_perf_t2.get("embed_store_dtype")).lower()
+                if esd not in {"fp32", "fp16"}:
+                    _err(errors, "perf.t2.embed_store_dtype", "must be one of {fp32,fp16}")
+                pt2["embed_store_dtype"] = esd
+            if "precompute_norms" in raw_perf_t2:
+                pt2["precompute_norms"] = _coerce_bool(raw_perf_t2.get("precompute_norms"))
+            if raw_perf_t2_cache:
+                pc2: Dict[str, Any] = {}
+                if "max_entries" in raw_perf_t2_cache:
+                    me2 = _coerce_int(raw_perf_t2_cache.get("max_entries"))
+                    if me2 < 0: _err(errors, "perf.t2.cache.max_entries", "must be >= 0")
+                    pc2["max_entries"] = me2
+                if "max_bytes" in raw_perf_t2_cache:
+                    mb2 = _coerce_int(raw_perf_t2_cache.get("max_bytes"))
+                    if mb2 < 0: _err(errors, "perf.t2.cache.max_bytes", "must be >= 0")
+                    pc2["max_bytes"] = mb2
+                if pc2: pt2["cache"] = pc2
+            if pt2: p["t2"] = pt2
+
+        # perf.snapshots
+        if raw_perf_snap:
+            ps: Dict[str, Any] = {}
+            if "compression" in raw_perf_snap:
+                comp = str(raw_perf_snap.get("compression")).lower()
+                if comp not in {"none", "zstd"}:
+                    _err(errors, "perf.snapshots.compression", "must be one of {none,zstd}")
+                ps["compression"] = comp
+            if "level" in raw_perf_snap:
+                lvl = _coerce_int(raw_perf_snap.get("level"))
+                if not (1 <= lvl <= 19):
+                    _err(errors, "perf.snapshots.level", "must be in [1,19]")
+                ps["level"] = lvl
+            if "delta_mode" in raw_perf_snap:
+                ps["delta_mode"] = _coerce_bool(raw_perf_snap.get("delta_mode"))
+            if "every_n_turns" in raw_perf_snap:
+                ent = _coerce_int(raw_perf_snap.get("every_n_turns"))
+                if ent < 1: _err(errors, "perf.snapshots.every_n_turns", "must be >= 1")
+                ps["every_n_turns"] = ent
+            if ps: p["snapshots"] = ps
+
+        # perf.metrics
+        if raw_perf_metrics:
+            pm: Dict[str, Any] = {}
+            if "report_memory" in raw_perf_metrics:
+                pm["report_memory"] = _coerce_bool(raw_perf_metrics.get("report_memory"))
+            if pm: p["metrics"] = pm
+
+        merged["perf"] = p
+
+    # ---- T2.QUALITY (M6 prep only; no runtime wiring) ----
+    if raw_t2_quality:
+        q: Dict[str, Any] = {}
+        q["enabled"] = _coerce_bool(raw_t2_quality.get("enabled", False))
+
+        # normalizer
+        if raw_q_norm:
+            qn: Dict[str, Any] = {}
+            if "stopwords" in raw_q_norm:
+                sw = raw_q_norm.get("stopwords")
+                if not isinstance(sw, str) or not sw:
+                    _err(errors, "t2.quality.normalizer.stopwords", "must be a non-empty string")
+                qn["stopwords"] = sw
+            if "stemmer" in raw_q_norm:
+                st = str(raw_q_norm.get("stemmer"))
+                if st not in {"none", "porter-lite"}:
+                    _err(errors, "t2.quality.normalizer.stemmer", "must be one of {none,porter-lite}")
+                qn["stemmer"] = st
+            if "min_token_len" in raw_q_norm:
+                mtl = _coerce_int(raw_q_norm.get("min_token_len"))
+                if mtl < 1: _err(errors, "t2.quality.normalizer.min_token_len", "must be >= 1")
+                qn["min_token_len"] = mtl
+            if qn: q["normalizer"] = qn
+
+        # aliasing
+        if raw_q_alias:
+            qa: Dict[str, Any] = {}
+            if "enabled" in raw_q_alias:
+                qa["enabled"] = _coerce_bool(raw_q_alias.get("enabled"))
+            if "map_path" in raw_q_alias:
+                mp = raw_q_alias.get("map_path")
+                if not isinstance(mp, str) or not mp:
+                    _err(errors, "t2.quality.aliasing.map_path", "must be a non-empty string path")
+                qa["map_path"] = mp
+            if "max_expansions_per_token" in raw_q_alias:
+                mep = _coerce_int(raw_q_alias.get("max_expansions_per_token"))
+                if mep < 0: _err(errors, "t2.quality.aliasing.max_expansions_per_token", "must be >= 0")
+                qa["max_expansions_per_token"] = mep
+            if qa: q["aliasing"] = qa
+
+        # lexical
+        if raw_q_lex:
+            ql: Dict[str, Any] = {}
+            if "enabled" in raw_q_lex:
+                ql["enabled"] = _coerce_bool(raw_q_lex.get("enabled"))
+            if raw_q_bm25:
+                qb: Dict[str, Any] = {}
+                if "k1" in raw_q_bm25: qb["k1"] = _coerce_float(raw_q_bm25.get("k1"))
+                if "b" in raw_q_bm25:
+                    bval = _coerce_float(raw_q_bm25.get("b"))
+                    qb["b"] = bval
+                if "doclen_floor" in raw_q_bm25:
+                    dlf = _coerce_int(raw_q_bm25.get("doclen_floor"))
+                    if dlf < 0: _err(errors, "t2.quality.lexical.bm25.doclen_floor", "must be >= 0")
+                    qb["doclen_floor"] = dlf
+                if qb: ql["bm25"] = qb
+            if ql: q["lexical"] = ql
+
+        # fusion
+        if raw_q_fusion:
+            qf: Dict[str, Any] = {}
+            if "enabled" in raw_q_fusion:
+                qf["enabled"] = _coerce_bool(raw_q_fusion.get("enabled"))
+            if "alpha_semantic" in raw_q_fusion:
+                qf["alpha_semantic"] = _coerce_float(raw_q_fusion.get("alpha_semantic"))
+            if "score_norm" in raw_q_fusion:
+                sn = str(raw_q_fusion.get("score_norm"))
+                if sn not in {"zscore", "minmax"}:
+                    _err(errors, "t2.quality.fusion.score_norm", "must be one of {zscore,minmax}")
+                qf["score_norm"] = sn
+            if qf: q["fusion"] = qf
+
+        # mmr
+        if raw_q_mmr:
+            qm: Dict[str, Any] = {}
+            if "enabled" in raw_q_mmr:
+                qm["enabled"] = _coerce_bool(raw_q_mmr.get("enabled"))
+            if "lambda_relevance" in raw_q_mmr:
+                qm["lambda_relevance"] = _coerce_float(raw_q_mmr.get("lambda_relevance"))
+            if "diversity_by_owner" in raw_q_mmr:
+                qm["diversity_by_owner"] = _coerce_bool(raw_q_mmr.get("diversity_by_owner"))
+            if "diversity_by_token" in raw_q_mmr:
+                qm["diversity_by_token"] = _coerce_bool(raw_q_mmr.get("diversity_by_token"))
+            if "k_final" in raw_q_mmr:
+                kf = _coerce_int(raw_q_mmr.get("k_final"))
+                if kf < 1: _err(errors, "t2.quality.mmr.k_final", "must be >= 1")
+                qm["k_final"] = kf
+            if qm: q["mmr"] = qm
+
+        # cache
+        if raw_q_cache:
+            qc: Dict[str, Any] = {}
+            if "salt" in raw_q_cache:
+                qc["salt"] = str(raw_q_cache.get("salt"))
+            if qc: q["cache"] = qc
+
+        # attach normalized quality only if provided
+        t2["quality"] = q
+
     # If we collected errors, raise a single ValueError with all messages (stable order)
     if errors:
         raise ValueError("\n".join(errors))
@@ -816,6 +1106,39 @@ def validate_config_verbose(cfg: Dict[str, Any]) -> Tuple[Dict[str, Any], List[s
         aging = _coerce_int(fairness.get("aging_ms", 200))
         if aging < qms:
             warnings.append("W[scheduler]: fairness.aging_ms < quantum_ms; aging tiers may be too fine-grained to have effect.")
+    except Exception:
+        pass
+    try:
+        perf = _ensure_dict(normalized.get("perf"))
+        if perf:
+            pt2 = _ensure_dict(perf.get("t2"))
+            esd = str(pt2.get("embed_store_dtype", "")).lower()
+            pre = _coerce_bool(pt2.get("precompute_norms", False))
+            if esd == "fp16" and not pre:
+                warnings.append("W[perf.t2]: embed_store_dtype=fp16 without precompute_norms=true; fp32 norms recommended for score parity.")
+            ps = _ensure_dict(perf.get("snapshots"))
+            if _coerce_bool(ps.get("delta_mode", False)):
+                warnings.append("W[perf.snapshots]: delta_mode=true may fallback to full snapshot when baseline/etag is missing.")
+        q = _ensure_dict(_ensure_dict(normalized.get("t2")).get("quality"))
+        if q:
+            qf = _ensure_dict(q.get("fusion"))
+            if "alpha_semantic" in qf:
+                a = _coerce_float(qf.get("alpha_semantic"))
+                if not (0.0 <= a <= 1.0):
+                    warnings.append("W[t2.quality.fusion.alpha_semantic]: expected in [0,1].")
+            qm = _ensure_dict(q.get("mmr"))
+            if "lambda_relevance" in qm:
+                lam = _coerce_float(qm.get("lambda_relevance"))
+                if not (0.0 <= lam <= 1.0):
+                    warnings.append("W[t2.quality.mmr.lambda_relevance]: expected in [0,1].")
+            if "k_final" in qm:
+                kf = _coerce_int(qm.get("k_final"))
+                try:
+                    kret = _coerce_int(_ensure_dict(normalized.get("t2")).get("k_retrieval", 10))
+                    if kf > kret:
+                        warnings.append("W[t2.quality.mmr.k_final]: k_final exceeds t2.k_retrieval; results may truncate in M7 wiring.")
+                except Exception:
+                    pass
     except Exception:
         pass
     return normalized, warnings
