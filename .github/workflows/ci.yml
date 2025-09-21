@@ -25,7 +25,7 @@ jobs:
             pip install pytest
           fi
           # Ensure minimal test deps are present regardless
-          pip install pyyaml
+          pip install pyyaml numpy
 
       # Install your package in editable mode (so `from clematis...` works)
       - name: Install package
@@ -102,7 +102,7 @@ jobs:
 
       - name: Install minimal deps
         run: |
-          pip install pytest pyyaml
+          pip install pytest pyyaml numpy
 
       - name: Install package (editable)
         run: pip install -e .
