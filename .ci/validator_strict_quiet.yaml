@@ -1,0 +1,11 @@
+# Quiet config for STRICT validator runs only (does not change golden behavior)
+t2:
+  quality:
+    enabled: false
+  cache:
+    enabled: false
+t4:
+  cache:
+    namespaces: []
+perf:
+  enabled: false
