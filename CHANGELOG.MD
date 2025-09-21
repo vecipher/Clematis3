@@ -118,3 +118,25 @@ All notable changes to this project will be documented in this file.
 - **Branch protection:** mark both jobs in `t2_reader_parity.yml` as required:
   - “Gate C — T2 Reader Parity / Parity matrix (dtype × norms)”
   - “Gate C — T2 Reader Parity / Reader must not engage (perf=OFF)”
+
+### Added (PR34 — Snapshots: zstd compression + delta mode; defaults OFF)
+- **Util:** `clematis/engine/util/snapshot_delta.py` — deterministic path-based delta codec (`compute_delta`, `apply_delta`).
+- **Tests:**
+  - `tests/snapshots/test_snapshot_delta_roundtrip.py` — delta round-trip identity.
+  - `tests/snapshots/test_snapshot_fallback.py` — baseline missing ⇒ warning + full fallback.
+  - `tests/config/test_validate_perf_snapshots.py` — validator bounds/warnings (aligned with current schema).
+- **Examples:** `examples/perf/snapshots.yaml` — safe example config (used by PR35 docs).
+- **CI:** `.github/workflows/snapshots_smoke.yml` — fast smoke for delta/fallback tests on relevant PRs.
+
+### Changed (PR34)
+- **Snapshot reader:** `clematis/engine/snapshot.py` adds `read_snapshot(...)` that understands two-line `header\npayload` format for **full** and **delta** files, supports optional `.json.zst` (when `zstandard` is installed), and performs a **safe fallback** to the matching full snapshot when the baseline is missing/mismatched, logging `SNAPSHOT_BASELINE_MISSING`.
+- **IO shim:** `clematis/engine/io/snapshot.py` re-exports `read_snapshot` to avoid optional import errors at import time.
+- **Validator:** `configs/validate.py` now emits a warning when any `perf.snapshots.*` keys are configured while `perf.enabled=false` (identity path; features remain disabled). No API shape changes.
+- **Dev/Test deps:** add `zstandard>=0.22` to dev/test extras (`pyproject.toml`) and `requirements-dev.txt`.
+
+### Notes (PR34)
+- **No behavior change by default:** with `perf.enabled=false`, outputs/logs remain identical to PR29 goldens.
+- **Semantics unchanged:** enabling compression/delta changes persistence cost/size only; reconstructed snapshot equals the full payload.
+- **Metrics deferred:** no new snapshot metrics in PR34; future counters must be gated by `perf.enabled && perf.metrics.report_memory`.
+- **Determinism:** ETags computed from canonical JSON; ordering and filenames are stable.
+- **Scope in this PR:** Adds reader + delta codec + tests; writer support for delta/zstd will land in a follow-up (no change to default write path in PR34).

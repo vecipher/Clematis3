@@ -1,4 +1,6 @@
 pytest
+hypothesis>=6
+zstandard>=0.22
 numpy
 pyyaml>=6.0.1
 setuptools>=68

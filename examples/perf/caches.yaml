@@ -1,0 +1,10 @@
+# examples/perf/caches.yaml
+# PR32 — Size-aware caches (LRU by bytes) for T1/T2
+# Identity note: 0 disables; eviction is deterministic (LRU, lex tie-break).
+perf:
+  enabled: true
+  metrics:
+    report_memory: false
+  cache:
+    max_entries: 0              # 0 = ignore entry count
+    max_bytes: 268435456        # 256 MiB budget for caches; 0 = disabled

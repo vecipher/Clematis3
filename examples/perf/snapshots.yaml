@@ -1,0 +1,11 @@
+# examples/perf/snapshots.yaml
+# PR34 — Snapshots (compression + delta) with safe fallback
+# Identity note: changes persistence only; semantics unchanged.
+perf:
+  enabled: true                 # enable perf features for this example
+  metrics:
+    report_memory: false        # set true to emit snapshot counters
+  snapshots:
+    compression: zstd           # allowed: none | zstd
+    level: 5                    # zstd compression level (1..19)
+    delta_mode: true            # write delta snapshots when a matching baseline exists

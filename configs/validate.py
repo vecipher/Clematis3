@@ -1,5 +1,5 @@
 """
-Lightweight configuration validation and normalization for Clematis3.
+"Lightweight" configuration validation and normalization for Clematis3.
 
 Public API:
     validate_config(cfg: dict) -> dict
@@ -1217,6 +1217,15 @@ def validate_config_verbose(cfg: Dict[str, Any]) -> Tuple[Dict[str, Any], List[s
                 if (_coerce_bool(prt.get("enabled", False))
                     or ("by" in prt) or ("layout" in prt) or ("path" in prt)):
                     warnings.append("W[perf.t2.reader]: partitions configured while perf.enabled=false; reader remains disabled (identity path).")
+                # PR34: snapshots configured while perf is disabled → identity path (no effect)
+                ps = _ensure_dict(perf.get("snapshots"))
+                if ps:
+                    comp = str(ps.get("compression", "none")).lower()
+                    lvl_present = ("level" in ps)
+                    delta_set = _coerce_bool(ps.get("delta_mode", False))
+                    every_present = ("every_n_turns" in ps)
+                    if (comp != "none") or lvl_present or delta_set or every_present:
+                        warnings.append("W[perf.snapshots]: snapshots configured while perf.enabled=false; features remain disabled (identity path).")
             # Warn if both legacy and new frontier caps are present
             if "queue_cap" in pt1v and "frontier" in capsv:
                 warnings.append("W[perf.t1]: both queue_cap and caps.frontier set; caps.frontier will be used by runtime.")

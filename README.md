@@ -1362,6 +1362,43 @@ pytest -q \
 - Sorting is strictly `(-score, lex(id))` in all paths; ties are stable.
 - Default configs keep `perf.enabled=false`, so PR33.5 does **not** change observable behavior.
 
+## M6 — Snapshots (PR34): zstd compression + delta mode (safe fallback; defaults OFF)
+
+**What this adds (no behavior change by default)**
+- Reader support for full and delta snapshots; can read optional zstd‐compressed files (`level` 1–19).
+- Delta snapshots (`delta_mode`) reconstruct from a baseline identified by `etag`; if baseline is missing or mismatched, the reader logs `SNAPSHOT_BASELINE_MISSING` and deterministically falls back to the matching full snapshot (or `{}` as a last resort).
+- Writer wiring for delta/zstd is deferred; defaults keep existing full JSON snapshots. With `perf.enabled=false`, behavior/logs remain identical to pre-M6.
+
+**Config (example)**
+```yaml
+# examples/perf/snapshots.yaml
+perf:
+  enabled: true
+  metrics: { report_memory: false }   # counters deferred to PR35
+  snapshots:
+    compression: zstd                 # allowed: none | zstd
+    level: 5                          # 1..19
+    delta_mode: true                  # write delta files when a matching baseline exists
+
+How it stores files - **File formats the reader understands idk**
+	•	Full: snapshot-{etag}.full.json[.zst]
+	•	Delta: snapshot-{etag_to}.delta.json[.zst] with a small JSON header on line 1 and a delta payload on line 2+.
+  
+
+Run locally
+# Unit tests for the delta codec and the safe fallback
+pytest -q tests/snapshots/test_snapshot_delta_roundtrip.py \
+         tests/snapshots/test_snapshot_fallback.py
+zstd support is optional; to read/write .zst files locally, install zstandard (already in dev/test extras).
+
+CI (smoke)
+	•	Workflow: .github/workflows/snapshots_smoke.yml runs the two tests above on PRs that touch snapshots code.
+
+Notes
+	•	Defaults keep snapshots as uncompressed full files; enabling compression/delta changes persistence only, not semantics.
+	•	ETags are computed over canonical JSON, keeping names deterministic; ordering is stable.
+	•	No new metrics are emitted in PR34; any future snapshot counters must remain gated (perf.enabled && perf.metrics.report_memory).
+
 ## Changelog & Releases
 - See the [CHANGELOG](./CHANGELOG.md) for notable changes.
 - Binary / source packages and release notes are on the [Releases] page.

@@ -5,7 +5,20 @@ description = "Clematis v2 scaffold (turn-based, graph-only, multi-agent)."
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [{ name = "Clematis Dev" }]
+
 dependencies = []
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8",
+  "hypothesis>=6",
+  "zstandard>=0.22"
+]
+test = [
+  "pytest>=8",
+  "hypothesis>=6",
+  "zstandard>=0.22"
+]
 
  
 

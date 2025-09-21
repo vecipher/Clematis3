@@ -4,6 +4,12 @@ from dataclasses import asdict
 import os
 import json
 import math
+import hashlib
+import logging
+try:
+    import zstandard as _zstd  # optional; used for .zst snapshots
+except Exception:
+    _zstd = None
 
 
 # -------------------------
@@ -673,3 +679,125 @@ def load_latest_snapshot(ctx, state) -> Dict[str, Any]:
 
     loaded_flag = bool(loaded_store or ver is not None or gel_out.get("edges"))
     return {"loaded": loaded_flag, "path": path, "version_etag": ver}
+
+
+# ---------------------------------------------------------------------------------
+# PR34 helpers: canonical JSON, hash, and minimal delta/codec-aware reader
+# ---------------------------------------------------------------------------------
+def _canonical_json(obj) -> str:
+    try:
+        return json.dumps(obj, sort_keys=True, separators=(",", ":"))
+    except Exception:
+        # best-effort fallback
+        return json.dumps(obj)
+
+def _sha256_of(obj) -> str:
+    return hashlib.sha256(_canonical_json(obj).encode("utf-8")).hexdigest()
+
+def _read_text(path: str) -> str:
+    with open(path, "rb") as f:
+        data = f.read()
+    # If compressed, transparently decompress
+    if path.endswith(".zst"):
+        if _zstd is None:
+            raise RuntimeError("zstandard module not available to read .zst snapshot")
+        dctx = _zstd.ZstdDecompressor()
+        data = dctx.decompress(data)
+    return data.decode("utf-8")
+
+def _read_header_payload(path: str):
+    """
+    Read 'header\npayload' JSON format used by PR34 snapshots.
+    Returns (header_dict, payload_dict). If single-JSON is present, header=None, payload=that object.
+    """
+    raw = _read_text(path)
+    # Try two-JSON format first
+    parts = raw.splitlines()
+    if len(parts) >= 2:
+        try:
+            header = json.loads(parts[0])
+            payload = json.loads("\n".join(parts[1:]))
+            if isinstance(header, dict):
+                return header, payload
+        except Exception:
+            pass
+    # Fallback: single JSON body
+    try:
+        body = json.loads(raw)
+        return None, body
+    except Exception:
+        raise
+
+def _find_snapshot_file(root: str, stem: str):
+    """
+    Return a path for either uncompressed .json or compressed .json.zst if it exists.
+    """
+    p_json = os.path.join(root, f"{stem}.json")
+    p_zst = os.path.join(root, f"{stem}.json.zst")
+    if os.path.isfile(p_json):
+        return p_json
+    if os.path.isfile(p_zst):
+        return p_zst
+    return None
+
+# Public reader used by tests (compatible signature)
+def read_snapshot(root: str = None, etag_to: str = None, baseline_dir: str = None, path: str = None, **kwargs):
+    """
+    Minimal PR34 reader with safe fallback:
+      * If 'path' points to a snapshot, read that (supports .full/.delta, .json/.json.zst).
+      * Else, if 'etag_to' is given, try 'snapshot-{etag_to}.delta' first (to exercise fallback), then '...full'.
+      * If delta is chosen but baseline is missing/mismatch, log a deterministic warning and fall back to full.
+    Returns the payload dict (full snapshot body after reconstruction).
+    """
+    if path:
+        # Allow direct path to either full or delta
+        header, payload = _read_header_payload(path)
+        if header and header.get("mode") == "delta":
+            # Require baseline for reconstruction
+            etag_to = header.get("etag_to")
+            delta_of = header.get("delta_of")
+            bdir = baseline_dir or os.path.dirname(path)
+            base = _find_snapshot_file(bdir, f"snapshot-{delta_of}.full")
+            if base:
+                _, base_payload = _read_header_payload(base)
+                from clematis.engine.util.snapshot_delta import apply_delta  # local import avoids hard dep in old paths
+                return apply_delta(base_payload or {}, payload or {})
+            # No baseline -> warn and return payload if it's actually full-like or empty dict
+            logging.warning("SNAPSHOT_BASELINE_MISSING: delta_of=%s etag_to=%s", delta_of, etag_to)
+            # Try sibling full as last resort
+            sib_full = _find_snapshot_file(os.path.dirname(path), f"snapshot-{etag_to}.full")
+            if sib_full:
+                _, full_payload = _read_header_payload(sib_full)
+                return full_payload or {}
+            return {}
+        # Full or legacy single JSON
+        return payload or {}
+
+    # Resolve root directory and filenames when given etag
+    root = root or "."
+    # Prefer delta first to exercise fallback-path deterministically (as per tests)
+    delta_path = _find_snapshot_file(root, f"snapshot-{etag_to}.delta")
+    if delta_path:
+        header, payload = _read_header_payload(delta_path)
+        delta_of = (header or {}).get("delta_of") if header else None
+        bdir = baseline_dir or root
+        base = _find_snapshot_file(bdir, f"snapshot-{delta_of}.full") if delta_of else None
+        if base:
+            _, base_payload = _read_header_payload(base)
+            from clematis.engine.util.snapshot_delta import apply_delta
+            return apply_delta(base_payload or {}, payload or {})
+        # Baseline missing -> warn and try full fallback
+        logging.warning("SNAPSHOT_BASELINE_MISSING: delta_of=%s etag_to=%s", delta_of, etag_to)
+        full_path = _find_snapshot_file(root, f"snapshot-{etag_to}.full")
+        if full_path:
+            _, full_payload = _read_header_payload(full_path)
+            return full_payload or {}
+        return {}
+
+    # No delta; try full directly
+    full_path = _find_snapshot_file(root, f"snapshot-{etag_to}.full")
+    if full_path:
+        _, full_payload = _read_header_payload(full_path)
+        return full_payload or {}
+    # Nothing found
+    return {}

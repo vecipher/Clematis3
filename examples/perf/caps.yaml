@@ -1,0 +1,10 @@
+# examples/perf/caps.yaml
+# PR31 — T1 compaction (queue caps + dedupe ring)
+# Identity note: set both caps to 0 to disable (default behavior).
+perf:
+  enabled: true                 # turn perf features on for this example
+  metrics:
+    report_memory: false        # set true if you want perf counters
+  t1:
+    queue_cap: 10000            # max items in T1 frontier; 0 = disabled
+    dedupe_window: 8192         # recent-IDs ring size; 0 = disabled

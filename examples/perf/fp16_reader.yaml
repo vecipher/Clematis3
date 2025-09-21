@@ -1,0 +1,14 @@
+# examples/perf/fp16_reader.yaml
+# PR33 (+ PR33.5 Gate C) — fp16 store + fp32 math & partition-friendly reader
+# Identity note: fp16 is opt-in; parity (Top-K identical, ≤1e-6 drift) is enforced in CI.
+perf:
+  enabled: true
+  metrics:
+    report_memory: false
+  t2:
+    embed_store_dtype: "fp16"   # "fp32" preserves identity; "fp16" reduces footprint
+    precompute_norms: true      # fp32 norms precomputed; parity still required
+    reader:
+      partitions:
+        enabled: true
+        by: ["owner", "quarter"]  # PR33.5-validated fields
