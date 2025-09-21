@@ -222,7 +222,7 @@ ALLOWED_PERF_T1_CAPS = {"frontier", "visited"}
 ALLOWED_PERF_T2 = {"embed_dtype", "embed_store_dtype", "precompute_norms", "cache", "reader"}
 ALLOWED_PERF_T2_CACHE = {"max_entries", "max_bytes"}
 ALLOWED_PERF_T2_READER = {"partitions"}
-ALLOWED_PERF_T2_READER_PARTITIONS = {"enabled", "layout", "path"}
+ALLOWED_PERF_T2_READER_PARTITIONS = {"enabled", "layout", "path", "by"}
 ALLOWED_PERF_SNAP = {"compression", "level", "delta_mode", "every_n_turns"}
 ALLOWED_PERF_METRICS = {"report_memory"}
 
@@ -989,6 +989,17 @@ def validate_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
                         if not isinstance(pth, str) or not pth.strip():
                             _err(errors, "perf.t2.reader.partitions.path", "must be a non-empty string")
                         pp_out["path"] = pth
+                    if "by" in prt:
+                        byv = prt.get("by")
+                        if not isinstance(byv, (list, tuple)) or not byv or not all(isinstance(x, str) and x.strip() for x in byv):
+                            _err(errors, "perf.t2.reader.partitions.by", "must be a non-empty list of strings")
+                        else:
+                            # Restrict to known partition fields for PR33.5
+                            allowed_fields = {"owner", "quarter"}
+                            for fld in byv:
+                                if fld not in allowed_fields:
+                                    _err(errors, f"perf.t2.reader.partitions.by[{fld}]", f"unknown partition field (allowed: {sorted(allowed_fields)})")
+                            pp_out["by"] = list(byv)
                     if pp_out:
                         rd_out["partitions"] = pp_out
                 if rd_out:
@@ -1203,7 +1214,8 @@ def validate_config_verbose(cfg: Dict[str, Any]) -> Tuple[Dict[str, Any], List[s
                 # PR33: reader partitions configured while perf is disabled → identity path (no effect)
                 pt2r = _ensure_dict(pt2.get("reader"))
                 prt = _ensure_dict(pt2r.get("partitions"))
-                if _coerce_bool(prt.get("enabled", False)):
+                if (_coerce_bool(prt.get("enabled", False))
+                    or ("by" in prt) or ("layout" in prt) or ("path" in prt)):
                     warnings.append("W[perf.t2.reader]: partitions configured while perf.enabled=false; reader remains disabled (identity path).")
             # Warn if both legacy and new frontier caps are present
             if "queue_cap" in pt1v and "frontier" in capsv:

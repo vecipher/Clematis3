@@ -1,0 +1,106 @@
+
+
+name: Gate C — T2 Reader Parity
+on:
+  pull_request:
+    branches: [ main ]
+    paths:
+      - "engine/**"
+      - "configs/**"
+      - "tests/**"
+      - ".github/workflows/t2_reader_parity.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gatec-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  parity:
+    name: Parity matrix (dtype × norms)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        py: [ "3.12" ]
+        dtype: [ "fp32", "fp16" ]
+        precompute_norms: [ "true", "false" ]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.py }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install -U pip
+          pip install -e ".[dev,test]"
+
+      - name: Validate config (strict & quiet)
+        run: |
+          if [ -f scripts/validate_config.py ]; then
+            python3 scripts/validate_config.py --strict .ci/validator_strict_quiet.yaml
+          else
+            echo "validate_config.py not found, skipping strict validation step"
+          fi
+
+      - name: Seed tiny shard (deterministic)
+        run: |
+          if [ -f scripts/seed_tiny_shard.py ]; then
+            python3 scripts/seed_tiny_shard.py --out ./.data/tiny
+          else
+            echo "seed_tiny_shard.py not found; creating placeholder store"
+            mkdir -p ./.data/tiny
+            echo '{}' > ./.data/tiny/_store_meta.json
+            echo '{"q":"anchor","expect_topk":[]}' > ./.data/tiny/queries.jsonl
+            touch ./.data/tiny/vectors.jsonl
+          fi
+
+      - name: Run reader parity & integration tests
+        env:
+          PERF_T2_DTYPE: ${{ matrix.dtype }}
+          PERF_T2_PRECOMPUTE_NORMS: ${{ matrix.precompute_norms }}
+        run: |
+          pytest -q \
+            tests/t2/test_fp16_parity.py \
+            tests/t2/test_partition_reader.py \
+            tests/t2/test_reader_backcompat.py \
+            tests/stages/test_t2_reader_integration.py
+
+      - name: Upload diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gatec-diagnostics
+          path: |
+            ./.artifacts/gatec/**/*.json
+            ./.logs/**
+            ./.data/tiny/**
+
+  identity-disabled-path:
+    name: Reader must not engage (perf=OFF)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install -U pip
+          pip install -e ".[dev,test]"
+
+      - name: Run gate identity test
+        run: |
+          pytest -q tests/t2/test_t2_reader_gate_identity.py

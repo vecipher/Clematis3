@@ -470,6 +470,22 @@ def t2_semantic(ctx, state, text: str, t1) -> T2Result:
         "backend": backend_selected,
         "backend_fallback": bool(backend_fallback_reason),
     }
+    # PR33.5: emit reader diagnostics only when the reader actually engaged under perf gate
+    if use_reader and perf_enabled:
+        partitions_list = []
+        if isinstance(partitions_cfg, dict):
+            by = partitions_cfg.get("by") or partitions_cfg.get("partitions")
+            if isinstance(by, (list, tuple)):
+                partitions_list = [str(x) for x in by]
+        reader_meta = {
+            "embed_store_dtype": pr33_store_dtype,
+            "precompute_norms": bool(precompute_norms_cfg),
+            "layout": pr33_layout,
+            "shards": int(pr33_shards or 0),
+        }
+        if partitions_list:
+            reader_meta["partitions"] = list(partitions_list)
+        metrics["reader"] = reader_meta
     if backend_fallback_reason:
         metrics["backend_fallback_reason"] = str(backend_fallback_reason)
     metrics["hybrid_used"] = hybrid_used
@@ -502,3 +518,31 @@ def t2_semantic(ctx, state, text: str, t1) -> T2Result:
             result.metrics["t2.cache_evictions"] = result.metrics.get("t2.cache_evictions", 0) + cache_evicted_n
             result.metrics["t2.cache_bytes"] = result.metrics.get("t2.cache_bytes", 0) + cache_evicted_b
     return result
+
+# --- Compatibility entrypoint for tests & CI (Gate C) ---
+def run_t2(cfg, corpus_dir: str | None = None, query: str = "", **kwargs):
+    """
+    Stable adapter used by tests. It constructs a minimal ctx/state and calls t2_semantic.
+    - `cfg`: loaded configuration object (must expose `t2` and related fields).
+    - `corpus_dir`: accepted for signature compatibility; unused here (reader is gated elsewhere).
+    - `query`: text query forwarded to T2.
+    Returns a T2Result.
+    """
+    class _Ctx:
+        def __init__(self, cfg_obj):
+            self.cfg = cfg_obj
+            # Allow tests to set a deterministic 'now' via cfg or kwargs; default None (t2_semantic handles it)
+            self.now = kwargs.get("now", None)
+            # Embedding adapter may be provided via kwargs; else BGEAdapter will be constructed inside t2_semantic
+            self.enc = kwargs.get("enc", None)
+            # Optional agent id for owner_scope="agent"
+            self.agent_id = kwargs.get("agent_id", None)
+
+    class _T1:
+        # Minimal T1 result stub: no deltas → no residual labels mixed in
+        graph_deltas: list = []
+
+    state = {}  # let t2_semantic lazily initialize the memory index and backend tags
+
+    q = str(query or "").strip()
+    return t2_semantic(_Ctx(cfg), state, q, _T1())

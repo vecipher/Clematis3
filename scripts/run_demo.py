@@ -88,8 +88,14 @@ def _maybe_override_cfg_inplace(cfg: Any, args: Any) -> Any:
 
 
 class DemoCtx:
+    """
+    Deterministic clock by default to keep identity CI stable.
+    Use --wall-clock to switch back to real time.
+    """
+    def __init__(self, fixed_now_ms: int):
+        self._fixed_now_ms = int(fixed_now_ms)
     def now_ms(self) -> int:
-        return int(time.time() * 1000)
+        return self._fixed_now_ms
 
 
 def _parse_args() -> argparse.Namespace:
@@ -111,6 +117,10 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--t1-pops", type=int, default=None, help="Override scheduler.budgets.t1_pops")
     p.add_argument("--t2-k", type=int, default=None, help="Override scheduler.budgets.t2_k")
     p.add_argument("--t3-ops", type=int, default=None, help="Override scheduler.budgets.t3_ops")
+    p.add_argument("--wall-clock", action="store_true",
+                   help="Use wall clock time for now_ms (default: deterministic fixed seed)")
+    p.add_argument("--fixed-now-ms", type=int, default=13371337,
+                   help="Deterministic now_ms base when --wall-clock is not set (default: 13371337)")
     return p.parse_args()
 
 
@@ -124,17 +134,19 @@ def main():
         print("No agents provided. Exiting.")
         return
 
-    # Initialize scheduler state with canonical lex order
-    sched_state = init_scheduler_state(agents, now_ms=int(time.time() * 1000))
+    # Deterministic by default; use --wall-clock to override
+    now_ms = int(time.time() * 1000) if args.wall_clock else int(args.fixed_now_ms)
+    sched_state = init_scheduler_state(agents, now_ms=now_ms)
     state: Dict[str, Any] = {}
 
-    demo_ctx = DemoCtx()
+    demo_ctx = DemoCtx(now_ms)
     policy = args.policy or _get_path(cfg, ["scheduler", "policy"], "round_robin")
     fairness = _get_path(cfg, ["scheduler", "fairness"], {}) or {}
 
     print(f"Demo: policy={policy}, agents={agents}, steps={args.steps}")
     print(f"Logs dir: {logs_dir()}")
     print("---")
+    # NOTE: In CI, identity workflow relies on deterministic now_ms for stable logs.
 
     for step in range(1, args.steps + 1):
         agent_id, _, pick_reason = next_turn(demo_ctx, sched_state, policy=policy, fairness_cfg=fairness)

@@ -12,7 +12,7 @@ All notable changes to this project will be documented in this file.
 - **Goldens:** `tests/goldens/pr29/.logs/` with normalized JSONL golden logs for disabled-path demo.
 
 ### Changed
-- CI now normalizes logs (via `jq`) to ignore volatile fields (`now`, `*_ms`, `version_etag`) before diffing.
+- CI now normalizes logs using the shared Python normalizer (`tests/helpers/identity.py`) and sorts before diffing; volatile fields (`now`, `*_ms`, `*_bytes`, `version_etag`, `rss_bytes`) are dropped.
 
 ### Added (PR31 — T1 compaction; defaults OFF)
 - **Engine (T1):** Deterministic compaction controls under `perf.t1`:
@@ -91,3 +91,30 @@ All notable changes to this project will be documented in this file.
   ```
   
 ![disabled-path-identity](https://github.com/vecipher/Clematis3/actions/workflows/disabled_identity.yml/badge.svg)
+
+### Added (PR33.5 — Gate C: T2 reader parity & runtime‑flip invariants; defaults OFF)
+- **CI:** Required workflow `.github/workflows/t2_reader_parity.yml`:
+  - Parity matrix over `{embed_store_dtype∈{fp32,fp16}} × {precompute_norms∈{true,false}}` running parity + integration tests.
+  - Identity sub‑job asserts reader does **not** engage when `perf.enabled=false`.
+- **Scripts:** `scripts/seed_tiny_shard.py` — deterministic tiny store for parity tests.
+- **Tests:** `tests/t2/test_t2_reader_gate_identity.py` — reader must not engage in disabled mode.
+- **Helpers:** `tests/helpers/identity.py` — shared normalizer used by CI and tests (replaces `jq` pipeline).
+- **Config loader:** `clematis/io/config.py` applies safe env overrides used by CI (`PERF_T2_DTYPE`, `PERF_T2_PRECOMPUTE_NORMS`) without flipping `perf.enabled`.
+
+### Changed (PR33.5)
+- **Engine (T2):** `engine/stages/t2.py` now:
+  - Emits `metrics.tier_sequence` consistently and a **gated** `metrics.reader` **only** when the reader is engaged with `perf.enabled=true`.
+  - Enforces deterministic final sort by `(-score, lex(id))` in all scoring paths.
+  - Exposes a stable `run_t2(cfg, **kwargs)` adapter for tests/CI (delegates to stage entrypoint).
+- **Validator:** `configs/validate.py`:
+  - Accepts `perf.t2.reader.partitions.by` (strictly limited to `["owner","quarter"]`).
+  - Emits a warning if any reader partitions config is present while `perf.enabled=false` (identity path).
+- **Identity workflow:** `.github/workflows/disabled_identity.yml` tightened:
+  - Editable dev/test install, deterministic locale/UTF‑8, shared Python normalizer for diffs, artifact upload on failure.
+- **Demo:** `scripts/run_demo.py` adds deterministic clock by default (`--fixed-now-ms`, `--wall-clock` to opt‑in).
+
+### Notes (PR33.5)
+- **No behavior change by default:** with `perf.enabled=false`, outputs/logs remain identical to PR29 goldens.
+- **Branch protection:** mark both jobs in `t2_reader_parity.yml` as required:
+  - “Gate C — T2 Reader Parity / Parity matrix (dtype × norms)”
+  - “Gate C — T2 Reader Parity / Reader must not engage (perf=OFF)”

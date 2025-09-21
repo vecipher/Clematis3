@@ -1,0 +1,8 @@
+{"id":"D001","owner":"A","quarter":"2025Q3","vec":[1.0,0.0,0.0,0.0],"ts":1,"importance":0.11}
+{"id":"D002","owner":"A","quarter":"2025Q3","vec":[0.99,0.01,0.0,0.0],"ts":2,"importance":0.12}
+{"id":"D003","owner":"B","quarter":"2025Q3","vec":[0.98,0.02,0.0,0.0],"ts":3,"importance":0.13}
+{"id":"D004","owner":"B","quarter":"2025Q4","vec":[0.6,0.8,0.0,0.0],"ts":4,"importance":0.14}
+{"id":"D005","owner":"A","quarter":"2025Q4","vec":[0.7,0.71,0.0,0.0],"ts":5,"importance":0.15}
+{"id":"D006","owner":"A","quarter":"2025Q3","vec":[0.0,1.0,0.0,0.0],"ts":6,"importance":0.16}
+{"id":"D007","owner":"B","quarter":"2025Q3","vec":[0.999,0.0,0.0,0.0],"ts":7,"importance":0.17}
+{"id":"D008","owner":"B","quarter":"2025Q4","vec":[0.2,0.98,0.0,0.0],"ts":8,"importance":0.18}

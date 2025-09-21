@@ -1325,6 +1325,43 @@ Gotchas
 	•	Reader currently requires meta.json; shards without it will be rejected.
 	•	Disabled path remains the default; enabling the reader is opt-in and gated under perf.enabled=true.
 
+-## M6 — Gate C (PR33.5): T2 reader parity & runtime‑flip invariants
+
+**What this adds (no behavior change by default)**
+- A required CI gate that proves the PR33 reader is **drop‑in**: Top‑K IDs/order identical and score drift ≤ `1e-6` across `{embed_store_dtype∈{fp32,fp16}} × {precompute_norms∈{true,false}}`.
+- Disabled‑path identity stays enforced: with `perf.enabled=false`, the reader **must not engage** and **no new metrics keys** appear.
+
+**Signals (only when the reader actually engages and gates are ON)**
+- `metrics.tier_sequence` includes `"embed_store"`.
+- `metrics.reader` object appears with: `{embed_store_dtype, precompute_norms, layout, shards, partitions?}`.
+
+**How to run locally**
+```bash
+# Seed a tiny deterministic store (used by tests)
+python3 scripts/seed_tiny_shard.py --out ./.data/tiny
+
+# Reader must NOT engage when perf is OFF (identity gate)
+pytest -q tests/t2/test_t2_reader_gate_identity.py
+
+# Parity + integration suite (dtype × norms matrix covered in CI)
+pytest -q \
+  tests/t2/test_fp16_parity.py \
+  tests/t2/test_partition_reader.py \
+  tests/t2/test_reader_backcompat.py \
+  tests/stages/test_t2_reader_integration.py
+```
+
+**CI (required checks)**
+- Workflow: `.github/workflows/t2_reader_parity.yml`
+- Jobs required in branch protection:
+  - **Gate C — T2 Reader Parity / Parity matrix (dtype × norms)**
+  - **Gate C — T2 Reader Parity / Reader must not engage (perf=OFF)**
+
+**Notes**
+- Env overrides used by CI are safe and optional locally: `PERF_T2_DTYPE=fp32|fp16`, `PERF_T2_PRECOMPUTE_NORMS=true|false`.
+- Sorting is strictly `(-score, lex(id))` in all paths; ties are stable.
+- Default configs keep `perf.enabled=false`, so PR33.5 does **not** change observable behavior.
+
 ## Changelog & Releases
 - See the [CHANGELOG](./CHANGELOG.md) for notable changes.
 - Binary / source packages and release notes are on the [Releases] page.
