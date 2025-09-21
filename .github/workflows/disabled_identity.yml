@@ -103,7 +103,7 @@ jobs:
             shopt -s nullglob
 
             # Strip timestamps and volatile counters (timings & snapshot etag); keep structure strict
-            JQ='del(.now, .ms, .version_etag) | with_entries(select(.key | endswith("_ms") | not))'
+            JQ='del(.now, .ms, .version_etag) | with_entries(select(.key | (startswith("ms_") or endswith("_ms")) | not))'
 
             # Normalize current logs
             for f in ./.logs/*.jsonl; do
