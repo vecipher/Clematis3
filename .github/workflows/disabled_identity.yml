@@ -89,29 +89,37 @@ jobs:
           set -euxo pipefail
           GOLD_DIR="tests/goldens/pr29/.logs"
           if [ -d "$GOLD_DIR" ]; then
-            # Re-run demo in disabled mode to produce ./.logs (if not already run)
+            # Always start from a clean state to avoid appended log lines across runs
+            rm -rf ./.logs ./.norm ./.gold_norm
+
+            # Run the disabled-path demo to generate fresh logs
             if [ -f scripts/run_demo.py ]; then
               python3 scripts/run_demo.py --config .ci/disabled_path_config.yaml || true
+            else
+              echo "scripts/run_demo.py not found; cannot produce logs" && exit 1
             fi
 
             mkdir -p ./.norm ./.gold_norm
             shopt -s nullglob
 
-            # Normalize current logs: drop volatile fields, sort keys, sort lines
+            # Strip timestamps and volatile counters (timings & snapshot etag); keep structure strict
+            JQ='del(.now, .ms, .version_etag) | with_entries(select(.key | endswith("_ms") | not))'
+
+            # Normalize current logs
             for f in ./.logs/*.jsonl; do
               b="$(basename "$f")"
-              jq -c -S 'del(.now) | with_entries(select(.key | endswith("_ms") | not))' "$f" | LC_ALL=C sort > "./.norm/$b" || true
+              jq -c -S "$JQ" "$f" | LC_ALL=C sort > "./.norm/$b"
             done
 
             # Normalize golden logs
-            for f in tests/goldens/pr29/.logs/*.jsonl; do
+            for f in "$GOLD_DIR"/*.jsonl; do
               b="$(basename "$f")"
-              jq -c -S 'del(.now) | with_entries(select(.key | endswith("_ms") | not))' "$f" | LC_ALL=C sort > "./.gold_norm/$b" || true
+              jq -c -S "$JQ" "$f" | LC_ALL=C sort > "./.gold_norm/$b"
             done
 
             # Strict diff on normalized logs; any structural change will fail the job
             diff -ru ./.norm ./.gold_norm
           else
-            echo "No goldens found at tests/goldens/pr29/.logs; skipping diff"
+            echo "No goldens found at $GOLD_DIR; skipping diff"
           fi
         shell: bash
