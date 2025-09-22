@@ -37,8 +37,6 @@ def _emit_t2_metrics(evt: dict, cfg, *, reader_engaged: bool,
                 m["partition_layout"] = str(partition_layout)
     else:
         # Ensure nothing leaked: remove top-level tier_sequence; drop empty metrics
-        if "tier_sequence" in evt:
-            del evt["tier_sequence"]
         if "metrics" in evt and (not evt["metrics"]):
             del evt["metrics"]
 def _cfg_get(obj, path, default=None):
@@ -487,28 +485,31 @@ def t2_semantic(ctx, state, text: str, t1) -> T2Result:
         "mean": float(np.mean(combined_scores)) if combined_scores else 0.0,
         "max": float(np.max(combined_scores)) if combined_scores else 0.0,
     }
-    metrics = {}
+
+    # --- Identity baseline metrics (always present) ---
+    metrics = {
+        "tier_sequence": tier_sequence if 'tier_sequence' in locals() and tier_sequence else tiers,
+        "k_returned": int(len(retrieved)),
+        "k_used": int(len(used_hits)),
+        "k_residual": int(len(graph_deltas_residual)),
+        "sim_stats": sim_stats,
+        "score_stats": score_stats,
+        "owner_scope": str(cfg_t2.get("owner_scope", "any")).lower(),
+        "caps": {"residual_cap": int(residual_cap)},
+        "cache_enabled": cache is not None,
+        "cache_used": bool(cache_used),
+        "cache_hits": int(cache_hits),
+        "cache_misses": int(cache_misses),
+        "backend": backend_selected,
+        "backend_fallback": bool(backend_fallback_reason),
+        "hybrid_used": bool(hybrid_used),
+    }
+    if hybrid_info:
+        metrics["hybrid"] = hybrid_info
+
+    # --- Additional gated metrics (only when perf.enabled && perf.metrics.report_memory) ---
     if gate_on:
-        metrics = {
-            "tier_sequence": tier_sequence if 'tier_sequence' in locals() and tier_sequence else tiers,
-            "k_returned": len(retrieved),
-            "k_used": len(used_hits),
-            "k_residual": len(graph_deltas_residual),
-            "sim_stats": sim_stats,
-            "score_stats": score_stats,
-            "owner_scope": str(cfg_t2.get("owner_scope", "any")).lower(),
-            "caps": {"residual_cap": residual_cap},
-            "cache_enabled": cache is not None,
-            "cache_used": cache_used,
-            "cache_hits": cache_hits,
-            "cache_misses": cache_misses,
-            "backend": backend_selected,
-            "backend_fallback": bool(backend_fallback_reason),
-            "hybrid_used": hybrid_used,
-        }
-        if hybrid_info:
-            metrics["hybrid"] = hybrid_info
-        # PR33.5: emit reader diagnostics only when the reader actually engaged under perf gate
+        # Emit reader diagnostics only when the reader actually engaged under perf gate
         if use_reader and perf_enabled:
             partitions_list = []
             if isinstance(partitions_cfg, dict):
@@ -526,7 +527,7 @@ def t2_semantic(ctx, state, text: str, t1) -> T2Result:
             metrics["reader"] = reader_meta
         if backend_fallback_reason:
             metrics["backend_fallback_reason"] = str(backend_fallback_reason)
-        # PR33: gated perf counters
+        # PR33: gated perf counters (namespaced)
         metrics["t2.embed_dtype"] = "fp32"
         metrics["t2.embed_store_dtype"] = pr33_store_dtype
         metrics["t2.precompute_norms"] = bool(precompute_norms_cfg)

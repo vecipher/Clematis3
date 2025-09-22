@@ -59,23 +59,26 @@ def main(mode: str) -> int:
     # Look at typical stage logs if present
     t2 = _last_jsonl(logs / "t2.jsonl")
     t1 = _last_jsonl(logs / "t1.jsonl")
-    any_snap_metric = _any_file_contains(logs, '"snap.')
-    any_tier_sequence = _any_file_contains(logs, '"tier_sequence"')
+    any_snap_metric = _any_file_contains(logs, '"snap."')
 
-    # In both OFF and ON_NO_REPORT:
-    #  - There must be NO metrics objects emitted.
-    #  - There must be NO snap.* metrics anywhere.
-    #  - There must be NO tier_sequence (reader-only) markers.
-    disallowed = []
-    if _has_metrics(t2) or _has_metrics(t1):
-        disallowed.append("non-empty 'metrics' object present")
-    if any_snap_metric:
-        disallowed.append("found 'snap.*' metrics in logs")
-    if any_tier_sequence:
-        disallowed.append("found 'tier_sequence' in logs")
+    # In both OFF and ON_NO_REPORT, disallow only **new M6** markers.
+    DISALLOWED_M6_MARKERS = [
+        '"reader"',                  # nested reader meta block in metrics
+        '"t2.embed_dtype"',
+        '"t2.embed_store_dtype"',
+        '"t2.precompute_norms"',
+        '"t2.reader_shards"',
+        '"t2.partition_layout"',
+        '"snap."',                  # any snapshot counters/fields
+    ]
 
-    if disallowed:
-        print(f"GateB FAIL [{mode}]: " + "; ".join(disallowed), file=sys.stderr)
+    leaks = []
+    for marker in DISALLOWED_M6_MARKERS:
+        if _any_file_contains(logs, marker):
+            leaks.append(marker)
+
+    if leaks:
+        print(f"GateB FAIL [{mode}]: found disallowed markers: {', '.join(leaks)}", file=sys.stderr)
         return 1
 
     print(f"GateB OK [{mode}]: no disallowed metrics or markers detected")
