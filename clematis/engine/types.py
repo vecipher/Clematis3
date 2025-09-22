@@ -1,8 +1,8 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Literal, Optional, Protocol, Tuple
-from numpy import ndarray
 import numpy as np
+from numpy import ndarray
 
 PlanVersion = Literal["t3-plan-v1"]
 BundleVersion = Literal["t3-bundle-v1"]
