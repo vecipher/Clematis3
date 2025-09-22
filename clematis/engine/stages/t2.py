@@ -10,6 +10,37 @@ import numpy as np
 import datetime as dt
 from .hybrid import rerank_with_gel
 
+def _metrics_gate_on(cfg) -> bool:
+    """True only when perf.enabled && perf.metrics.report_memory."""
+    perf = (cfg.get("perf") or {}) if isinstance(cfg, dict) else (getattr(cfg, "perf", {}) or {})
+    if not bool(perf.get("enabled", False)):
+        return False
+    m = perf.get("metrics") or {}
+    return bool(m.get("report_memory", False))
+
+
+def _emit_t2_metrics(evt: dict, cfg, *, reader_engaged: bool,
+                     shard_count: int | None = None,
+                     partition_layout: str | None = None,
+                     tier_sequence: list[str] | None = None) -> None:
+    """
+    Gate all T2 metrics emission. Never emit top-level tier_sequence.
+    Only emit metrics.* when the gate is ON; strip empty metrics otherwise.
+    """
+    if _metrics_gate_on(cfg):
+        m = evt.setdefault("metrics", {})
+        if reader_engaged:
+            m["tier_sequence"] = tier_sequence or ["embed_store"]
+            if shard_count is not None:
+                m["reader_shards"] = int(shard_count)
+            if partition_layout:
+                m["partition_layout"] = str(partition_layout)
+    else:
+        # Ensure nothing leaked: remove top-level tier_sequence; drop empty metrics
+        if "tier_sequence" in evt:
+            del evt["tier_sequence"]
+        if "metrics" in evt and (not evt["metrics"]):
+            del evt["metrics"]
 def _cfg_get(obj, path, default=None):
     cur = obj
     for i, key in enumerate(path):
@@ -246,6 +277,7 @@ def t2_semantic(ctx, state, text: str, t1) -> T2Result:
     )
     perf_enabled = bool(_cfg_get(ctx, ["cfg", "perf", "enabled"], False))
     metrics_enabled = bool(_cfg_get(ctx, ["cfg", "perf", "metrics", "report_memory"], False))
+    gate_on = bool(perf_enabled and metrics_enabled)
     cache_evicted_n = 0
     cache_evicted_b = 0
     cache_used = False
@@ -254,13 +286,14 @@ def t2_semantic(ctx, state, text: str, t1) -> T2Result:
     if cache is not None:
         hit = cache.get(ckey)
         if hit is not None:
-            # Mark this as a cache hit on the returned metrics (without recomputing)
-            try:
-                hit.metrics["cache_used"] = True
-                hit.metrics["cache_hits"] = hit.metrics.get("cache_hits", 0) + 1
-                hit.metrics["cache_misses"] = hit.metrics.get("cache_misses", 0)
-            except Exception:
-                pass
+            # Mark cache hit only when metrics gate is ON
+            if _metrics_gate_on(ctx.cfg):
+                try:
+                    hit.metrics["cache_used"] = True
+                    hit.metrics["cache_hits"] = hit.metrics.get("cache_hits", 0) + 1
+                    hit.metrics["cache_misses"] = hit.metrics.get("cache_misses", 0)
+                except Exception:
+                    pass
             return hit
         else:
             cache_misses += 1
@@ -454,47 +487,47 @@ def t2_semantic(ctx, state, text: str, t1) -> T2Result:
         "mean": float(np.mean(combined_scores)) if combined_scores else 0.0,
         "max": float(np.max(combined_scores)) if combined_scores else 0.0,
     }
-    metrics = {
-        "tier_sequence": tier_sequence if 'tier_sequence' in locals() and tier_sequence else tiers,
-        "k_returned": len(retrieved),
-        "k_used": len(used_hits),
-        "k_residual": len(graph_deltas_residual),
-        "sim_stats": sim_stats,
-        "score_stats": score_stats,
-        "owner_scope": str(cfg_t2.get("owner_scope", "any")).lower(),
-        "caps": {"residual_cap": residual_cap},
-        "cache_enabled": cache is not None,
-        "cache_used": cache_used,
-        "cache_hits": cache_hits,
-        "cache_misses": cache_misses,
-        "backend": backend_selected,
-        "backend_fallback": bool(backend_fallback_reason),
-    }
-    # PR33.5: emit reader diagnostics only when the reader actually engaged under perf gate
-    if use_reader and perf_enabled:
-        partitions_list = []
-        if isinstance(partitions_cfg, dict):
-            by = partitions_cfg.get("by") or partitions_cfg.get("partitions")
-            if isinstance(by, (list, tuple)):
-                partitions_list = [str(x) for x in by]
-        reader_meta = {
-            "embed_store_dtype": pr33_store_dtype,
-            "precompute_norms": bool(precompute_norms_cfg),
-            "layout": pr33_layout,
-            "shards": int(pr33_shards or 0),
+    metrics = {}
+    if gate_on:
+        metrics = {
+            "tier_sequence": tier_sequence if 'tier_sequence' in locals() and tier_sequence else tiers,
+            "k_returned": len(retrieved),
+            "k_used": len(used_hits),
+            "k_residual": len(graph_deltas_residual),
+            "sim_stats": sim_stats,
+            "score_stats": score_stats,
+            "owner_scope": str(cfg_t2.get("owner_scope", "any")).lower(),
+            "caps": {"residual_cap": residual_cap},
+            "cache_enabled": cache is not None,
+            "cache_used": cache_used,
+            "cache_hits": cache_hits,
+            "cache_misses": cache_misses,
+            "backend": backend_selected,
+            "backend_fallback": bool(backend_fallback_reason),
+            "hybrid_used": hybrid_used,
         }
-        if partitions_list:
-            reader_meta["partitions"] = list(partitions_list)
-        metrics["reader"] = reader_meta
-    if backend_fallback_reason:
-        metrics["backend_fallback_reason"] = str(backend_fallback_reason)
-    metrics["hybrid_used"] = hybrid_used
-    if hybrid_info:
-        metrics["hybrid"] = hybrid_info
-    # PR33: gated metrics (no new keys on disabled path)
-    if perf_enabled and metrics_enabled:
+        if hybrid_info:
+            metrics["hybrid"] = hybrid_info
+        # PR33.5: emit reader diagnostics only when the reader actually engaged under perf gate
+        if use_reader and perf_enabled:
+            partitions_list = []
+            if isinstance(partitions_cfg, dict):
+                by = partitions_cfg.get("by") or partitions_cfg.get("partitions")
+                if isinstance(by, (list, tuple)):
+                    partitions_list = [str(x) for x in by]
+            reader_meta = {
+                "embed_store_dtype": pr33_store_dtype,
+                "precompute_norms": bool(precompute_norms_cfg),
+                "layout": pr33_layout,
+                "shards": int(pr33_shards or 0),
+            }
+            if partitions_list:
+                reader_meta["partitions"] = list(partitions_list)
+            metrics["reader"] = reader_meta
+        if backend_fallback_reason:
+            metrics["backend_fallback_reason"] = str(backend_fallback_reason)
+        # PR33: gated perf counters
         metrics["t2.embed_dtype"] = "fp32"
-        # Prefer discovered store dtype/layout if available
         metrics["t2.embed_store_dtype"] = pr33_store_dtype
         metrics["t2.precompute_norms"] = bool(precompute_norms_cfg)
         if pr33_reader is not None:
@@ -510,13 +543,13 @@ def t2_semantic(ctx, state, text: str, t1) -> T2Result:
         else:
             # legacy LRU (no size accounting)
             cache.put(ckey, result)
-        # sync simple hit/miss counters for continuity with older logs
-        result.metrics["cache_used"] = True
-        result.metrics["cache_misses"] = result.metrics.get("cache_misses", 0) + 1
-        # gated perf counters (new keys only when both gates are ON)
-        if perf_enabled and metrics_enabled and cache_kind == "bytes":
-            result.metrics["t2.cache_evictions"] = result.metrics.get("t2.cache_evictions", 0) + cache_evicted_n
-            result.metrics["t2.cache_bytes"] = result.metrics.get("t2.cache_bytes", 0) + cache_evicted_b
+        # sync simple hit/miss counters only when metrics gate is ON
+        if gate_on:
+            result.metrics["cache_used"] = True
+            result.metrics["cache_misses"] = result.metrics.get("cache_misses", 0) + 1
+            if cache_kind == "bytes":
+                result.metrics["t2.cache_evictions"] = result.metrics.get("t2.cache_evictions", 0) + cache_evicted_n
+                result.metrics["t2.cache_bytes"] = result.metrics.get("t2.cache_bytes", 0) + cache_evicted_b
     return result
 
 # --- Compatibility entrypoint for tests & CI (Gate C) ---

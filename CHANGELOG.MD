@@ -3,7 +3,7 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-## [0.6.0] - 2025-09-21
+## [0.6.0] - 2025-09-22
 ### Added
 - **CI:** `disabled-path-identity` workflow at `.github/workflows/disabled_identity.yml`:
   - Validates repo config (non-strict), runs strict quiet validator, unit test, CLI smoke, and normalized log diff.
@@ -139,9 +139,40 @@ All notable changes to this project will be documented in this file.
 - **Semantics unchanged:** enabling compression/delta changes persistence cost/size only; reconstructed snapshot equals the full payload.
 - **Metrics deferred:** no new snapshot metrics in PR34; future counters must be gated by `perf.enabled && perf.metrics.report_memory`.
 - **Determinism:** ETags computed from canonical JSON; ordering and filenames are stable.
-- **Scope in this PR:** Adds reader + delta codec + tests; writer support for delta/zstd will land in a follow-up (no change to default write path in PR34).
 
-### Added (PR35 — Docs, examples, and CLIs; no runtime behavior change)
+### Added (PR34.1 — Snapshot writer; read/write parity; defaults OFF)
+- **Snapshot writer:** `clematis/engine/snapshot.py::write_snapshot_auto(...)` emits `snapshot-{etag}.full.json[.zst]` or `snapshot-{etag_to}.delta.json[.zst]` using the same two-line canonical `header\npayload` format as the reader.
+- **Tests:** `tests/snapshots/test_snapshot_writer_roundtrip.py` — writes a baseline full + a delta from that baseline and verifies reconstruction equals the current payload.
+
+### Changed (PR34.1)
+- **Reader helpers:** `_read_text` and `_read_header_payload` now accept Path-like inputs for robustness in CLIs/tests; `.zst` handling remains optional and guarded.
+- **README:** PR34 section updated to reflect writer availability in PR34.1 (read/write support; defaults unchanged).
+
+
+### Added (Gate B — Metrics-only guard; required)
+- **CI:** `.github/workflows/gate_b.yml` — asserts **no metrics** (including `tier_sequence`) appear when either:
+  - `perf.enabled=false`, or
+  - `perf.enabled=true` and `perf.metrics.report_memory=false`.
+- **Scripts:** `scripts/ci_gate_b_assert.py` — scans normalized logs for disallowed keys; used by the workflow.
+- **Configs:** `.ci/gate_b_off.yaml`, `.ci/gate_b_on_nometrics.yaml` — minimal configs to exercise the two OFF modes.
+
+### Changed (Gate B)
+- **Stages:**
+  - `engine/stages/t2.py` — all metric emissions (including `tier_sequence`) are **gated** behind `perf.enabled && perf.metrics.report_memory`.
+  - `engine/stages/t3.py` — no longer synthesizes `tier_sequence` when absent; passes through only what T2 emits under gate.
+- **Tests:** updated `tests/test_t2_stage.py` to explicitly enable the metrics gate only in tests that assert on metrics.
+- **Identity:** no change to disabled-path outputs; Gate B ensures accidental leaks are caught pre-merge.
+
+### Added (Nice-to-haves — config-only / helper)
+- **Validator:** optional config surface for `t2.lancedb.partitions` (e.g., `{by: ["owner","quarter"], shard_order: "lex|score"}`) with warnings when `perf.enabled=false`. **No runtime changes in M6.**
+- **Helper:** `engine/util/metrics.py` — central `emit/emit_many/gate_on` helper to prevent future counters from bypassing the gate (not yet widely adopted in M6).
+
+### Changed (Validator & examples smalls)
+- **API compatibility:** `configs/validate.py` now supports both call styles:
+  - `validate_config(cfg) -> normalized dict` (raises on errors), and
+  - `validate_config(cfg, strict=..., verbose=...) -> (errors, warnings)`.
+- **Examples:** `examples/perf/caches.yaml` now scopes caches under `perf.t1.cache` and `perf.t2.cache` (replacing the deprecated top-level `perf.cache`).
+
 - **Docs:**
   - README gains an “M6 — Docs & CLIs (PR35)” section with quickstart, CLI usage, and links to examples.
   - CONTRIBUTING adds a rollback playbook (how to force disabled‑path identity) and a quick ref for Gates A/B/C.

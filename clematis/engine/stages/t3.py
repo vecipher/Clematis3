@@ -157,17 +157,41 @@ def _extract_t2_retrieved(t2, k_retrieval: int) -> List[Dict[str, Any]]:
 
 def _extract_t2_metrics(t2) -> Dict[str, Any]:
     m = getattr(t2, "metrics", None)
+    out: Dict[str, Any] = {}
     if isinstance(m, dict):
-        # project down to stable fields we document
-        tier_seq = list(m.get("tier_sequence", [])) if isinstance(m.get("tier_sequence", []), list) else []
-        sim_stats = m.get("sim_stats", {}) if isinstance(m.get("sim_stats", {}), dict) else {}
-        return {
-            "tier_sequence": [str(x) for x in tier_seq],
-            "k_returned": int(m.get("k_returned", len(getattr(t2, "retrieved", []) or []))),
-            "sim_stats": {"mean": float(sim_stats.get("mean", 0.0)), "max": float(sim_stats.get("max", 0.0))},
-            "cache_used": bool(m.get("cache_used", False)),
-        }
-    return {"tier_sequence": [], "k_returned": 0, "sim_stats": {"mean": 0.0, "max": 0.0}, "cache_used": False}
+        # Pass through known fields; DO NOT synthesize 'tier_sequence' when absent.
+        ts = m.get("tier_sequence", None)
+        if isinstance(ts, list):
+            out["tier_sequence"] = [str(x) for x in ts]
+        sim_stats = m.get("sim_stats", None)
+        if isinstance(sim_stats, dict):
+            out["sim_stats"] = {
+                "mean": float(sim_stats.get("mean", 0.0)),
+                "max": float(sim_stats.get("max", 0.0)),
+            }
+        # k_returned: prefer explicit value; else derive from retrieved list length
+        if "k_returned" in m:
+            try:
+                out["k_returned"] = int(m.get("k_returned", 0))
+            except Exception:
+                out["k_returned"] = 0
+        else:
+            try:
+                out["k_returned"] = int(len(getattr(t2, "retrieved", []) or []))
+            except Exception:
+                out["k_returned"] = 0
+        # cache_used: pass through if present; else default False
+        if "cache_used" in m:
+            out["cache_used"] = bool(m.get("cache_used", False))
+        else:
+            out["cache_used"] = False
+        return out
+    # Fallback: do not include 'tier_sequence' when metrics are missing
+    try:
+        k_ret = int(len(getattr(t2, "retrieved", []) or []))
+    except Exception:
+        k_ret = 0
+    return {"k_returned": k_ret, "sim_stats": {"mean": 0.0, "max": 0.0}, "cache_used": False}
 
 
 def _cfg_snapshot(ctx) -> Dict[str, Any]:

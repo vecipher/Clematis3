@@ -279,7 +279,7 @@ def _ensure_subdict(cfg: Dict[str, Any], key: str) -> Dict[str, Any]:
 # Main validator
 # ------------------------------
 
-def validate_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
+def _validate_config_normalize_impl(cfg: Dict[str, Any]) -> Dict[str, Any]:
     """
     Validate and normalize a configuration dictionary.
 
@@ -631,6 +631,36 @@ def validate_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
 
     # write back
     t2["hybrid"] = h2
+
+    # Optional LanceDB partitions (config surface only; no runtime changes in M6)
+    raw_lancedb_val = raw_t2.get("lancedb", None)
+    if raw_lancedb_val is not None and not isinstance(raw_lancedb_val, dict):
+        _err(errors, "t2.lancedb", "must be an object")
+    raw_lancedb = _ensure_dict(raw_lancedb_val)
+    if raw_lancedb:
+        ldb_out: Dict[str, Any] = {}
+        raw_parts_val = raw_lancedb.get("partitions", None)
+        if raw_parts_val is not None and not isinstance(raw_parts_val, dict):
+            _err(errors, "t2.lancedb.partitions", "must be an object")
+        raw_parts = _ensure_dict(raw_parts_val)
+        if raw_parts:
+            pp: Dict[str, Any] = {}
+            if "by" in raw_parts:
+                by = raw_parts.get("by")
+                if not (isinstance(by, list) and all(isinstance(x, str) for x in by)):
+                    _err(errors, "t2.lancedb.partitions.by", "must be a list of strings (e.g., ['owner','quarter'])")
+                else:
+                    pp["by"] = list(by)
+            if "shard_order" in raw_parts:
+                so = str(raw_parts.get("shard_order")).lower()
+                if so not in {"lex", "score"}:
+                    _err(errors, "t2.lancedb.partitions.shard_order", "must be 'lex' or 'score'")
+                else:
+                    pp["shard_order"] = so
+            if pp:
+                ldb_out["partitions"] = pp
+        if ldb_out:
+            t2["lancedb"] = ldb_out
 
     # ---- T3 ----
     t3 = _ensure_subdict(merged, "t3")
@@ -1149,6 +1179,7 @@ def validate_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
     return merged
 
 
+
 # ------------------------------
 # Verbose API: return warnings as a second value
 # ------------------------------
@@ -1161,7 +1192,7 @@ def validate_config_verbose(cfg: Dict[str, Any]) -> Tuple[Dict[str, Any], List[s
     Warnings currently include:
     - Duplicate cache namespace overlap between t2.stage cache and t4.orchestrator cache.
     """
-    normalized = validate_config(cfg)  # will raise ValueError on errors
+    normalized = _validate_config_normalize_impl(cfg)  # will raise ValueError on errors
 
     warnings: List[str] = []
     try:
@@ -1237,6 +1268,15 @@ def validate_config_verbose(cfg: Dict[str, Any]) -> Tuple[Dict[str, Any], List[s
             ps = _ensure_dict(perf.get("snapshots"))
             if _coerce_bool(ps.get("delta_mode", False)):
                 warnings.append("W[perf.snapshots]: delta_mode=true may fallback to full snapshot when baseline/etag is missing.")
+        # LanceDB partitions configured while perf is OFF → ignored in disabled path
+        try:
+            t2n = _ensure_dict(normalized.get("t2"))
+            ldb = _ensure_dict(t2n.get("lancedb"))
+            parts = _ensure_dict(ldb.get("partitions"))
+            if parts and not perf_on:
+                warnings.append("W[t2.lancedb.partitions]: configured while perf.enabled=false; ignored in disabled path.")
+        except Exception:
+            pass
         q = _ensure_dict(_ensure_dict(normalized.get("t2")).get("quality"))
         if q:
             qf = _ensure_dict(q.get("fusion"))
@@ -1260,3 +1300,30 @@ def validate_config_verbose(cfg: Dict[str, Any]) -> Tuple[Dict[str, Any], List[s
     except Exception:
         pass
     return normalized, warnings
+
+
+# Public API (unified):
+# - validate_config(cfg) -> dict (normalized)  [primary path]
+# - validate_config(cfg, strict=..., verbose=...) -> (errors, warnings)  [compat path for a few tests]
+
+def validate_config(cfg: Dict[str, Any], **kwargs):
+    """Validate configuration.
+
+    Primary form: validate_config(cfg) -> dict (normalized) and raises ValueError on errors.
+    Compatibility form (if any kwargs like 'strict' or 'verbose' are provided):
+      returns (errors, warnings) instead of raising, matching older tests.
+    """
+    if kwargs:  # compat mode triggered by presence of any kwargs
+        try:
+            # Run normalization to surface any errors
+            _ = _validate_config_normalize_impl(cfg)
+            # Collect warnings using the verbose API
+            _, warnings = validate_config_verbose(cfg)
+            return [], warnings
+        except ValueError as e:
+            msg = str(e).strip()
+            errs = msg.split("\n") if msg else ["invalid configuration"]
+            return errs, []
+    # No kwargs: return normalized dict or raise on error
+    return _validate_config_normalize_impl(cfg)
+    

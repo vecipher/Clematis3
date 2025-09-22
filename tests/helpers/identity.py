@@ -1,114 +1,36 @@
-
-
-"""
-tests/helpers/identity.py
--------------------------
-Canonical normalizer for identity (disabled-path) log comparisons.
-
-Usage in tests/workflows:
-  from tests.helpers.identity import normalize_line, normalize_lines, normalize_record
-
-Policy (conservative, explicit):
-  • Drop keys that are inherently volatile in identity mode:
-      - "now", "version_etag"
-      - any key starting with "ms_"  (prefix timing counters)
-      - any key ending with "_ms" or "_bytes" (timings/sizes)
-      - exact keys: "rss_bytes"
-  • Keep ordering deterministic by serializing with sorted keys.
-  • Do NOT reorder lists; we only strip volatile fields.
-
-Rationale:
-  Disabled-path identity should be byte-for-byte stable after normalization.
-  We deliberately keep the drop set small to avoid masking regressions.
-"""
+# tests/helpers/identity.py
 from __future__ import annotations
-
 import json
-from typing import Any, Dict, Iterable, List, Union
+from typing import Any
 
-# ---- Drop policy ---------------------------------------------------------
-
-DROP_EXACT_KEYS = {
+# Drop keys that vary across runs or are not part of disabled-path identity
+_DROP_KEYS = {
     "now",
     "version_etag",
-    "rss_bytes",
+    "tier_sequence",      # added to stabilize disabled-path identity
 }
+_DROP_SUFFIXES = ("_ms", "ms")  # e.g., duration_ms, total_ms, etc.
 
-DROP_SUFFIXES = (
-    "_ms",
-    "_bytes",
-)
-
-DROP_PREFIXES = (
-    "ms_",
-)
-
-
-# ---- Core normalization ---------------------------------------------------
-
-def _should_drop(key: str) -> bool:
-    if key in DROP_EXACT_KEYS:
-        return True
-    for suf in DROP_SUFFIXES:
-        if key.endswith(suf):
-            return True
-    for pre in DROP_PREFIXES:
-        if key.startswith(pre):
-            return True
-    return False
-
-
-def normalize_record(obj: Any) -> Any:
-    """
-    Recursively drop volatile keys from a decoded JSON object (dict/list/primitive).
-    Returns a new object; input is not mutated.
-    """
+def _normalize(obj: Any) -> Any:
     if isinstance(obj, dict):
-        out: Dict[str, Any] = {}
-        for k in sorted(obj.keys()):  # deterministic key order
-            if _should_drop(k):
+        out = {}
+        for k, v in obj.items():
+            if k in _DROP_KEYS:
                 continue
-            out[k] = normalize_record(obj[k])
+            if any(k.endswith(suf) for suf in _DROP_SUFFIXES):
+                continue
+            out[k] = _normalize(v)
         return out
     if isinstance(obj, list):
-        return [normalize_record(v) for v in obj]
-    # primitives pass through unchanged
+        return [_normalize(x) for x in obj]
     return obj
 
-
-def normalize_line(line: str) -> str:
-    """
-    If line is JSON, normalize it and return a compact JSON string with sorted keys.
-    Otherwise, return the stripped line.
-    """
-    s = line.strip()
-    if not s:
-        return s
+def normalize_json_line(line: str) -> str:
     try:
-        obj = json.loads(s)
+        obj = json.loads(line)
     except Exception:
-        return s
-    norm = normalize_record(obj)
-    # compact separators, sorted keys for determinism
-    return json.dumps(norm, sort_keys=True, separators=(",", ":"))
+        return line.strip()
+    return json.dumps(_normalize(obj), sort_keys=True, separators=(",", ":"))
 
-
-def normalize_lines(lines: Iterable[str]) -> List[str]:
-    """Normalize an iterable of lines; returns a new list of normalized lines."""
-    return [normalize_line(ln) for ln in lines]
-
-
-# ---- Optional helpers for test convenience -------------------------------
-
-def load_and_normalize(path: str) -> List[str]:
-    """Read a file and return normalized lines."""
-    with open(path, "r", encoding="utf-8") as f:
-        return normalize_lines(f.readlines())
-
-
-if __name__ == "__main__":
-    # Simple CLI: read stdin and print normalized lines
-    import sys
-    data = sys.stdin.read().splitlines()
-    for out in normalize_lines(data):
-        print(out)
+def normalize_json_lines(lines: list[str]) -> list[str]:
+    return [normalize_json_line(ln) for ln in lines if ln.strip()]

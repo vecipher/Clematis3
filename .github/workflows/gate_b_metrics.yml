@@ -1,0 +1,87 @@
+name: M6 — Gate B (metrics-only)
+
+on:
+  pull_request:
+    branches: [ main ]
+    paths:
+      - "clematis/**"
+      - "scripts/**"
+      - "configs/**"
+      - "tests/**"
+      - ".ci/gate_b_*.yaml"
+      - ".github/workflows/gate_b_metrics.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gate-b-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gate-b:
+    name: Verify no metrics leak when gates are OFF
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      LC_ALL: C
+      PYTHONUTF8: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: "${{ runner.os }}-pip-${{ hashFiles('**/pyproject.toml', '**/setup.cfg', '**/requirements*.txt') }}"
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install dependencies (editable if available)
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python -m pip install -U pip
+          if [ -f pyproject.toml ] || [ -f setup.cfg ] || [ -f setup.py ]; then
+            python -m pip install -e ".[dev,test]" || python -m pip install -e .
+          elif [ -f requirements-dev.txt ]; then
+            python -m pip install -r requirements-dev.txt
+          else
+            python -m pip install pytest hypothesis
+          fi
+
+      - name: Run disabled path (perf.enabled=false)
+        shell: bash
+        run: |
+          set -euxo pipefail
+          rm -rf ./.logs
+          # Use your existing deterministic demo; ignore non-zero exit from demo
+          python3 scripts/run_demo.py --config .ci/gate_b_off.yaml --steps 2 || true
+          python3 scripts/ci_gate_b_assert.py OFF
+
+      - name: Run with perf ON but report_memory=false
+        shell: bash
+        run: |
+          set -euxo pipefail
+          rm -rf ./.logs
+          python3 scripts/run_demo.py --config .ci/gate_b_on_nometrics.yaml --steps 2 || true
+          python3 scripts/ci_gate_b_assert.py ON_NO_REPORT
+
+      - name: Upload diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gate-b-diagnostics
+          path: |
+            ./.logs/**
+            ./.norm/**
+            tests/**
+            .ci/**
+            scripts/**

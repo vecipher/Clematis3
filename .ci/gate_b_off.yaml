@@ -1,0 +1,8 @@
+perf:
+  enabled: false
+  metrics: { report_memory: false }
+  # Exercise snapshot config to ensure it can't leak when perf is off
+  snapshots:
+    compression: zstd
+    level: 3
+    delta_mode: true

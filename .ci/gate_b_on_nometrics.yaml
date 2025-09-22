@@ -1,0 +1,7 @@
+perf:
+  enabled: true
+  metrics: { report_memory: false }  # gate OFF → no metrics must be emitted
+  snapshots:
+    compression: zstd
+    level: 5
+    delta_mode: true

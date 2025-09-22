@@ -1362,44 +1362,97 @@ pytest -q \
 - Sorting is strictly `(-score, lex(id))` in all paths; ties are stable.
 - Default configs keep `perf.enabled=false`, so PR33.5 does **not** change observable behavior.
 
-## M6 — Snapshots (PR34): zstd compression + delta mode (safe fallback; defaults OFF)
+
+## M6 — Gate B (metrics-only guard; CI)
+
+**Purpose**
+- Prevent any performance/reader/snapshot counters from appearing in logs unless **both** `perf.enabled=true` **and** `perf.metrics.report_memory=true`.
+- Keeps the **disabled path** byte-for-byte identical to PR29 goldens (after normalization).
+
+**How to run locally**
+```bash
+# OFF: no perf and no reporting -> absolutely no perf metrics in logs
+rm -rf ./.logs
+python3 scripts/run_demo.py --config .ci/gate_b_off.yaml --steps 2 || true
+python3 scripts/ci_gate_b_assert.py OFF
+
+# ON but NO REPORT: feature gate on, report gate off -> still no perf metrics in logs
+rm -rf ./.logs
+python3 scripts/run_demo.py --config .ci/gate_b_on_nometrics.yaml --steps 2 || true
+python3 scripts/ci_gate_b_assert.py ON_NO_REPORT
+
+# ON + REPORT: both gates -> perf metrics may appear (bounded, deterministic)
+rm -rf ./.logs
+python3 scripts/run_demo.py --config .ci/gate_b_on_withmetrics.yaml --steps 2 || true
+python3 scripts/ci_gate_b_assert.py ON_WITH_REPORT
+```
+
+**Signals & invariants**
+- With gates **OFF** or **ON_NO_REPORT**:
+  - No `tier_sequence` appears in T2/T3 logs.
+  - No `reader`, `embed_store_*`, or `snap.*` fields appear.
+- With **ON_WITH_REPORT**, metrics that do appear are limited to the M6 set, e.g.:
+  - `t1.*`/`t2.*` cache counters (PR31/PR32), `t2.reader` fields when the opt-in reader is actually engaged (PR33), and snapshot counters if enabled in a future PR.
+- CI job (optional): `.github/workflows/gate_b.yml` runs the three scenarios above and fails on leakage.
+
+## M6 — Snapshots (PR34/34.1): zstd compression + delta mode (safe fallback; defaults OFF)
 
 **What this adds (no behavior change by default)**
-- Reader support for full and delta snapshots; can read optional zstd‑compressed files (`level` 1–19).
+- **Read/Write** support for full and delta snapshots (writer added in **PR34.1**); optional zstd compression (`level` 1–19).
 - Delta snapshots (`delta_mode`) reconstruct from a baseline identified by `etag`; if baseline is missing or mismatched, the reader logs `SNAPSHOT_BASELINE_MISSING` and deterministically falls back to the matching full snapshot (or `{}` as a last resort).
-- Writer wiring for delta/zstd is deferred; defaults keep existing full JSON snapshots. With `perf.enabled=false`, behavior/logs remain identical to pre‑M6.
+- With `perf.enabled=false`, behavior/logs remain identical to pre‑M6.
 
 **Config (example)**
 ```yaml
 # examples/perf/snapshots.yaml
 perf:
   enabled: true
-  metrics: { report_memory: false }   # counters deferred to PR35
+  metrics: { report_memory: false }   # counters deferred; no new metrics in PR34/34.1
   snapshots:
     compression: zstd                 # allowed: none | zstd
     level: 5                          # 1..19
     delta_mode: true                  # write delta files when a matching baseline exists
 ```
 
-**File formats the reader understands**
+**File formats (read/write)**
 - Full: `snapshot-{etag}.full.json[.zst]`
 - Delta: `snapshot-{etag_to}.delta.json[.zst]` with a small JSON header on line 1 and a delta payload on line 2+.
 
+**API (offline usage)**
+```python
+from clematis.engine.snapshot import write_snapshot_auto, read_snapshot
+
+# Write (auto-select delta vs full based on baseline availability)
+path, wrote_delta = write_snapshot_auto(
+    "./.data/snapshots",
+    etag_from="aaaa",   # None for the first full snapshot
+    etag_to="bbbb",
+    payload={"store": {"nodes": {}}},
+    compression="zstd",  # or "none"
+    level=5,
+    delta_mode=True,
+)
+
+# Read back
+header, state = read_snapshot("./.data/snapshots", etag="bbbb")
+```
+
 **Run locally**
 ```bash
-# Unit tests for the delta codec and the safe fallback
+# Unit tests for codec, writer round‑trip, and safe fallback
 pytest -q tests/snapshots/test_snapshot_delta_roundtrip.py \
+         tests/snapshots/test_snapshot_writer_roundtrip.py \
          tests/snapshots/test_snapshot_fallback.py
 ```
 > zstd support is optional; to read/write `.zst` files locally, install `zstandard` (already in dev/test extras).
 
 **CI (smoke)**
-- Workflow: `.github/workflows/snapshots_smoke.yml` runs the two tests above on PRs that touch snapshots code.
+- Workflow: `.github/workflows/snapshots_smoke.yml` runs the snapshot tests above on PRs that touch snapshot code.
 
 **Notes**
 - Defaults keep snapshots as uncompressed full files; enabling compression/delta changes persistence only, not semantics.
 - ETags are computed over canonical JSON, keeping names deterministic; ordering is stable.
-- No new metrics are emitted in PR34; any future snapshot counters must remain gated (`perf.enabled && perf.metrics.report_memory`).
+- No new metrics are emitted in PR34/34.1; any future snapshot counters must remain gated (`perf.enabled && perf.metrics.report_memory`).
 ```
 
 ## M6 — Docs & CLIs (PR35): quickstart, examples, and offline tooling

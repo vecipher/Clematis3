@@ -139,6 +139,7 @@ def test_t2_scoring_orders_by_recency_and_importance():
     Recent-but-low-importance should outrank old-but-high-importance given beta>gamma.
     """
     cfg = Config()
+    setattr(cfg, "perf", {"enabled": True, "metrics": {"report_memory": True}})
     cfg.t2["tiers"] = ["exact_semantic"]
     cfg.t2["k_retrieval"] = 10
     cfg.t2["sim_threshold"] = -1.0  # include all by cosine
@@ -174,6 +175,7 @@ def test_t2_owner_scope_agent_filters_other_owners():
     When owner_scope=agent, only episodes owned by ctx.agent_id should be considered.
     """
     cfg = Config()
+    setattr(cfg, "perf", {"enabled": True, "metrics": {"report_memory": True}})
     cfg.t2["tiers"] = ["exact_semantic"]
     cfg.t2["k_retrieval"] = 10
     cfg.t2["sim_threshold"] = -1.0
@@ -204,6 +206,7 @@ def test_t2_owner_scope_agent_filters_other_owners():
 
 def test_t2_cache_hit_then_miss_on_index_version_bump():
     cfg = Config()
+    setattr(cfg, "perf", {"enabled": True, "metrics": {"report_memory": True}})
     cfg.t2["tiers"] = ["exact_semantic"]
     cfg.t2["k_retrieval"] = 10
     cfg.t2["sim_threshold"] = -1.0

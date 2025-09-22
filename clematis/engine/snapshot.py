@@ -6,6 +6,7 @@ import json
 import math
 import hashlib
 import logging
+import sys
 try:
     import zstandard as _zstd  # optional; used for .zst snapshots
 except Exception:
@@ -694,18 +695,22 @@ def _canonical_json(obj) -> str:
 def _sha256_of(obj) -> str:
     return hashlib.sha256(_canonical_json(obj).encode("utf-8")).hexdigest()
 
-def _read_text(path: str) -> str:
-    with open(path, "rb") as f:
+def _read_text(path) -> str:
+    """Read a snapshot file as text. Accepts str or Path-like.
+    Transparently decompresses .zst when zstandard is available.
+    """
+    p = os.fspath(path)
+    with open(p, "rb") as f:
         data = f.read()
     # If compressed, transparently decompress
-    if path.endswith(".zst"):
+    if p.endswith(".zst"):
         if _zstd is None:
             raise RuntimeError("zstandard module not available to read .zst snapshot")
         dctx = _zstd.ZstdDecompressor()
         data = dctx.decompress(data)
     return data.decode("utf-8")
 
-def _read_header_payload(path: str):
+def _read_header_payload(path):
     """
     Read 'header\npayload' JSON format used by PR34 snapshots.
     Returns (header_dict, payload_dict). If single-JSON is present, header=None, payload=that object.
@@ -801,3 +806,82 @@ def read_snapshot(root: str = None, etag_to: str = None, baseline_dir: str = Non
         return full_payload or {}
     # Nothing found
     return {}
+
+# Writer helpers reuse _canonical_json, _find_snapshot_file, and _read_header_payload above.
+def _write_lines(p: str, header: Dict[str, Any], body_json: str, *, codec: str, level: int) -> None:
+    # If zstd requested but not installed, degrade deterministically to none (warn once per call site).
+    if codec == "zstd" and _zstd is None:
+        print("W[SNAPSHOT]: zstandard not installed; writing uncompressed", file=sys.stderr)
+        codec = "none"
+    payload = _canonical_json(header) + "\n" + body_json
+    if codec == "zstd" and _zstd is not None:
+        lvl = max(1, min(19, int(level or 3)))
+        cctx = _zstd.ZstdCompressor(level=lvl)
+        with open(p, "wb") as f:
+            f.write(cctx.compress(payload.encode("utf-8")))
+    else:
+        with open(p, "w", encoding="utf-8") as f:
+            f.write(payload)
+
+def write_snapshot_auto(
+    dir_path: str,
+    *,
+    etag_from: Optional[str],
+    etag_to: str,
+    payload: Dict[str, Any],
+    compression: str = "none",    # "none" | "zstd"
+    level: int = 3,
+    delta_mode: bool = False,
+) -> tuple[str, bool]:
+    """
+    Write a snapshot into `dir_path` with canonical header+payload lines.
+
+    - delta_mode=True: if a matching full baseline {etag_from} is found, emit a delta file;
+                       otherwise fall back to a full file and print a deterministic warning.
+    - compression: "none" or "zstd"; if zstandard is not installed, falls back to "none" with a warning.
+
+    Returns: (path, wrote_delta: bool)
+    """
+    os.makedirs(dir_path, exist_ok=True)
+    codec = "zstd" if str(compression).lower() == "zstd" else "none"
+    body_json = _canonical_json(payload)
+
+    # Try delta when requested and possible
+    if delta_mode and etag_from:
+        base = _find_snapshot_file(dir_path, f"snapshot-{etag_from}.full")
+        if base is not None:
+            try:
+                # Local import avoids hard dependency at import time
+                from clematis.engine.util.snapshot_delta import compute_delta  # type: ignore
+            except Exception:
+                compute_delta = None  # type: ignore
+            if compute_delta is not None:
+                _, base_payload = _read_header_payload(base)
+                base_obj = base_payload or {}
+                delta_blob = compute_delta(base_obj, payload)  # type: ignore[misc]
+                header = {
+                    "schema": "snapshot:v1",
+                    "mode": "delta",
+                    "etag_from": etag_from,
+                    "delta_of": etag_from,   # kept for tool compatibility
+                    "etag_to": etag_to,
+                    "codec": codec,
+                    "level": int(level if codec == "zstd" else 0),
+                }
+                out_path = os.path.join(dir_path, f"snapshot-{etag_to}.delta.json" + (".zst" if codec == "zstd" else ""))
+                _write_lines(out_path, header, _canonical_json(delta_blob), codec=codec, level=level)
+                return out_path, True
+        # Baseline unavailable or codec missing; fall back to full with deterministic warning
+        print("W[SNAPSHOT_BASELINE_MISSING]: delta requested but baseline full not found; writing full", file=sys.stderr)
+
+    # Fall back to full
+    header = {
+        "schema": "snapshot:v1",
+        "mode": "full",
+        "etag_to": etag_to,
+        "codec": codec,
+        "level": int(level if codec == "zstd" else 0),
+    }
+    out_path = os.path.join(dir_path, f"snapshot-{etag_to}.full.json" + (".zst" if codec == "zstd" else ""))
+    _write_lines(out_path, header, body_json, codec=codec, level=level)
+    return out_path, False

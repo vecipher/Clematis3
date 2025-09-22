@@ -1,6 +1,0 @@
-{"agent":"AgentA","backend":"rulebased","ms_deliberate":0.016,"ms_rag":0.026,"ops_counts":{"RequestRetrieve":1,"Speak":1},"policy_backend":"rulebased","rag_used":true,"reflection":false,"requested_retrieve":true,"turn":"demo-1"}
-{"agent":"AgentA","backend":"rulebased","ms_deliberate":0.017,"ms_rag":0.028,"ops_counts":{"RequestRetrieve":1,"Speak":1},"policy_backend":"rulebased","rag_used":true,"reflection":false,"requested_retrieve":true,"turn":"demo-1"}
-{"agent":"AgentA","backend":"rulebased","ms_deliberate":0.018,"ms_rag":0.028,"ops_counts":{"RequestRetrieve":1,"Speak":1},"policy_backend":"rulebased","rag_used":true,"reflection":false,"requested_retrieve":true,"turn":"demo-1"}
-{"agent":"AgentA","backend":"rulebased","ms_deliberate":0.021,"ms_rag":0.032,"ops_counts":{"RequestRetrieve":1,"Speak":1},"policy_backend":"rulebased","rag_used":true,"reflection":false,"requested_retrieve":true,"turn":"demo-1"}
-{"agent":"AgentA","backend":"rulebased","ms_deliberate":0.023,"ms_rag":0.035,"ops_counts":{"RequestRetrieve":1,"Speak":1},"policy_backend":"rulebased","rag_used":true,"reflection":false,"requested_retrieve":true,"turn":"demo-1"}
-{"agent":"AgentA","backend":"rulebased","ms_deliberate":0.032,"ms_rag":0.046,"ops_counts":{"RequestRetrieve":1,"Speak":1},"policy_backend":"rulebased","rag_used":true,"reflection":false,"requested_retrieve":true,"turn":"demo-1"}
