@@ -140,3 +140,30 @@ All notable changes to this project will be documented in this file.
 - **Metrics deferred:** no new snapshot metrics in PR34; future counters must be gated by `perf.enabled && perf.metrics.report_memory`.
 - **Determinism:** ETags computed from canonical JSON; ordering and filenames are stable.
 - **Scope in this PR:** Adds reader + delta codec + tests; writer support for delta/zstd will land in a follow-up (no change to default write path in PR34).
+
+### Added (PR35 — Docs, examples, and CLIs; no runtime behavior change)
+- **Docs:**
+  - README gains an “M6 — Docs & CLIs (PR35)” section with quickstart, CLI usage, and links to examples.
+  - CONTRIBUTING adds a rollback playbook (how to force disabled‑path identity) and a quick ref for Gates A/B/C.
+- **Examples:**
+  - `examples/perf/caps.yaml` — PR31 T1 caps + dedupe ring.
+  - `examples/perf/caches.yaml` — PR32 LRU‑by‑bytes caches.
+  - `examples/perf/fp16_reader.yaml` — PR33/33.5 fp16 + partition reader (opt‑in).
+  - `examples/perf/snapshots.yaml` — PR34 compression + delta (safe fallback) referenced by docs.
+- **CLIs (offline only):**
+  - `scripts/mem_inspect.py` — lists snapshot files and basic stats (works with `.json` and optional `.json.zst`).
+  - `scripts/mem_compact.py` — offline rewrite of **full** snapshots to a new directory with optional zstd compression; never in‑place.
+- **Tests:**
+  - `tests/cli/test_mem_inspect.py`, `tests/cli/test_mem_compact.py` — smoke tests (exit 0, expected keys/files).
+- **CI:**
+  - `.github/workflows/cli_smoke.yml` — runs CLI smoke tests on PRs touching `scripts/`.
+
+### Changed (PR35)
+- README updated with M6 quickstart, examples, and CLI docs. No changes to runtime code paths.
+- CHANGELOG updated accordingly.
+
+### Notes (PR35)
+- **No runtime behavior change:** CLIs are offline and do not alter runtime semantics or logs.
+- **Identity preserved:** With `perf.enabled=false`, behavior/logs remain identical to PR29 goldens (guarded by the identity CI gate).
+- **Safety:** `mem_compact.py` writes to a new directory, never in‑place; deterministic ordering and headers.
+- **Optional dependency:** `zstandard` is only required when reading/writing `.zst` files; included in dev/test deps.

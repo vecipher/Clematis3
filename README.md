@@ -1365,9 +1365,9 @@ pytest -q \
 ## M6 — Snapshots (PR34): zstd compression + delta mode (safe fallback; defaults OFF)
 
 **What this adds (no behavior change by default)**
-- Reader support for full and delta snapshots; can read optional zstd‐compressed files (`level` 1–19).
+- Reader support for full and delta snapshots; can read optional zstd‑compressed files (`level` 1–19).
 - Delta snapshots (`delta_mode`) reconstruct from a baseline identified by `etag`; if baseline is missing or mismatched, the reader logs `SNAPSHOT_BASELINE_MISSING` and deterministically falls back to the matching full snapshot (or `{}` as a last resort).
-- Writer wiring for delta/zstd is deferred; defaults keep existing full JSON snapshots. With `perf.enabled=false`, behavior/logs remain identical to pre-M6.
+- Writer wiring for delta/zstd is deferred; defaults keep existing full JSON snapshots. With `perf.enabled=false`, behavior/logs remain identical to pre‑M6.
 
 **Config (example)**
 ```yaml
@@ -1379,25 +1379,85 @@ perf:
     compression: zstd                 # allowed: none | zstd
     level: 5                          # 1..19
     delta_mode: true                  # write delta files when a matching baseline exists
+```
 
-How it stores files - **File formats the reader understands idk**
-	•	Full: snapshot-{etag}.full.json[.zst]
-	•	Delta: snapshot-{etag_to}.delta.json[.zst] with a small JSON header on line 1 and a delta payload on line 2+.
-  
+**File formats the reader understands**
+- Full: `snapshot-{etag}.full.json[.zst]`
+- Delta: `snapshot-{etag_to}.delta.json[.zst]` with a small JSON header on line 1 and a delta payload on line 2+.
 
-Run locally
+**Run locally**
+```bash
 # Unit tests for the delta codec and the safe fallback
 pytest -q tests/snapshots/test_snapshot_delta_roundtrip.py \
          tests/snapshots/test_snapshot_fallback.py
-zstd support is optional; to read/write .zst files locally, install zstandard (already in dev/test extras).
+```
+> zstd support is optional; to read/write `.zst` files locally, install `zstandard` (already in dev/test extras).
 
-CI (smoke)
-	•	Workflow: .github/workflows/snapshots_smoke.yml runs the two tests above on PRs that touch snapshots code.
+**CI (smoke)**
+- Workflow: `.github/workflows/snapshots_smoke.yml` runs the two tests above on PRs that touch snapshots code.
 
-Notes
-	•	Defaults keep snapshots as uncompressed full files; enabling compression/delta changes persistence only, not semantics.
-	•	ETags are computed over canonical JSON, keeping names deterministic; ordering is stable.
-	•	No new metrics are emitted in PR34; any future snapshot counters must remain gated (perf.enabled && perf.metrics.report_memory).
+**Notes**
+- Defaults keep snapshots as uncompressed full files; enabling compression/delta changes persistence only, not semantics.
+- ETags are computed over canonical JSON, keeping names deterministic; ordering is stable.
+- No new metrics are emitted in PR34; any future snapshot counters must remain gated (`perf.enabled && perf.metrics.report_memory`).
+```
+
+## M6 — Docs & CLIs (PR35): quickstart, examples, and offline tooling
+
+**Scope (no runtime behavior change)**
+- Adds documentation and example configs for M6 perf features.
+- Ships two **offline** CLIs: `mem_inspect.py` and `mem_compact.py`.
+- Defaults keep the disabled‑path identity; tools never modify in‑place.
+
+**Examples**
+Located under `examples/perf/` (referenced throughout the docs):
+- `caps.yaml` — PR31 T1 caps + dedupe ring
+- `caches.yaml` — PR32 LRU‑by‑bytes caches (T1/T2)
+- `fp16_reader.yaml` — PR33/33.5 fp16 store + partition‑friendly reader (opt‑in)
+- `snapshots.yaml` — PR34 snapshot compression + delta (safe fallback)
+
+**CLIs**
+
+`mem_inspect` — list snapshot files and basic stats (works with `.json` and optional `.json.zst`).
+```bash
+python3 scripts/mem_inspect.py \
+  --snapshots-dir ./.data/snapshots \
+  --format json   # or: table
+```
+Typical JSON keys:
+```json
+{
+  "root": "/abs/path", 
+  "snapshots_dir": "/abs/path/.data/snapshots",
+  "files": [
+    {"name":"snapshot-aaaa.full.json","kind":"full","compressed":false,"level":0,"size_bytes":1234,"etag_to":"aaaa","delta_of":null,"codec":"none"}
+  ],
+  "summary": {"count":1,"total_bytes":1234,"compressed":0,"delta":0}
+}
+```
+
+`mem_compact` — offline rewrite of **full** snapshots to a new directory with optional zstd compression; never in‑place.
+```bash
+# Dry‑run first
+python3 scripts/mem_compact.py --in ./.data/snapshots --out ./.artifacts/compact --dry-run
+# Then write (uncompressed)
+python3 scripts/mem_compact.py --in ./.data/snapshots --out ./.artifacts/compact
+# Or write compressed
+python3 scripts/mem_compact.py --in ./.data/snapshots --out ./.artifacts/compact_zstd \
+  --compression zstd --level 5
+```
+Notes:
+- Requires `zstandard` only when writing/reading `.zst` files (already in dev/test extras).
+- `--dtype fp32|fp16` updates header metadata only; it does **not** transform model weights.
+- Delta emission is intentionally disabled in PR35 CLI to keep safety simple.
+
+**Tests & CI**
+- `tests/cli/test_mem_inspect.py`, `tests/cli/test_mem_compact.py` — smoke tests (exit 0, expected keys/files).
+- CI workflow: `.github/workflows/cli_smoke.yml` runs these tests on PRs touching `scripts/`.
+
+**Rollback & invariants**
+- Tools are offline: they do not change runtime semantics or logs.
+- With `perf.enabled=false`, behavior/logs remain identical to PR29 goldens (guarded in CI).
 
 ## Changelog & Releases
 - See the [CHANGELOG](./CHANGELOG.md) for notable changes.

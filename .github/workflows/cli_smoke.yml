@@ -1,0 +1,77 @@
+
+
+name: PR35 — CLI Smoke
+
+on:
+  pull_request:
+    branches: [ main ]
+    paths:
+      - "scripts/**"
+      - "tests/cli/**"
+      - ".github/workflows/cli_smoke.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cli-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  cli:
+    name: Run CLI smoke tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      LC_ALL: C
+      PYTHONUTF8: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: "${{ runner.os }}-pip-${{ hashFiles('**/pyproject.toml', '**/setup.cfg', '**/requirements*.txt') }}"
+          restore-keys: |
+            ${{ runner.os }}-pip-
+      
+      - name: Install dependencies (editable if available)
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python -m pip install -U pip
+          if [ -f pyproject.toml ] || [ -f setup.cfg ] || [ -f setup.py ]; then
+            python -m pip install -e ".[dev,test]" || python -m pip install -e .
+          elif [ -f requirements-dev.txt ]; then
+            python -m pip install -r requirements-dev.txt
+          else
+            python -m pip install pytest hypothesis
+          fi
+      
+      - name: Run CLI tests
+        shell: bash
+        run: |
+          set -euxo pipefail
+          if [ -d tests/cli ]; then
+            pytest -q tests/cli
+          else
+            echo "No CLI tests found (tests/cli) — skipping" && exit 0
+          fi
+      
+      - name: Upload diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cli-smoke-diagnostics
+          path: |
+            ./.logs/**
+            ./.artifacts/**
+            tests/cli/**
