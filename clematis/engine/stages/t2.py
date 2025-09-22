@@ -486,6 +486,20 @@ def t2_semantic(ctx, state, text: str, t1) -> T2Result:
         "max": float(np.max(combined_scores)) if combined_scores else 0.0,
     }
 
+    # --- Legacy baseline cache semantics for identity (PR29) ---
+    tiers_for_baseline = tier_sequence if 'tier_sequence' in locals() and tier_sequence else tiers
+    _legacy_cacheable = {"exact_semantic", "cluster_semantic"}
+    legacy_miss_baseline = sum(1 for t in tiers_for_baseline if str(t) in _legacy_cacheable)
+
+    cache_misses_out = int(cache_misses)
+    if not gate_on:
+        # In disabled path, PR29 logged a miss per cacheable tier even with empty hits
+        cache_misses_out = max(cache_misses_out, legacy_miss_baseline)
+
+    # cache_used should be True if the cache subsystem was consulted at all; in PR29
+    # this was True even on all-miss first turns.
+    cache_used_out = (cache is not None) and ((cache_hits + cache_misses_out) > 0 or not gate_on)
+
     # --- Identity baseline metrics (always present) ---
     metrics = {
         "tier_sequence": tier_sequence if 'tier_sequence' in locals() and tier_sequence else tiers,
@@ -497,9 +511,9 @@ def t2_semantic(ctx, state, text: str, t1) -> T2Result:
         "owner_scope": str(cfg_t2.get("owner_scope", "any")).lower(),
         "caps": {"residual_cap": int(residual_cap)},
         "cache_enabled": cache is not None,
-        "cache_used": bool(cache_used),
+        "cache_used": cache_used_out,
         "cache_hits": int(cache_hits),
-        "cache_misses": int(cache_misses),
+        "cache_misses": cache_misses_out,
         "backend": backend_selected,
         "backend_fallback": bool(backend_fallback_reason),
         "hybrid_used": bool(hybrid_used),
