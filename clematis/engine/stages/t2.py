@@ -8,7 +8,9 @@ from ...adapters.embeddings import BGEAdapter
 from ...memory.index import InMemoryIndex
 import numpy as np
 import datetime as dt
+from types import SimpleNamespace as NS
 from .hybrid import rerank_with_gel
+from .t2_quality_trace import emit_trace as emit_quality_trace
 
 def _metrics_gate_on(cfg) -> bool:
     """True only when perf.enabled && perf.metrics.report_memory."""
@@ -17,6 +19,31 @@ def _metrics_gate_on(cfg) -> bool:
         return False
     m = perf.get("metrics") or {}
     return bool(m.get("report_memory", False))
+
+
+# Helper for minimal config snapshot for quality trace emitter
+def _quality_cfg_snapshot(cfg_obj) -> Dict[str, Any]:
+    """Build a minimal config dict with only the parts used by the quality trace emitter."""
+    perf_enabled = bool(_cfg_get(cfg_obj, ["perf", "enabled"], False))
+    report_memory = bool(_cfg_get(cfg_obj, ["perf", "metrics", "report_memory"], False))
+    q_enabled = bool(_cfg_get(cfg_obj, ["t2", "quality", "enabled"], False))
+    q_shadow = bool(_cfg_get(cfg_obj, ["t2", "quality", "shadow"], False))
+    q_trace_dir = str(_cfg_get(cfg_obj, ["t2", "quality", "trace_dir"], "logs/quality"))
+    q_redact = bool(_cfg_get(cfg_obj, ["t2", "quality", "redact"], True))
+    return {
+        "perf": {
+            "enabled": perf_enabled,
+            "metrics": {"report_memory": report_memory},
+        },
+        "t2": {
+            "quality": {
+                "enabled": q_enabled,
+                "shadow": q_shadow,
+                "trace_dir": q_trace_dir,
+                "redact": q_redact,
+            }
+        },
+    }
 
 
 def _emit_t2_metrics(evt: dict, cfg, *, reader_engaged: bool,
@@ -208,6 +235,9 @@ def _init_index_from_cfg(state: dict, cfg_t2: dict):
 
 def t2_semantic(ctx, state, text: str, t1) -> T2Result:
     cfg = ctx.cfg
+    # Accept both dict-based and namespace configs (tests use a namespace; CLIs may pass dicts)
+    if isinstance(cfg, dict):
+        cfg = NS(**cfg)
     cfg_t2 = cfg.t2
     # PR33 config (identity-safe; metrics only unless explicitly wired)
     embed_store_dtype_cfg = str(_cfg_get(ctx, ["cfg", "perf", "t2", "embed_store_dtype"], "fp32") or "fp32").lower()
@@ -565,6 +595,27 @@ def t2_semantic(ctx, state, text: str, t1) -> T2Result:
             if cache_kind == "bytes":
                 result.metrics["t2.cache_evictions"] = result.metrics.get("t2.cache_evictions", 0) + cache_evicted_n
                 result.metrics["t2.cache_bytes"] = result.metrics.get("t2.cache_bytes", 0) + cache_evicted_b
+
+    # --- PR36: Shadow tracing (no-op) — triple-gated; does not mutate rankings or metrics ---
+    try:
+        perf_enabled = bool(_cfg_get(cfg, ["perf", "enabled"], False))
+        report_memory = bool(_cfg_get(cfg, ["perf", "metrics", "report_memory"], False))
+        q_enabled = bool(_cfg_get(cfg, ["t2", "quality", "enabled"], False))
+        q_shadow = bool(_cfg_get(cfg, ["t2", "quality", "shadow"], False))
+        if perf_enabled and report_memory and q_shadow and not q_enabled:
+            cfg_snap = _quality_cfg_snapshot(cfg)
+            # serialize only id+score for trace; keep ordering identical to returned list
+            trace_items = [{"id": h.id, "score": float(getattr(h, "score", 0.0))} for h in retrieved]
+            meta = {
+                "k": len(retrieved),
+                "reason": "shadow",
+                "note": "PR36 shadow trace; rankings unchanged",
+            }
+            emit_quality_trace(cfg_snap, q_text, trace_items, meta)
+    except Exception:
+        # Never fail the request due to tracing issues
+        pass
+
     return result
 
 # --- Compatibility entrypoint for tests & CI (Gate C) ---

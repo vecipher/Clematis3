@@ -1,0 +1,90 @@
+# stages/t2_quality_trace.py
+from __future__ import annotations
+from pathlib import Path
+import json, os, hashlib
+from typing import Any, Dict, List
+import unicodedata
+
+def _norm_query(q: str) -> str:
+    # Unicode normalize, trim, collapse internal whitespace, lowercase
+    q = unicodedata.normalize("NFKC", q)
+    q = " ".join(q.split())  # splits on any whitespace and rejoins with single space
+    return q.lower()
+
+def _query_id(q: str) -> str:
+    return _sha1(_norm_query(q))
+
+TRACE_SCHEMA_VERSION = 1
+
+def _stable_json(obj: Any) -> str:
+    return json.dumps(obj, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+
+def _sha256(s: str) -> str:
+    return hashlib.sha256(s.encode("utf-8")).hexdigest()
+
+def _sha1(s: str) -> str:
+    return hashlib.sha1(s.encode("utf-8")).hexdigest()
+
+def _config_digest(cfg: Dict[str, Any]) -> str:
+    """
+    Digest only the knobs that change behavior/semantics for quality/traces.
+    Excludes path-like and purely cosmetic fields (e.g., trace_dir).
+    """
+    perf = cfg.get("perf", {}) or {}
+    q = cfg.get("t2", {}).get("quality", {}) or {}
+    sub = {
+        "perf": {
+            "enabled": bool(perf.get("enabled", False)),
+            "metrics": {
+                "report_memory": bool((perf.get("metrics") or {}).get("report_memory", False))
+            },
+        },
+        "t2": {
+            "quality": {
+                "enabled": bool(q.get("enabled", False)),
+                "shadow": bool(q.get("shadow", False)),
+                # redact does affect the *shape* of traces, so include it
+                "redact": bool(q.get("redact", True)),
+                # NOTE: trace_dir intentionally excluded (non-semantic, env-specific)
+            }
+        },
+    }
+    return _sha256(_stable_json(sub))
+
+def _git_sha() -> str:
+    return os.environ.get("CLEMATIS_GIT_SHA", "unknown")
+
+def _redact_items(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    # Minimal, conservative redaction for shadow mode.
+    redacted = []
+    for it in items:
+        r = dict(it)
+        # Common fields to scrub if present
+        for k in ("text", "snippet", "title", "content"):
+            if k in r:
+                r[k] = "[REDACTED]"
+        redacted.append(r)
+    return redacted
+
+def emit_trace(cfg: Dict[str, Any], query: str, items: List[Dict[str, Any]], meta: Dict[str, Any]) -> None:
+    """
+    Write a single JSONL record to trace_dir/rq_traces.jsonl.
+    Must be called only when triple-gate is satisfied.
+    """
+    qcfg = cfg.get("t2", {}).get("quality", {})
+    trace_dir = Path(qcfg.get("trace_dir", "logs/quality"))
+    redact = bool(qcfg.get("redact", True))
+
+    record = {
+        "trace_schema_version": TRACE_SCHEMA_VERSION,
+        "git_sha": _git_sha(),
+        "config_digest": _config_digest(cfg),
+        "clock": 0, "seed": 0,
+        "query": "[REDACTED]" if redact else query,
+        "query_id": _query_id(query),
+        "meta": meta or {},
+        "items": _redact_items(items) if redact else items,
+    }
+    trace_dir.mkdir(parents=True, exist_ok=True)
+    with (trace_dir / "rq_traces.jsonl").open("a", encoding="utf-8") as f:
+        f.write(_stable_json(record) + "\n")

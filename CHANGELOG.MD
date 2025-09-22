@@ -2,6 +2,30 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+## [0.7.0-M7] - 2025-09-29 (planned)
+
+### Added (PR36 — Quality scaffold & shadow mode; defaults OFF)
+- **Engine (T2):** `clematis/engine/stages/t2_quality_trace.py` — shadow tracing emitter that writes `rq_traces.jsonl` **without** mutating rankings or metrics. Deterministic headers: `trace_schema_version=1`, `git_sha` (from `CLEMATIS_GIT_SHA` or `"unknown"`), **semantic-only** `config_digest` (excludes `trace_dir`), `query_id` (Unicode NFKC + collapsed whitespace, lowercased), `clock=0`, `seed=0`.
+- **Stage wiring:** `clematis/engine/stages/t2.py` emits a **write-only** shadow trace **behind a triple gate**: `perf.enabled && perf.metrics.report_memory && t2.quality.shadow && !t2.quality.enabled`. Ordering and scores are unchanged.
+- **Configs (validator):** `configs/validate.py` adds `t2.quality.{enabled,shadow,trace_dir,redact}` with defaults (`enabled=false`, `shadow=false`, `trace_dir="logs/quality"`, `redact=true`). **PR36 guard:** `t2.quality.enabled=true` is rejected until PR37 lands. Verbose warning when the triple gate is incomplete.
+- **Examples:** `examples/quality/shadow.yaml` — runnable example exercising the triple gate (ON) with redaction.
+- **CLIs:** 
+  - `scripts/rq_trace_dump.py` — tail/inspect recent trace entries.
+  - `scripts/validate_noop_shadow.py` — Gate D comparator; asserts **no diffs** between baseline vs shadow runs **except** for `rq_traces.jsonl`.
+- **Configs (defaults):** `configs/config.yaml` now includes a minimal `t2.quality` block (defaults OFF) so the identity path is explicit.
+- **CI (Gate D — Quality shadow is a no‑op):** `.github/workflows/gate_d_quality_shadow.yml` (recommended as **required**). Runs baseline vs shadow and calls the comparator script; fails on any non-trace diffs.
+
+### Changed (PR36)
+- **Trace schema stability:** `config_digest` now hashes only **behavioral knobs** (excludes env-specific paths like `trace_dir`); `query_id` normalization tightened (NFKC + whitespace collapse + lowercase) to make A/B diffs mechanical.
+- **Docs:** README gains “M7 — Retrieval Quality: shadow tracing (PR36, defaults OFF)” with quickstart, triple‑gate description, and rollback notes.
+
+### Tests (PR36)
+- `tests/quality/test_t2_quality_shadow.py` — shadow is a no‑op; triple gate required; validator guard for `enabled=true`.
+- `tests/quality/test_trace_emitter_format.py` — redaction on/off; deterministic headers; config digest invariance; query normalization; item order preservation.
+- `tests/scripts/test_validate_noop_shadow.py` — comparator ignores `rq_traces.jsonl` but fails on any other diff.
+- `tests/examples/test_examples_quality_shadow_yaml.py` — example exists and validates; triple gate is satisfied.
+- `tests/integration/test_t2_shadow_noop_integration.py` — end‑to‑end: baseline vs shadow produce identical rankings; trace appears only under shadow (separate dirs).
+
 
 ## [0.6.0] - 2025-09-22
 ### Added

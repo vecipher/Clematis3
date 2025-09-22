@@ -1,0 +1,11 @@
+perf:
+  enabled: true
+  metrics:
+    report_memory: true
+
+t2:
+  quality:
+    enabled: false   # PR36 forbids true
+    shadow: true     # emit traces only
+    trace_dir: "logs/quality"
+    redact: true     # redact human-readable text in traces

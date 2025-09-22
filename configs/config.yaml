@@ -36,6 +36,12 @@ t2:
       metric: cosine
       ef_search: 64
       m: 16
+  # M7 quality controls (PR36 shadow scaffold; defaults OFF)
+  quality:
+    enabled: false
+    shadow: false
+    trace_dir: "logs/quality"
+    redact: true
 t3:
   max_rag_loops: 1
   tokens: 256

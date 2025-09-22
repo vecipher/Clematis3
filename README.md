@@ -12,6 +12,9 @@ python3 scripts/run_demo.py
 
 # Run unit tests
 pytest -q
+# PR36 (M7) — run shadow traces (no-op) and inspect
+export CLEMATIS_CONFIG=examples/quality/shadow.yaml
+python3 scripts/rq_trace_dump.py --trace_dir logs/quality --limit 5
 ```
 
 ## Validate your config (PR16)
@@ -537,7 +540,7 @@ tail -n 1 ./.logs/t2.jsonl | python3 -c 'import sys,json;print(json.loads(sys.st
 - **Residuals:** keyword‑match episode text ↔ current graph labels, emit bounded `upsert_node` nudges; **never undo T1**.  
 - **Metrics:** `tier_sequence`, `k_returned`, `k_used`, `sim_stats{mean,max}`, `caps.residual_cap`, `cache_*`.
 
-## Logs
+# Logs
 
 JSONL files are written to `.logs/`:
 
@@ -555,6 +558,8 @@ JSONL files are written to `.logs/`:
   - `promotion` fields: concept_id, label, members_count, attach_weight
 - `turn.jsonl` — per‑turn roll‑up (durations, key metrics)
 - `health.jsonl` — guardrail flags
+- `rq_traces.jsonl` — quality shadow traces (PR36). Written only when **triple gate** is satisfied: `perf.enabled && perf.metrics.report_memory && t2.quality.shadow && !t2.quality.enabled`. Default path: `logs/quality/`.
+# HS1 wrap-up
 # HS1:
 
 - Deterministic tests use the hash‑based embeddings; if a test filters too hard on cosine, set `t2.sim_threshold` to `-1.0` in that test to include all candidates and let other filters (recency, tiers) drive behavior.
@@ -1511,6 +1516,51 @@ Notes:
 **Rollback & invariants**
 - Tools are offline: they do not change runtime semantics or logs.
 - With `perf.enabled=false`, behavior/logs remain identical to PR29 goldens (guarded in CI).
+
+-## M7 — Retrieval Quality: shadow tracing (PR36, defaults OFF)
+
+**Scope (no-op by default)**  
+Adds the `t2.quality.*` surface and a shadow tracing path that **does not change rankings or metrics**. When the **triple gate** is ON:
+- `perf.enabled: true`
+- `perf.metrics.report_memory: true`
+- `t2.quality.shadow: true` and `t2.quality.enabled: false`
+
+…the system writes a single JSONL stream at `logs/quality/rq_traces.jsonl`. With defaults (both gates OFF), behavior is **identical** to pre‑PR36.
+
+**Config (example)** — see `examples/quality/shadow.yaml`:
+```yaml
+perf:
+  enabled: true
+  metrics: { report_memory: true }
+t2:
+  quality:
+    enabled: false         # PR36 forbids true (guarded by validator)
+    shadow: true           # emit traces only; no ranking changes
+    trace_dir: "logs/quality"
+    redact: true           # redact human-readable fields in traces
+```
+
+**Determinism & trace schema**
+Each trace record includes deterministic headers:
+- `trace_schema_version` (starts at 1)
+- `git_sha` (from `CLEMATIS_GIT_SHA` or `"unknown"`)
+- `config_digest` (semantic knobs only; excludes `trace_dir`)
+- `query_id` (Unicode **NFKC**, collapsed whitespace, lowercased; SHA1)
+- `clock=0`, `seed=0`
+
+**CI guard — Gate D (“shadow is a no‑op”)**  
+Required check that asserts **no diffs** between baseline and shadow runs **except** for `rq_traces.jsonl`. Comparator script: `scripts/validate_noop_shadow.py`.
+
+**Try it locally**
+```bash
+export CLEMATIS_CONFIG=examples/quality/shadow.yaml
+pytest -q
+python3 scripts/rq_trace_dump.py --trace_dir logs/quality --limit 5
+```
+
+**Invariants**
+- Defaults keep **disabled‑path identity**.
+- Enabling `t2.quality.enabled=true` is rejected in PR36 (validator guard); functional paths land in later PRs.
 
 ## Changelog & Releases
 - See the [CHANGELOG](./CHANGELOG.md) for notable changes.

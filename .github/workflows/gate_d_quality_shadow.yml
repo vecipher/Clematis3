@@ -1,0 +1,36 @@
+name: Gate D — Quality shadow is a no-op
+on:
+  pull_request:
+    branches: [ main ]
+jobs:
+  gate-d:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - name: Setup
+        run: |
+          python -m venv .venv
+          . .venv/bin/activate
+          pip install -e ".[dev]"
+      - name: Baseline run (disabled-path)
+        env:
+          BASE_ARTIFACTS: artifacts/base
+        run: |
+          . .venv/bin/activate
+          mkdir -p "$BASE_ARTIFACTS"
+          pytest -q --maxfail=1
+      - name: Shadow run (triple gate)
+        env:
+          CLEMATIS_CONFIG: examples/quality/shadow.yaml
+          SHADOW_ARTIFACTS: artifacts/shadow
+          CLEMATIS_GIT_SHA: ${{ github.sha }}
+        run: |
+          . .venv/bin/activate
+          mkdir -p "$SHADOW_ARTIFACTS"
+          pytest -q --maxfail=1
+      - name: Compare artifacts (ignore rq_traces.jsonl only)
+        run: |
+          . .venv/bin/activate
+          python scripts/validate_noop_shadow.py

@@ -226,8 +226,7 @@ ALLOWED_PERF_T2_READER_PARTITIONS = {"enabled", "layout", "path", "by"}
 ALLOWED_PERF_SNAP = {"compression", "level", "delta_mode", "every_n_turns"}
 ALLOWED_PERF_METRICS = {"report_memory"}
 
-# T2.quality (RQ prep only) allowed keys
-ALLOWED_T2_QUALITY = {"enabled", "normalizer", "aliasing", "lexical", "fusion", "mmr", "cache"}
+ALLOWED_T2_QUALITY = {"enabled", "shadow", "trace_dir", "redact", "normalizer", "aliasing", "lexical", "fusion", "mmr", "cache"}
 ALLOWED_T2_QUALITY_NORMALIZER = {"stopwords", "stemmer", "min_token_len"}
 ALLOWED_T2_QUALITY_ALIASING = {"enabled", "map_path", "max_expansions_per_token"}
 ALLOWED_T2_QUALITY_LEXICAL = {"enabled", "bm25"}
@@ -1071,6 +1070,26 @@ def _validate_config_normalize_impl(cfg: Dict[str, Any]) -> Dict[str, Any]:
         q: Dict[str, Any] = {}
         q["enabled"] = _coerce_bool(raw_t2_quality.get("enabled", False))
 
+        # PR36: shadow tracing controls (no-op path)
+        q["shadow"] = _coerce_bool(raw_t2_quality.get("shadow", False))
+
+        # trace_dir: must be a non-empty string; default to logs/quality
+        if "trace_dir" in raw_t2_quality:
+            td = raw_t2_quality.get("trace_dir")
+            if not isinstance(td, str) or not td.strip():
+                _err(errors, "t2.quality.trace_dir", "must be a non-empty string path")
+            else:
+                q["trace_dir"] = td
+        else:
+            q["trace_dir"] = "logs/quality"
+
+        # privacy: redact text fields in traces by default
+        q["redact"] = _coerce_bool(raw_t2_quality.get("redact", True))
+
+        # PR36 guard: enabling the quality path is unsupported until PR37 lands
+        if q["enabled"]:
+            _err(errors, "t2.quality.enabled", "unsupported in PR36; set to false until PR37 (lexical+fusion) lands.")
+
         # normalizer
         if raw_q_norm:
             qn: Dict[str, Any] = {}
@@ -1279,6 +1298,17 @@ def validate_config_verbose(cfg: Dict[str, Any]) -> Tuple[Dict[str, Any], List[s
             pass
         q = _ensure_dict(_ensure_dict(normalized.get("t2")).get("quality"))
         if q:
+            # Shadow triple-gate reminder: traces only emit when perf.enabled && perf.metrics.report_memory && shadow==true && enabled==false
+            try:
+                perf = _ensure_dict(normalized.get("perf"))
+                perf_on = _coerce_bool(perf.get("enabled", False))
+                perf_metrics = _ensure_dict(perf.get("metrics"))
+                report_mem = _coerce_bool(perf_metrics.get("report_memory", False))
+                if _coerce_bool(q.get("shadow", False)):
+                    if not (perf_on and report_mem and not _coerce_bool(q.get("enabled", False))):
+                        warnings.append("W[t2.quality.shadow]: requires perf.enabled=true AND perf.metrics.report_memory=true AND t2.quality.enabled=false; traces will not emit otherwise.")
+            except Exception:
+                pass
             qf = _ensure_dict(q.get("fusion"))
             if "alpha_semantic" in qf:
                 a = _coerce_float(qf.get("alpha_semantic"))
