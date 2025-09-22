@@ -1,0 +1,24 @@
+
+
+# PR37 example: Lexical BM25 + rank-based fusion (alpha)
+# Requires perf.enabled=true and perf.metrics.report_memory=true for metrics/traces.
+# Disabled-path identity is preserved when t2.quality.enabled=false.
+
+perf:
+  enabled: true
+  metrics:
+    report_memory: true
+
+t2:
+  quality:
+    enabled: true        # activate fusion
+    shadow: false        # shadow not needed when enabled
+    trace_dir: "logs/quality"
+    redact: true
+    lexical:
+      bm25_k1: 1.2
+      bm25_b: 0.75
+      stopwords: "en-basic"   # or "none"
+    fusion:
+      mode: "score_interp"
+      alpha_semantic: 0.6     # 0..1; higher favors semantic signal

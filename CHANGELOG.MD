@@ -19,12 +19,29 @@ All notable changes to this project will be documented in this file.
 - **Trace schema stability:** `config_digest` now hashes only **behavioral knobs** (excludes env-specific paths like `trace_dir`); `query_id` normalization tightened (NFKC + whitespace collapse + lowercase) to make A/B diffs mechanical.
 - **Docs:** README gains “M7 — Retrieval Quality: shadow tracing (PR36, defaults OFF)” with quickstart, triple‑gate description, and rollback notes.
 
+
 ### Tests (PR36)
 - `tests/quality/test_t2_quality_shadow.py` — shadow is a no‑op; triple gate required; validator guard for `enabled=true`.
 - `tests/quality/test_trace_emitter_format.py` — redaction on/off; deterministic headers; config digest invariance; query normalization; item order preservation.
 - `tests/scripts/test_validate_noop_shadow.py` — comparator ignores `rq_traces.jsonl` but fails on any other diff.
 - `tests/examples/test_examples_quality_shadow_yaml.py` — example exists and validates; triple gate is satisfied.
 - `tests/integration/test_t2_shadow_noop_integration.py` — end‑to‑end: baseline vs shadow produce identical rankings; trace appears only under shadow (separate dirs).
+
+
+### Added (PR37 — Lexical BM25 + fusion; opt‑in)
+- **Engine (T2):** `clematis/engine/stages/t2_quality.py` — deterministic lexical BM25 scorer over the current candidate set and rank‑based fusion; ties break by `lex(id)`.
+- **Stage wiring:** `clematis/engine/stages/t2.py` calls fusion when `t2.quality.enabled=true`; emits quality metrics under the triple gate; **enabled‑path tracing** writes `rq_traces.jsonl` with `meta.reason="enabled"` and per‑item `rank_sem`, `rank_fused`, `score_fused`.
+- **Configs (validator):** `configs/validate.py` now accepts `t2.quality.enabled=true` and adds `t2.quality.lexical.{bm25_k1,bm25_b,stopwords}` and `t2.quality.fusion.{mode,alpha_semantic}` (defaults + bounds). Warnings emitted if perf gates are off.
+- **Examples:** `examples/quality/lexical_fusion.yaml` — runnable example for PR37.
+- **CI (optional smoke):** `.github/workflows/pr37_quality_fusion_smoke.yml` — runs the test suite with PR37 enabled (`CLEMATIS_CONFIG=examples/quality/lexical_fusion.yaml`).
+
+### Changed (PR37)
+- **Traces:** When `t2.quality.enabled=true` and the triple gate is satisfied, the pipeline now writes **enabled‑path** traces (`meta.reason="enabled"`) in addition to PR36 shadow traces. Shadow behavior unchanged.
+- **Docs:** README updated with a PR37 section, quickstart, and Logs details (enabled‑path fields).
+
+### Tests (PR37)
+- `tests/quality/test_t2_quality_fusion.py` — determinism of fused ordering, alpha extremes, and metrics presence only when enabled.
+- `tests/integration/test_t2_enabled_traces_integration.py` — verifies that enabled‑path traces are produced with `meta.reason="enabled"`.
 
 
 ## [0.6.0] - 2025-09-22

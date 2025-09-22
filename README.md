@@ -15,6 +15,11 @@ pytest -q
 # PR36 (M7) — run shadow traces (no-op) and inspect
 export CLEMATIS_CONFIG=examples/quality/shadow.yaml
 python3 scripts/rq_trace_dump.py --trace_dir logs/quality --limit 5
+
+# PR37 (M7) — enable lexical BM25 + fusion (alpha) and inspect enabled-path traces
+export CLEMATIS_CONFIG=examples/quality/lexical_fusion.yaml
+pytest -q
+python3 scripts/rq_trace_dump.py --trace_dir logs/quality --limit 5
 ```
 
 ## Validate your config (PR16)
@@ -558,7 +563,9 @@ JSONL files are written to `.logs/`:
   - `promotion` fields: concept_id, label, members_count, attach_weight
 - `turn.jsonl` — per‑turn roll‑up (durations, key metrics)
 - `health.jsonl` — guardrail flags
-- `rq_traces.jsonl` — quality shadow traces (PR36). Written only when **triple gate** is satisfied: `perf.enabled && perf.metrics.report_memory && t2.quality.shadow && !t2.quality.enabled`. Default path: `logs/quality/`.
+- `rq_traces.jsonl` — quality traces (M7).
+  - **Shadow (PR36)**: written only when the **triple gate** is satisfied and shadow is on: `perf.enabled && perf.metrics.report_memory && t2.quality.shadow && !t2.quality.enabled` → `meta.reason: "shadow"`.
+  - **Enabled (PR37)**: written when the **triple gate** is satisfied and the quality fuser actually runs: `perf.enabled && perf.metrics.report_memory && t2.quality.enabled` → `meta.reason: "enabled"`. Per-item fields include `rank_sem`, `rank_fused`, and `score_fused`; `meta.alpha` and `meta.lex_hits` summarize fusion settings and lexical coverage. Default path: `logs/quality/`.
 # HS1 wrap-up
 # HS1:
 
@@ -1561,6 +1568,30 @@ python3 scripts/rq_trace_dump.py --trace_dir logs/quality --limit 5
 **Invariants**
 - Defaults keep **disabled‑path identity**.
 - Enabling `t2.quality.enabled=true` is rejected in PR36 (validator guard); functional paths land in later PRs.
+
+## M7 — Retrieval Quality: Lexical BM25 + Fusion (PR37, opt-in, gated)
+
+**Scope (opt-in; defaults OFF)**  
+Adds a deterministic lexical BM25 scorer over the current candidate set and a rank-based fusion step that combines semantic and lexical signals. When **enabled** and the **triple gate** is ON, we emit both **metrics** and **traces** for the enabled path. Disabled path remains byte-for-byte identical to pre-M7.
+
+**Config (example)** — see [`examples/quality/lexical_fusion.yaml`](examples/quality/lexical_fusion.yaml):
+```yaml
+perf:
+  enabled: true
+  metrics: { report_memory: true }
+t2:
+  quality:
+    enabled: true          # activate fusion
+    shadow: false
+    trace_dir: "logs/quality"
+    redact: true
+    lexical:
+      bm25_k1: 1.2
+      bm25_b: 0.75
+      stopwords: en-basic   # or "none"
+    fusion:
+      mode: score_interp
+      alpha_semantic: 0.6   # 0..1; higher = more semantic
 
 ## Changelog & Releases
 - See the [CHANGELOG](./CHANGELOG.md) for notable changes.

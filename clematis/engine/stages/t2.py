@@ -22,6 +22,7 @@ def _metrics_gate_on(cfg) -> bool:
 
 
 # Helper for minimal config snapshot for quality trace emitter
+
 def _quality_cfg_snapshot(cfg_obj) -> Dict[str, Any]:
     """Build a minimal config dict with only the parts used by the quality trace emitter."""
     perf_enabled = bool(_cfg_get(cfg_obj, ["perf", "enabled"], False))
@@ -44,6 +45,25 @@ def _quality_cfg_snapshot(cfg_obj) -> Dict[str, Any]:
             }
         },
     }
+
+# Helper: build a deterministic items list for quality fusion based on current ordering
+def _items_for_fusion(retrieved_list: list) -> list[dict]:
+    """
+    Convert the current ordered list of EpisodeRef into dicts consumable by the quality fuser.
+    We provide a deterministic 'score' surrogate that strictly reflects the current ordering,
+    so fusion can use rank-based normalization independent of cosine/combined values.
+    """
+    n = len(retrieved_list or [])
+    out = []
+    for idx, ref in enumerate(retrieved_list):
+        # Higher surrogate score for earlier items to preserve the current rank in fusion
+        sem_rank_surrogate = float(n - idx)
+        out.append({
+            "id": getattr(ref, "id", None),
+            "score": sem_rank_surrogate,
+            "text": getattr(ref, "text", ""),
+        })
+    return out
 
 
 def _emit_t2_metrics(evt: dict, cfg, *, reader_engaged: bool,
@@ -468,6 +488,52 @@ def t2_semantic(ctx, state, text: str, t1) -> T2Result:
         hybrid_used = False
         hybrid_info = {}
 
+    # PR37 fusion bookkeeping
+    q_fusion_used = False
+    q_fusion_meta = {}
+
+    # --- PR37: Optional lexical BM25 + fusion (alpha), behind t2.quality.enabled ---
+    try:
+        q_enabled_cfg = bool(_cfg_get(cfg, ["t2", "quality", "enabled"], False))
+        if q_enabled_cfg:
+            # Import lazily to avoid hard dependency before PR37 lands
+            try:
+                from .t2_quality import fuse as quality_fuse  # type: ignore
+            except Exception:
+                quality_fuse = None  # fallback: skip fusion if module not present
+            if quality_fuse is not None:
+                # Build fusion input from the *current* ordering
+                items_for_fusion = _items_for_fusion(retrieved)
+                fused_out = quality_fuse(q_text, items_for_fusion, cfg=cfg)
+                # Allow either a list or (list, meta) return
+                if isinstance(fused_out, tuple):
+                    fused_items, q_fusion_meta = fused_out
+                else:
+                    fused_items, q_fusion_meta = fused_out, {}
+                # Build optional maps for enabled-path traces
+                try:
+                    sem_rank_map = {d["id"]: i + 1 for i, d in enumerate(items_for_fusion)}
+                    score_fused_map = {d.get("id"): float(d.get("score_fused", 0.0)) for d in (fused_items or [])}
+                    if isinstance(q_fusion_meta, dict):
+                        q_fusion_meta.setdefault("sem_rank_map", sem_rank_map)
+                        q_fusion_meta.setdefault("score_fused_map", score_fused_map)
+                except Exception:
+                    pass
+                # Reorder `retrieved` according to fused id ordering; keep only known ids
+                id_to_ref = {r.id: r for r in retrieved}
+                new_order = []
+                for it in fused_items:
+                    iid = it.get("id")
+                    if iid in id_to_ref:
+                        new_order.append(id_to_ref[iid])
+                if new_order:
+                    retrieved = new_order
+                    q_fusion_used = True
+    except Exception:
+        # Fusion must never break retrieval; if anything goes wrong, keep baseline ordering
+        q_fusion_used = False
+        q_fusion_meta = {}
+
     # --- M5 scheduler slice caps (use-only clamp) ---
     # We cap how many retrieval hits are **used** downstream in this slice (not how many are fetched).
     # The full `retrieved` list is kept for metrics/logging and possible caching.
@@ -571,6 +637,45 @@ def t2_semantic(ctx, state, text: str, t1) -> T2Result:
             metrics["reader"] = reader_meta
         if backend_fallback_reason:
             metrics["backend_fallback_reason"] = str(backend_fallback_reason)
+        # PR37: emit quality fusion metrics only when enabled and fusion executed
+        if bool(_cfg_get(cfg, ["t2", "quality", "enabled"], False)) and q_fusion_used:
+            metrics["t2q.fusion_mode"] = "score_interp"
+            metrics["t2q.alpha_semantic"] = float(_cfg_get(cfg, ["t2", "quality", "fusion", "alpha_semantic"], 0.6))
+            # If the fuser provided additional meta (e.g., lex_hits), forward selected fields
+            if isinstance(q_fusion_meta, dict) and "t2q.lex_hits" in q_fusion_meta:
+                try:
+                    metrics["t2q.lex_hits"] = int(q_fusion_meta["t2q.lex_hits"])
+                except Exception:
+                    pass
+        # PR37: enabled-path tracing (triple-gated). Writes fused ordering details.
+        if bool(_cfg_get(cfg, ["t2", "quality", "enabled"], False)) and q_fusion_used:
+            try:
+                cfg_snap = _quality_cfg_snapshot(cfg)
+                sem_rank_map = {}
+                score_fused_map = {}
+                if isinstance(q_fusion_meta, dict):
+                    sem_rank_map = q_fusion_meta.get("sem_rank_map", {}) or {}
+                    score_fused_map = q_fusion_meta.get("score_fused_map", {}) or {}
+                trace_items = []
+                for idx, r in enumerate(retrieved, start=1):
+                    sid = getattr(r, "id", None)
+                    trace_items.append({
+                        "id": sid,
+                        "rank_sem": int(sem_rank_map.get(sid, 0)),
+                        "rank_fused": int(idx),
+                        "score_fused": float(score_fused_map.get(sid, 0.0)),
+                    })
+                meta = {
+                    "k": len(retrieved),
+                    "reason": "enabled",
+                    "note": "PR37 enabled trace; fused ordering active",
+                    "alpha": float(_cfg_get(cfg, ["t2", "quality", "fusion", "alpha_semantic"], 0.6)),
+                    "lex_hits": int(q_fusion_meta.get("t2q.lex_hits", 0)) if isinstance(q_fusion_meta, dict) else 0,
+                }
+                emit_quality_trace(cfg_snap, q_text, trace_items, meta)
+            except Exception:
+                # Never fail the request due to tracing issues
+                pass
         # PR33: gated perf counters (namespaced)
         metrics["t2.embed_dtype"] = "fp32"
         metrics["t2.embed_store_dtype"] = pr33_store_dtype

@@ -75,7 +75,13 @@ def test_quality_defaults_off_accepts():
     assert q["redact"] is True
     # Should not error; warnings are allowed but not required here.
 
-def test_quality_enabled_rejected_in_pr36():
+def test_quality_enabled_accepted_in_pr37_with_warnings():
     raw = {"t2": {"quality": {"enabled": True}}}
-    with pytest.raises(ValueError):
-        validate_config_verbose(raw)
+    norm, warnings = validate_config_verbose(raw)
+    q = norm["t2"]["quality"]
+    assert q["enabled"] is True
+    # Expect warnings when enabling without perf gates
+    assert any(
+        str(w).startswith("W[t2.quality.enabled]") or str(w).startswith("W[t2.quality.metrics]")
+        for w in warnings
+    ), "Expected PR37 warnings when enabling quality without perf gates"

@@ -1085,10 +1085,38 @@ def _validate_config_normalize_impl(cfg: Dict[str, Any]) -> Dict[str, Any]:
 
         # privacy: redact text fields in traces by default
         q["redact"] = _coerce_bool(raw_t2_quality.get("redact", True))
+        # PR37: lexical BM25 and fusion knobs (alpha)
 
-        # PR36 guard: enabling the quality path is unsupported until PR37 lands
-        if q["enabled"]:
-            _err(errors, "t2.quality.enabled", "unsupported in PR36; set to false until PR37 (lexical+fusion) lands.")
+        # lexical: defaults and bounds
+        lex = q.setdefault("lexical", {})
+        lex.setdefault("bm25_k1", 1.2)
+        lex.setdefault("bm25_b", 0.75)
+        lex.setdefault("stopwords", "en-basic")
+        if not isinstance(lex["bm25_k1"], (int, float)) or lex["bm25_k1"] < 0:
+            _err(errors, "t2.quality.lexical.bm25_k1", "must be a number >= 0")
+        if not isinstance(lex["bm25_b"], (int, float)) or not (0.0 <= float(lex["bm25_b"]) <= 1.0):
+            _err(errors, "t2.quality.lexical.bm25_b", "must be a number in [0,1]")
+        if lex["stopwords"] not in ("none", "en-basic"):
+            _err(errors, "t2.quality.lexical.stopwords", 'must be one of {"none","en-basic"}')
+
+        # fusion: mode and alpha (only score_interp supported in PR37)
+        fus = q.setdefault("fusion", {})
+        fus.setdefault("mode", "score_interp")
+        fus.setdefault("alpha_semantic", 0.6)
+        if fus["mode"] != "score_interp":
+            _err(errors, "t2.quality.fusion.mode", 'only "score_interp" is supported in PR37')
+        try:
+            alpha = float(fus["alpha_semantic"])
+        except Exception:
+            _err(errors, "t2.quality.fusion.alpha_semantic", "must be a number in [0,1]")
+            alpha = 0.6
+        if not (0.0 <= alpha <= 1.0):
+            _err(errors, "t2.quality.fusion.alpha_semantic", "must be a number in [0,1]")
+        else:
+            fus["alpha_semantic"] = alpha
+        # PR36 guard: enabling the quality path is unsupported until PR37 lands, removed for PR37
+        # if q["enabled"]:
+        #     _err(errors, "t2.quality.enabled", "unsupported in PR36; set to false until PR37 (lexical+fusion) lands.")
 
         # normalizer
         if raw_q_norm:
@@ -1307,6 +1335,18 @@ def validate_config_verbose(cfg: Dict[str, Any]) -> Tuple[Dict[str, Any], List[s
                 if _coerce_bool(q.get("shadow", False)):
                     if not (perf_on and report_mem and not _coerce_bool(q.get("enabled", False))):
                         warnings.append("W[t2.quality.shadow]: requires perf.enabled=true AND perf.metrics.report_memory=true AND t2.quality.enabled=false; traces will not emit otherwise.")
+            except Exception:
+                pass
+            # PR37: enabled-path warnings
+            try:
+                perf = _ensure_dict(normalized.get("perf"))
+                perf_on = _coerce_bool(perf.get("enabled", False))
+                perf_metrics = _ensure_dict(perf.get("metrics"))
+                report_mem = _coerce_bool(perf_metrics.get("report_memory", False))
+                if _coerce_bool(q.get("enabled", False)) and not perf_on:
+                    warnings.append("W[t2.quality.enabled]: perf.enabled=false; quality fusion will not execute.")
+                if _coerce_bool(q.get("enabled", False)) and perf_on and not report_mem:
+                    warnings.append("W[t2.quality.metrics]: perf.metrics.report_memory=false; quality metrics/traces will not emit under Gate B.")
             except Exception:
                 pass
             qf = _ensure_dict(q.get("fusion"))
