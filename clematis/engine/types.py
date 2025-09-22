@@ -1,7 +1,7 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Literal, Optional, Protocol, Tuple
-from numpy.typing import NDArray
+from numpy import NDArray
 import numpy as np
 
 PlanVersion = Literal["t3-plan-v1"]
