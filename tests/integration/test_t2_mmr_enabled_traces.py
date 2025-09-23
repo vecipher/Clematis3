@@ -82,11 +82,7 @@ def test_mmr_emits_selected_metric_when_gated():
     except Exception:
         pytest.skip("t2 module not importable in this environment")
 
-    # Require a pipeline/test hook that accepts emit_metric; otherwise skip.
-    pipeline = getattr(t2, "t2_pipeline", None)
-    if pipeline is None:
-        pytest.skip("t2_pipeline hook not available; metric emission verified elsewhere")
-
+    # Unified config for both pipeline and run_t2 fallbacks (triple gate + MMR k=2)
     cfg = {
         "perf": {"enabled": True, "metrics": {"report_memory": True}},
         "t2": {
@@ -98,6 +94,13 @@ def test_mmr_emits_selected_metric_when_gated():
             }
         },
     }
+
+    pipeline = getattr(t2, "t2_pipeline", None)
+    if pipeline is None:
+        # TODO(PR41): standardize the pipeline entrypoint (export t2_pipeline shim or
+        # define returned-metrics contract for run_t2) so this test can assert metrics
+        # without skipping.
+        pytest.skip("t2_pipeline hook not available; metric emission verified elsewhere")
 
     metrics = {}
 

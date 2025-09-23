@@ -54,9 +54,24 @@ All notable changes to this project will be documented in this file.
 - **Determinism & invariants:** No RNG or wall-clock; ties break by `lex(id)`. When `t2.quality.enabled=false` or `mmr.enabled=false`, results match PR37 fused order. With MMR on, final order is deterministic.
 - **Traces:** Enabled-path traces (PR37) now reflect the MMR-reordered list when MMR is engaged; shadow behavior unchanged. Triple gate unchanged.
 
+
 ### Tests (PR38)
 - `tests/scripts/test_t2_quality_mmr.py` — selection extremes, tie-breaks, permutation properties, lambda validation.
 - `tests/integration/test_t2_mmr_enabled_traces.py` — MMR reorders when enabled; no-op when disabled; text-only tokenization path; asserts gated metrics `t2q.mmr.lambda`, `t2q.mmr.selected`, and `t2q.diversity_avg_pairwise`.
+
+### Added (PR39 — Normalizer & aliasing; quality paths only)
+- **Engine (T2):** `clematis/engine/stages/t2_quality_norm.py` — deterministic helpers: `normalize_text`, `tokenize`, `load_alias_map` (cached), `apply_aliases` (exact/phrase; single‑pass, idempotent).
+- **Stage wiring:** `clematis/engine/stages/t2_quality.py` — BM25 scorer and MMR glue now use PR39 normalizer/aliasing when `t2.quality.enabled=true`; disabled path unchanged.
+- **Configs (validator):** `configs/validate.py` — adds `t2.quality.normalizer.{enabled,case,unicode}` and `t2.quality.aliasing.map_path`; warns when normalizer/aliasing are configured while `t2.quality.enabled=false`; warns when `map_path` is missing/unreadable (no‑op at runtime).
+- **Examples:** `tests/examples/quality/normalizer_aliases.yaml`, `tests/examples/quality/aliases.yaml` — minimal runnable example + alias map.
+
+### Changed (PR39)
+- **Determinism & invariants:** No RNG/wall‑clock; ties via `lex(id)`; disabled‑path identity preserved. With no alias map, BM25 behavior remains parity with PR37; MMR token sets mirror the same normalization/aliasing policy.
+- **Traces & gates:** Enabled‑path traces reflect any normalization/aliasing effects via the fused/MMR outputs; triple gate unchanged.
+
+### Tests (PR39)
+- `tests/quality/test_t2_quality_normalizer_aliases.py` — normalization (NFKC/lower/whitespace), tokenization (stops/minlen/stemmer), aliasing rewrite/expansion, alias map I/O; idempotency.
+- `tests/integration/test_t2_quality_normalizer_aliases_integration.py` — alias map deterministically changes the MMR head (λ=1.0, k=2); repeatability.
 
 ## [0.6.0] - 2025-09-22
 ### Added

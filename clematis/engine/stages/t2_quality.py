@@ -26,6 +26,7 @@ import unicodedata
 from typing import Any, Dict, List, Tuple, FrozenSet
 
 from .t2_quality_mmr import MMRItem, mmr_reorder_full
+from .t2_quality_norm import normalize_text as _qnorm, tokenize as _qtokenize, load_alias_map as _load_alias_map, apply_aliases as _apply_aliases
 
 __all__ = ["fuse", "maybe_apply_mmr"]
 
@@ -64,15 +65,28 @@ def _reciprocal_rank_scores(ids_in_order: List[str], C: int = _RRANK_C) -> Dict[
 
 # ---------- Lexical BM25 over the candidate set ----------
 
-def _bm25_scores(query: str, items: List[Dict[str, Any]], k1: float, b: float, stopset) -> Tuple[Dict[str, float], Dict[str, int], Dict[str, int]]:
+def _bm25_scores(query: str, items: List[Dict[str, Any]], k1: float, b: float, stopset, qcfg: Dict[str, Any]) -> Tuple[Dict[str, float], Dict[str, int], Dict[str, int]]:
   """
   Compute BM25-style lexical scores over the provided candidate set.
   Returns:
     - scores: dict id -> float score
     - df:     dict term -> document frequency within the candidate set
     - hits:   dict id -> count of UNIQUE query terms present in that item
+  Uses PR39 normalizer/aliasing when quality paths are enabled.
   """
-  q_terms = _tokenize(query, stopset)
+  norm_cfg = (qcfg.get("normalizer") or {})
+  use_norm = bool(norm_cfg.get("enabled", True))
+  alias_cfg = (qcfg.get("aliasing") or {})
+  map_path = alias_cfg.get("map_path")
+  amap = _load_alias_map(map_path) if map_path else {}
+
+  def _lex_tokens(text: str) -> List[str]:
+    toks = _qtokenize(text, stopset=stopset) if use_norm else _tokenize(text, stopset)
+    if amap:
+      toks = _apply_aliases(toks, amap)
+    return toks
+
+  q_terms = _lex_tokens(query)
   if not q_terms:
     return ({it["id"]: 0.0 for it in items}, {}, {it["id"]: 0 for it in items})
 
@@ -80,7 +94,7 @@ def _bm25_scores(query: str, items: List[Dict[str, Any]], k1: float, b: float, s
   docs: List[List[str]] = []
   doc_lens: List[int] = []
   for it in items:
-    toks = _tokenize(str(it.get("text", "")), stopset)
+    toks = _lex_tokens(str(it.get("text", "")))
     docs.append(toks)
     doc_lens.append(len(toks))
 
@@ -162,7 +176,7 @@ def fuse(query: str, items: List[Dict[str, Any]], *, cfg: Dict[str, Any]) -> Tup
     return items, {}
 
   # 1) Lexical scores over candidates
-  lex_scores, _, unique_hits = _bm25_scores(query, items, k1=k1, b=b, stopset=stopset)
+  lex_scores, _, unique_hits = _bm25_scores(query, items, k1=k1, b=b, stopset=stopset, qcfg=qcfg)
 
   # 2) Deterministic ranks for both signals (break ties lex(id))
   def _id_or(it): return it.get("id")
@@ -247,16 +261,38 @@ def maybe_apply_mmr(fused: List[Dict[str, Any]], qcfg: Dict[str, Any]) -> List[D
   if isinstance(k, int) and k < 1:
     k = None
 
-  # Reuse PR37 lexical stopword choice for token sets
+  # Reuse PR37/PR39 lexical stopword choice and PR39 normalizer/aliasing
   lex_cfg = qcfg.get("lexical", {}) or {}
   stopwords = lex_cfg.get("stopwords", "en-basic")
   stopset = _STOP_EN_BASIC if stopwords == "en-basic" else None
+
+  norm_cfg = (qcfg.get("normalizer") or {})
+  use_norm = bool(norm_cfg.get("enabled", True))
+  alias_cfg = (qcfg.get("aliasing") or {})
+  map_path = alias_cfg.get("map_path")
+  amap = _load_alias_map(map_path) if map_path else {}
+
+  def _mmr_toks_for_item(c: Dict[str, Any]) -> FrozenSet[str]:
+    # Prefer text; fallback to provided tokens
+    text = c.get("text", "")
+    if text:
+      toks = _qtokenize(text, stopset=stopset) if use_norm else _tokenize(text, stopset)
+    else:
+      raw = c.get("tokens") or []
+      toks = []
+      for t in raw:
+        tt = _qnorm(str(t)) if use_norm else _norm_text(str(t))
+        if tt and (not stopset or tt not in stopset):
+          toks.append(tt)
+    if amap:
+      toks = _apply_aliases(toks, amap)
+    return frozenset(toks)
 
   items: List[MMRItem] = []
   for c in fused:
     cid = str(c.get("id"))
     rel = float(c.get("score_fused", c.get("score", 0.0)))
-    toks = _tokens_for_item_mmr(c, stopset)
+    toks = _mmr_toks_for_item(c)
     items.append(MMRItem(id=cid, rel=rel, toks=toks))
 
   order = mmr_reorder_full(items, k=k, lam=lam)

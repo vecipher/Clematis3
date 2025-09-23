@@ -227,7 +227,7 @@ ALLOWED_PERF_SNAP = {"compression", "level", "delta_mode", "every_n_turns"}
 ALLOWED_PERF_METRICS = {"report_memory"}
 
 ALLOWED_T2_QUALITY = {"enabled", "shadow", "trace_dir", "redact", "normalizer", "aliasing", "lexical", "fusion", "mmr", "cache"}
-ALLOWED_T2_QUALITY_NORMALIZER = {"stopwords", "stemmer", "min_token_len"}
+ALLOWED_T2_QUALITY_NORMALIZER = {"enabled", "case", "unicode", "stopwords", "stemmer", "min_token_len"}
 ALLOWED_T2_QUALITY_ALIASING = {"enabled", "map_path", "max_expansions_per_token"}
 ALLOWED_T2_QUALITY_LEXICAL = {"enabled", "bm25"}
 ALLOWED_T2_QUALITY_BM25 = {"k1", "b", "doclen_floor"}
@@ -1118,24 +1118,48 @@ def _validate_config_normalize_impl(cfg: Dict[str, Any]) -> Dict[str, Any]:
         # if q["enabled"]:
         #     _err(errors, "t2.quality.enabled", "unsupported in PR36; set to false until PR37 (lexical+fusion) lands.")
 
-        # normalizer
-        if raw_q_norm:
-            qn: Dict[str, Any] = {}
-            if "stopwords" in raw_q_norm:
-                sw = raw_q_norm.get("stopwords")
-                if not isinstance(sw, str) or not sw:
-                    _err(errors, "t2.quality.normalizer.stopwords", "must be a non-empty string")
-                qn["stopwords"] = sw
-            if "stemmer" in raw_q_norm:
-                st = str(raw_q_norm.get("stemmer"))
-                if st not in {"none", "porter-lite"}:
-                    _err(errors, "t2.quality.normalizer.stemmer", "must be one of {none,porter-lite}")
-                qn["stemmer"] = st
-            if "min_token_len" in raw_q_norm:
-                mtl = _coerce_int(raw_q_norm.get("min_token_len"))
-                if mtl < 1: _err(errors, "t2.quality.normalizer.min_token_len", "must be >= 1")
-                qn["min_token_len"] = mtl
-            if qn: q["normalizer"] = qn
+        # normalizer (PR39): default ON when quality.enabled=true
+        qn: Dict[str, Any] = {}
+        # Default enablement follows quality.enabled
+        q_enabled_flag = _coerce_bool(raw_t2_quality.get("enabled", False))
+        if "enabled" in raw_q_norm:
+            qn["enabled"] = _coerce_bool(raw_q_norm.get("enabled"))
+        else:
+            qn["enabled"] = True if q_enabled_flag else False
+        # case (only 'lower')
+        if "case" in raw_q_norm:
+            cs = str(raw_q_norm.get("case")).lower()
+            if cs != "lower":
+                _err(errors, "t2.quality.normalizer.case", "must be 'lower'")
+            qn["case"] = "lower"
+        else:
+            qn["case"] = "lower"
+        # unicode (only 'NFKC')
+        if "unicode" in raw_q_norm:
+            uc = str(raw_q_norm.get("unicode")).upper()
+            if uc != "NFKC":
+                _err(errors, "t2.quality.normalizer.unicode", "must be 'NFKC'")
+            qn["unicode"] = "NFKC"
+        else:
+            qn["unicode"] = "NFKC"
+        # Back-compat keys (accepted but not required)
+        if "stopwords" in raw_q_norm:
+            sw = raw_q_norm.get("stopwords")
+            if not isinstance(sw, str) or not sw:
+                _err(errors, "t2.quality.normalizer.stopwords", "must be a non-empty string")
+            qn["stopwords"] = sw
+        if "stemmer" in raw_q_norm:
+            st = str(raw_q_norm.get("stemmer"))
+            if st not in {"none", "porter-lite"}:
+                _err(errors, "t2.quality.normalizer.stemmer", "must be one of {none,porter-lite}")
+            qn["stemmer"] = st
+        if "min_token_len" in raw_q_norm:
+            mtl = _coerce_int(raw_q_norm.get("min_token_len"))
+            if mtl < 1:
+                _err(errors, "t2.quality.normalizer.min_token_len", "must be >= 1")
+            qn["min_token_len"] = mtl
+        # Always attach normalized normalizer (explicit defaults are helpful for downstream)
+        q["normalizer"] = qn
 
         # aliasing
         if raw_q_alias:
@@ -1357,6 +1381,29 @@ def validate_config_verbose(cfg: Dict[str, Any]) -> Tuple[Dict[str, Any], List[s
             pass
         q = _ensure_dict(_ensure_dict(normalized.get("t2")).get("quality"))
         if q:
+            # PR39: normalizer & aliasing warnings
+            qn = _ensure_dict(q.get("normalizer"))
+            if qn:
+                if _coerce_bool(qn.get("enabled", False)) and not _coerce_bool(q.get("enabled", False)):
+                    warnings.append("W[t2.quality.normalizer]: normalizer.enabled=true while t2.quality.enabled=false; no effect.")
+                case = str(qn.get("case", "lower"))
+                if case != "lower":
+                    warnings.append("W[t2.quality.normalizer.case]: only 'lower' is supported; using 'lower'.")
+                uni = str(qn.get("unicode", "NFKC"))
+                if uni != "NFKC":
+                    warnings.append("W[t2.quality.normalizer.unicode]: only 'NFKC' is supported; using 'NFKC'.")
+            qa = _ensure_dict(q.get("aliasing"))
+            if qa:
+                if not _coerce_bool(q.get("enabled", False)):
+                    warnings.append("W[t2.quality.aliasing]: configured while t2.quality.enabled=false; no effect.")
+                mp = qa.get("map_path")
+                if isinstance(mp, str) and mp:
+                    try:
+                        import os
+                        if not os.path.isfile(mp):
+                            warnings.append("W[t2.quality.aliasing.map_path]: file not found or unreadable; aliasing will be a no-op.")
+                    except Exception:
+                        pass
             # Shadow triple-gate reminder: traces only emit when perf.enabled && perf.metrics.report_memory && shadow==true && enabled==false
             try:
                 perf = _ensure_dict(normalized.get("perf"))

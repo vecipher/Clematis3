@@ -1,0 +1,39 @@
+
+
+# PR39 example — Normalizer + Aliasing (quality paths only)
+# Triple gate: metrics/traces emitted when perf.enabled && perf.metrics.report_memory && t2.quality.enabled
+
+perf:
+  enabled: true
+  metrics:
+    report_memory: true
+
+t2:
+  quality:
+    enabled: true          # opt-in quality path
+    shadow: false          # use enabled path (not shadow)
+    trace_dir: "logs/quality"
+    redact: true
+
+    # Lexical/BM25 knobs (PR37)
+    lexical:
+      stopwords: en-basic  # reuse the same stopword list for BM25/MMR tokenization
+    fusion:
+      mode: rank
+      alpha_semantic: 0.6
+
+    # Normalizer (PR39)
+    normalizer:
+      enabled: true        # default true when quality.enabled=true
+      case: lower          # fixed
+      unicode: NFKC        # fixed
+
+    # Aliasing map (PR39)
+    aliasing:
+      map_path: examples/quality/aliases.yaml  # YAML of {alias: canonical}; missing file → warning + no-op
+
+    # Optional: MMR (PR38) on top of fused ordering; shown here to highlight alias impact on diversity
+    mmr:
+      enabled: true
+      lambda: 0.5          # 0..1; higher = more diversity
+      k: 20                # head size; null/omit = full list
