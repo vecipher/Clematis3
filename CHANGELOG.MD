@@ -268,3 +268,16 @@ All notable changes to this project will be documented in this file.
 - **Identity preserved:** With `perf.enabled=false`, behavior/logs remain identical to PR29 goldens (guarded by the identity CI gate).
 - **Safety:** `mem_compact.py` writes to a new directory, never in‑place; deterministic ordering and headers.
 - **Optional dependency:** `zstandard` is only required when reading/writing `.zst` files; included in dev/test deps.
+
+### Added (PR40 — Lance partition reader parity; optional, default flat)
+- **Engine (T2):** `clematis/engine/stages/t2_lance_reader.py` — dependency-light, deterministic partition wrapper over a flat reader; preserves content and within-partition order; never raises during availability checks.
+- **Stage wiring:** `clematis/engine/stages/t2.py` — accepts `t2.reader.mode ∈ {flat, auto, partition}`; selects partition mode only when available; otherwise deterministically falls back to flat. Emits gated metric `t2.reader_mode` ("flat"|"partition"). No scoring/order changes.
+- **Configs (validator):** `configs/validate.py` — adds `t2.reader.mode` enum and warning when `mode ∈ {partition, auto}` is set while `perf.enabled=false` (no effect).
+- **Examples:** `tests/examples/quality/reader_parity.yaml` — minimal config to exercise mode selection and metrics.
+- **CI (smoke):** `.github/workflows/pr40_reader_parity_smoke.yml` — matrix over `{flat, auto, partition}`; runs parity smoke tests; uploads artifacts on failure.
+
+### Changed (PR40)
+- **Observability only:** Default remains `flat`; when `partition` is unavailable, code falls back to `flat` and reports it via `t2.reader_mode` under the triple gate. Disabled-path identity and trace behavior remain unchanged.
+
+### Tests (PR40)
+- `tests/integration/test_t2_reader_parity.py` — emits `t2.reader_mode=flat` under gate; `partition`/`auto` fall back to `flat` when unavailable; metric suppressed when `report_memory=false`.

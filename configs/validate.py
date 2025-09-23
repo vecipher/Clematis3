@@ -190,7 +190,7 @@ ALLOWED_TOP = {"t1", "t2", "t3", "t4", "graph", "k_surface", "surface_method", "
 ALLOWED_T1 = {"cache", "iter_cap", "queue_budget", "node_budget", "decay", "edge_type_mult", "radius_cap"}
 ALLOWED_T2 = {"backend", "k_retrieval", "sim_threshold", "cache", "ranking", "hybrid",
               "tiers", "exact_recent_days", "clusters_top_m", "owner_scope",
-              "residual_cap_per_turn", "lancedb", "archive", "quality", "embed_root", "reader_batch"}
+              "residual_cap_per_turn", "lancedb", "archive", "quality", "embed_root", "reader_batch", "reader"}
 ALLOWED_T3 = {"max_rag_loops", "max_ops_per_turn", "backend",
               "tokens", "temp", "allow_reflection", "dialogue", "policy", "llm"}
 ALLOWED_T4 = {
@@ -205,6 +205,9 @@ ALLOWED_T2_HYBRID = {
     "enabled", "use_graph", "anchor_top_m", "walk_hops", "edge_threshold",
     "lambda_graph", "damping", "degree_norm", "max_bonus", "k_max",
 }
+
+# PR40: allowed keys for t2.reader
+ALLOWED_T2_READER = {"mode"}
 
 ALLOWED_GRAPH = {"enabled", "coactivation_threshold", "observe_top_k", "pair_cap_per_obs", "update", "decay", "merge", "split", "promotion"}
 ALLOWED_GRAPH_UPDATE = {"mode", "alpha", "clamp_min", "clamp_max"}
@@ -299,6 +302,8 @@ def _validate_config_normalize_impl(cfg: Dict[str, Any]) -> Dict[str, Any]:
     raw_t2_cache = _ensure_dict(raw_t2.get("cache"))
     raw_t2_ranking = _ensure_dict(raw_t2.get("ranking"))
     raw_t2_hybrid = _ensure_dict(raw_t2.get("hybrid"))
+    # PR40: capture t2.reader
+    raw_t2_reader = _ensure_dict(raw_t2.get("reader"))
     raw_t4_cache = _ensure_dict(raw_t4.get("cache"))
     raw_graph = _ensure_dict(cfg_in.get("graph"))
     raw_graph_update = _ensure_dict(raw_graph.get("update"))
@@ -384,6 +389,13 @@ def _validate_config_normalize_impl(cfg: Dict[str, Any]) -> Dict[str, Any]:
             sug = _suggest_key(k, ALLOWED_T2_HYBRID)
             hint = f" (did you mean '{sug}')" if sug else ""
             _err(errors, f"t2.hybrid.{k}", f"unknown key{hint}")
+
+    # PR40: unknown key check for t2.reader
+    for k in raw_t2_reader.keys():
+        if k not in ALLOWED_T2_READER:
+            sug = _suggest_key(k, ALLOWED_T2_READER)
+            hint = f" (did you mean '{sug}')" if sug else ""
+            _err(errors, f"t2.reader.{k}", f"unknown key{hint}")
 
     for k in raw_t4_cache.keys():
         if k not in ALLOWED_CACHE_FIELDS:
@@ -630,6 +642,16 @@ def _validate_config_normalize_impl(cfg: Dict[str, Any]) -> Dict[str, Any]:
 
     # write back
     t2["hybrid"] = h2
+
+    # PR40: reader mode normalization
+    # reader mode (PR40): flat | partition | auto
+    r2_reader = _ensure_subdict(t2, "reader")
+    mode_raw = str(raw_t2_reader.get("mode", "flat")).lower() if raw_t2_reader else str(r2_reader.get("mode", "flat")).lower()
+    if mode_raw not in {"flat", "partition", "auto"}:
+        _err(errors, "t2.reader.mode", "must be one of {flat,partition,auto}")
+        mode_raw = "flat"
+    r2_reader["mode"] = mode_raw
+    t2["reader"] = r2_reader
 
     # Optional LanceDB partitions (config surface only; no runtime changes in M6)
     raw_lancedb_val = raw_t2.get("lancedb", None)
@@ -1377,6 +1399,16 @@ def validate_config_verbose(cfg: Dict[str, Any]) -> Tuple[Dict[str, Any], List[s
             parts = _ensure_dict(ldb.get("partitions"))
             if parts and not perf_on:
                 warnings.append("W[t2.lancedb.partitions]: configured while perf.enabled=false; ignored in disabled path.")
+        except Exception:
+            pass
+        # PR40: t2.reader.mode warnings
+        try:
+            t2n = _ensure_dict(normalized.get("t2"))
+            rmode = str(_ensure_dict(t2n.get("reader")).get("mode", "flat")).lower()
+            perf = _ensure_dict(normalized.get("perf"))
+            perf_on = _coerce_bool(perf.get("enabled", False))
+            if rmode in {"partition", "auto"} and not perf_on:
+                warnings.append("W[t2.reader.mode]: partition/auto configured while perf.enabled=false; reader parity path & metrics are disabled (flat behavior).")
         except Exception:
             pass
         q = _ensure_dict(_ensure_dict(normalized.get("t2")).get("quality"))

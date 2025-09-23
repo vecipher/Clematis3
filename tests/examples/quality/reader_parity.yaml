@@ -1,0 +1,22 @@
+# PR40 example — Reader parity (flat remains default)
+# Triple gate: metrics/traces emitted when perf.enabled && perf.metrics.report_memory
+
+perf:
+  enabled: true
+  metrics:
+    report_memory: true
+
+# Reader selection only affects how data is iterated, not scoring/order.
+# Set mode to one of: flat | auto | partition
+# - flat:      always use the legacy flat reader
+# - auto:      prefer partitioned reader when available; else flat
+# - partition: require partitioned reader; if unavailable we fall back to flat deterministically
+
+t2:
+  reader:
+    mode: flat  # change to 'auto' or 'partition' to experiment
+
+  # Storage/fixture root used by availability checks for the partitioned reader.
+  # If this path does not exist as a directory, the code falls back to 'flat'.
+  # For smoke testing unavailability, point to a clearly non-existent path.
+  # embed_root: /no/such/partition/root

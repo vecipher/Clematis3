@@ -13,6 +13,13 @@ from .hybrid import rerank_with_gel
 from .t2_quality_trace import emit_trace as emit_quality_trace
 from .t2_quality_mmr import MMRItem, avg_pairwise_distance
 
+# PR40: Safe import for optional Lance partitioned reader
+try:
+    from .t2_lance_reader import LancePartitionSpec, PartitionedReader  # PR40 optional
+except Exception:
+    LancePartitionSpec = None  # type: ignore
+    PartitionedReader = None  # type: ignore
+
 def _metrics_gate_on(cfg) -> bool:
     """True only when perf.enabled && perf.metrics.report_memory."""
     perf = (cfg.get("perf") or {}) if isinstance(cfg, dict) else (getattr(cfg, "perf", {}) or {})
@@ -265,6 +272,30 @@ def t2_semantic(ctx, state, text: str, t1) -> T2Result:
     precompute_norms_cfg = bool(_cfg_get(ctx, ["cfg", "perf", "t2", "precompute_norms"], False))
     partitions_cfg = _cfg_get(ctx, ["cfg", "perf", "t2", "reader", "partitions"], {}) or {}
     embed_root = str(getattr(cfg_t2, "embed_root", "./.data/t2"))
+    # PR40: determine requested reader mode (flat|partition|auto), default flat
+    reader_mode_req = str(_cfg_get(ctx, ["cfg", "t2", "reader", "mode"], "flat") or "flat").lower()
+    reader_mode_sel = "flat"
+    # Check availability of a partitioned fixture if requested/auto
+    _p_avail = False
+    if reader_mode_req in ("partition", "auto") and PartitionedReader is not None and LancePartitionSpec is not None:
+        try:
+            # Use embed_root as a conservative root; partition keys (if any) come from perf.t2.reader.partitions
+            by = None
+            if isinstance(partitions_cfg, dict):
+                _by = partitions_cfg.get("by") or partitions_cfg.get("partitions")
+                if isinstance(_by, (list, tuple)):
+                    by = tuple(str(x) for x in _by)
+            spec = LancePartitionSpec(root=str(embed_root), by=tuple(by or ()))
+            preader = PartitionedReader(spec)  # flat_iter not required for availability check
+            _p_avail = bool(preader.available())
+        except Exception:
+            _p_avail = False
+    if reader_mode_req == "partition":
+        reader_mode_sel = "partition" if _p_avail else "flat"
+    elif reader_mode_req == "auto":
+        reader_mode_sel = "partition" if _p_avail else "flat"
+    else:
+        reader_mode_sel = "flat"
     # Ensure a memory index exists in state, honoring backend selection with safe fallback
     index, backend_selected, backend_fallback_reason = _init_index_from_cfg(state, cfg_t2)
     # Query text = user text + labels changed by T1
@@ -659,6 +690,11 @@ def t2_semantic(ctx, state, text: str, t1) -> T2Result:
             if partitions_list:
                 reader_meta["partitions"] = list(partitions_list)
             metrics["reader"] = reader_meta
+        # PR40: emit selected reader mode for observability
+        try:
+            metrics["t2.reader_mode"] = str(reader_mode_sel)
+        except Exception:
+            pass
         if backend_fallback_reason:
             metrics["backend_fallback_reason"] = str(backend_fallback_reason)
         # PR37: emit quality fusion metrics only when enabled and fusion executed
