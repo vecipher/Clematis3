@@ -232,7 +232,7 @@ ALLOWED_T2_QUALITY_ALIASING = {"enabled", "map_path", "max_expansions_per_token"
 ALLOWED_T2_QUALITY_LEXICAL = {"enabled", "bm25"}
 ALLOWED_T2_QUALITY_BM25 = {"k1", "b", "doclen_floor"}
 ALLOWED_T2_QUALITY_FUSION = {"enabled", "alpha_semantic", "score_norm"}
-ALLOWED_T2_QUALITY_MMR = {"enabled", "lambda_relevance", "diversity_by_owner", "diversity_by_token", "k_final"}
+ALLOWED_T2_QUALITY_MMR = {"enabled", "lambda", "lambda_relevance", "diversity_by_owner", "diversity_by_token", "k", "k_final"}
 ALLOWED_T2_QUALITY_CACHE = {"salt"}
 
 def _lev(a: str, b: str) -> int:
@@ -1185,22 +1185,53 @@ def _validate_config_normalize_impl(cfg: Dict[str, Any]) -> Dict[str, Any]:
                 qf["score_norm"] = sn
             if qf: q["fusion"] = qf
 
-        # mmr
+        # mmr (PR38): accept canonical keys (lambda, k) and legacy aliases (lambda_relevance, k_final)
         if raw_q_mmr:
             qm: Dict[str, Any] = {}
+            # enabled
             if "enabled" in raw_q_mmr:
                 qm["enabled"] = _coerce_bool(raw_q_mmr.get("enabled"))
-            if "lambda_relevance" in raw_q_mmr:
-                qm["lambda_relevance"] = _coerce_float(raw_q_mmr.get("lambda_relevance"))
+            # lambda: prefer canonical 'lambda', fall back to 'lambda_relevance', default 0.5 when mmr present
+            lam_present = False
+            lam_val = 0.5
+            if "lambda" in raw_q_mmr:
+                lam_present = True
+                lam_val = _coerce_float(raw_q_mmr.get("lambda"))
+            elif "lambda_relevance" in raw_q_mmr:
+                lam_present = True
+                lam_val = _coerce_float(raw_q_mmr.get("lambda_relevance"))
+            # range check if provided explicitly
+            if lam_present and not (0.0 <= lam_val <= 1.0):
+                _err(errors, "t2.quality.mmr.lambda", "must be in [0,1]")
+            # write canonical + legacy mirror (for downstream readers/tests)
+            if lam_present or "enabled" in qm:
+                qm["lambda"] = lam_val
+                qm["lambda_relevance"] = lam_val
+            # diversity flags (accepted but not required in PR38)
             if "diversity_by_owner" in raw_q_mmr:
                 qm["diversity_by_owner"] = _coerce_bool(raw_q_mmr.get("diversity_by_owner"))
             if "diversity_by_token" in raw_q_mmr:
                 qm["diversity_by_token"] = _coerce_bool(raw_q_mmr.get("diversity_by_token"))
-            if "k_final" in raw_q_mmr:
-                kf = _coerce_int(raw_q_mmr.get("k_final"))
-                if kf < 1: _err(errors, "t2.quality.mmr.k_final", "must be >= 1")
-                qm["k_final"] = kf
-            if qm: q["mmr"] = qm
+            # k: prefer canonical 'k', fall back to 'k_final'
+            k_present = False
+            if "k" in raw_q_mmr:
+                k_present = True
+                kv = _coerce_int(raw_q_mmr.get("k"))
+                if kv < 1:
+                    _err(errors, "t2.quality.mmr.k", "must be >= 1")
+                else:
+                    qm["k"] = kv
+                    qm["k_final"] = kv
+            elif "k_final" in raw_q_mmr:
+                k_present = True
+                kv = _coerce_int(raw_q_mmr.get("k_final"))
+                if kv < 1:
+                    _err(errors, "t2.quality.mmr.k_final", "must be >= 1")
+                else:
+                    qm["k_final"] = kv
+                    qm["k"] = kv
+            if qm:
+                q["mmr"] = qm
 
         # cache
         if raw_q_cache:
@@ -1355,18 +1386,54 @@ def validate_config_verbose(cfg: Dict[str, Any]) -> Tuple[Dict[str, Any], List[s
                 if not (0.0 <= a <= 1.0):
                     warnings.append("W[t2.quality.fusion.alpha_semantic]: expected in [0,1].")
             qm = _ensure_subdict(q, "mmr")
-            if "lambda_relevance" in qm:
-                lam = _coerce_float(qm.get("lambda_relevance"))
-                if not (0.0 <= lam <= 1.0):
-                    warnings.append("W[t2.quality.mmr.lambda_relevance]: expected in [0,1].")
-            if "k_final" in qm:
-                kf = _coerce_int(qm.get("k_final"))
-                try:
-                    kret = _coerce_int(_ensure_dict(normalized.get("t2")).get("k_retrieval", 10))
-                    if kf > kret:
-                        warnings.append("W[t2.quality.mmr.k_final]: k_final exceeds t2.k_retrieval; results may truncate in M7 wiring.")
-                except Exception:
-                    pass
+            if qm:
+                # enabled-without-quality: no effect
+                if _coerce_bool(qm.get("enabled", False)) and not _coerce_bool(q.get("enabled", False)):
+                    warnings.append("W[t2.quality.mmr]: mmr.enabled=true while t2.quality.enabled=false; MMR has no effect.")
+                # lambda checks (canonical + legacy)
+                lam = None
+                if "lambda" in qm:
+                    lam = _coerce_float(qm.get("lambda"))
+                    if not (0.0 <= lam <= 1.0):
+                        warnings.append("W[t2.quality.mmr.lambda]: expected in [0,1].")
+                elif "lambda_relevance" in qm:
+                    lam = _coerce_float(qm.get("lambda_relevance"))
+                    if not (0.0 <= lam <= 1.0):
+                        warnings.append("W[t2.quality.mmr.lambda_relevance]: expected in [0,1].")
+                # k checks (canonical + legacy) and compare with t2.k_retrieval
+                k_val = None
+                if "k" in qm:
+                    k_val = _coerce_int(qm.get("k"))
+                    if k_val < 1:
+                        warnings.append("W[t2.quality.mmr.k]: expected >= 1.")
+                elif "k_final" in qm:
+                    k_val = _coerce_int(qm.get("k_final"))
+                    if k_val < 1:
+                        warnings.append("W[t2.quality.mmr.k_final]: expected >= 1.")
+                if k_val is not None:
+                    try:
+                        kret = _coerce_int(_ensure_dict(normalized.get("t2")).get("k_retrieval", 10))
+                        if k_val > kret:
+                            # Choose label based on raw cfg to preserve legacy expectation
+                            raw_t2 = _ensure_dict(cfg.get("t2")) if isinstance(cfg, dict) else {}
+                            raw_q = _ensure_dict(raw_t2.get("quality"))
+                            raw_mmr = _ensure_dict(raw_q.get("mmr"))
+                            if "k_final" in raw_mmr and "k" not in raw_mmr:
+                                k_label = "k_final"
+                            elif "k" in raw_mmr:
+                                k_label = "k"
+                            else:
+                                k_label = "k"
+                            warnings.append(
+                                f"W[t2.quality.mmr.{k_label}]: {k_label} exceeds t2.k_retrieval; results may truncate in M7 wiring."
+                            )
+                    except Exception:
+                        pass
+                # PR38 scope: owner-diversity is ignored; token-diversity is implicit
+                if _coerce_bool(qm.get("diversity_by_owner", False)):
+                    warnings.append("W[t2.quality.mmr.diversity_by_owner]: ignored in PR38; token-based diversity only.")
+                if "diversity_by_token" in qm:
+                    warnings.append("W[t2.quality.mmr.diversity_by_token]: flag is accepted but PR38 always uses token-based diversity.")
     except Exception:
         pass
     return normalized, warnings

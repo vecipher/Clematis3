@@ -23,9 +23,11 @@ Metrics surfaced via meta (picked up by t2.py under the triple gate):
 
 import math
 import unicodedata
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Tuple, FrozenSet
 
-__all__ = ["fuse"]
+from .t2_quality_mmr import MMRItem, mmr_reorder_full
+
+__all__ = ["fuse", "maybe_apply_mmr"]
 
 # Small, deterministic English stopword set for PR37 (can be extended later)
 _STOP_EN_BASIC = {"a", "an", "the", "of", "to", "in", "and", "or"}
@@ -195,3 +197,68 @@ def fuse(query: str, items: List[Dict[str, Any]], *, cfg: Dict[str, Any]) -> Tup
     "score_fused_map": score_fused_map,
   }
   return fused, meta
+
+
+# ---------- MMR (PR38) glue ----------
+
+def _tokenize_for_mmr(s: str, stopset) -> List[str]:
+  """Mirror PR37 normalization for MMR token sets."""
+  toks = _norm_text(s).split()
+  if stopset:
+    toks = [t for t in toks if t not in stopset]
+  return toks
+
+def _tokens_for_item_mmr(it: Dict[str, Any], stopset) -> FrozenSet[str]:
+  """Use provided tokens if present; otherwise tokenize the item's text."""
+  toks = it.get("tokens")
+  if toks:
+    # Normalize tokens defensively to match PR37 lower/NFKC
+    normed = []
+    for t in toks:
+      try:
+        tt = _norm_text(str(t))
+        if tt and (not stopset or tt not in stopset):
+          normed.append(tt)
+      except Exception:
+        continue
+    return frozenset(normed)
+  return frozenset(_tokenize_for_mmr(str(it.get("text", "")), stopset))
+
+def maybe_apply_mmr(fused: List[Dict[str, Any]], qcfg: Dict[str, Any]) -> List[Dict[str, Any]]:
+  """Apply deterministic MMR reordering over PR37 fused results if enabled.
+
+  Expectations for `fused` items:
+    - Each item contains `id` (str) and `score_fused` (float). If `score_fused`
+      is missing, we fall back to `score`.
+  `qcfg` is the `t2.quality` sub-config.
+  """
+  if not qcfg or not qcfg.get("enabled", False):
+    return fused
+  mmr_cfg = (qcfg.get("mmr") or {})
+  if not mmr_cfg.get("enabled", False):
+    return fused
+
+  lam = float(mmr_cfg.get("lambda", 0.5))
+  if lam < 0.0:
+    lam = 0.0
+  elif lam > 1.0:
+    lam = 1.0
+  k = mmr_cfg.get("k")
+  if isinstance(k, int) and k < 1:
+    k = None
+
+  # Reuse PR37 lexical stopword choice for token sets
+  lex_cfg = qcfg.get("lexical", {}) or {}
+  stopwords = lex_cfg.get("stopwords", "en-basic")
+  stopset = _STOP_EN_BASIC if stopwords == "en-basic" else None
+
+  items: List[MMRItem] = []
+  for c in fused:
+    cid = str(c.get("id"))
+    rel = float(c.get("score_fused", c.get("score", 0.0)))
+    toks = _tokens_for_item_mmr(c, stopset)
+    items.append(MMRItem(id=cid, rel=rel, toks=toks))
+
+  order = mmr_reorder_full(items, k=k, lam=lam)
+  # Reorder without mutating input list
+  return [fused[i] for i in order]

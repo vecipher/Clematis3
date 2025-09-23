@@ -43,6 +43,20 @@ All notable changes to this project will be documented in this file.
 - `tests/quality/test_t2_quality_fusion.py` — determinism of fused ordering, alpha extremes, and metrics presence only when enabled.
 - `tests/integration/test_t2_enabled_traces_integration.py` — verifies that enabled‑path traces are produced with `meta.reason="enabled"`.
 
+### Added (PR38 — MMR diversification; opt-in)
+- **Engine (T2):** `clematis/engine/stages/t2_quality_mmr.py` — deterministic MMR utilities: `MMRItem`, `jaccard_distance`, `mmr_select`, `mmr_reorder_full`, and `avg_pairwise_distance` (pure, no side effects).
+- **Stage wiring:** `clematis/engine/stages/t2_quality.py` — adds `maybe_apply_mmr(...)` glue that builds token sets (mirroring PR37) and reorders the fused list; ties break by `lex(id)`.
+- **Stage wiring:** `clematis/engine/stages/t2.py` — invokes MMR after PR37 fusion when `t2.quality.mmr.enabled=true`; emits gated metrics (`t2q.mmr.lambda`, `t2q.mmr.selected`, `t2q.diversity_avg_pairwise`).
+- **Configs (validator):** `configs/validate.py` accepts `t2.quality.mmr.{enabled,lambda,k}` with bounds; supports legacy aliases `lambda_relevance` and `k_final`; truncation warning uses the key provided (e.g., warns with `k_final` when that was set). Warns when `mmr.enabled=true` while `t2.quality.enabled=false` (no effect).
+- **Examples:** `examples/quality/mmr.yaml` — minimal runnable example.
+
+### Changed (PR38)
+- **Determinism & invariants:** No RNG or wall-clock; ties break by `lex(id)`. When `t2.quality.enabled=false` or `mmr.enabled=false`, results match PR37 fused order. With MMR on, final order is deterministic.
+- **Traces:** Enabled-path traces (PR37) now reflect the MMR-reordered list when MMR is engaged; shadow behavior unchanged. Triple gate unchanged.
+
+### Tests (PR38)
+- `tests/scripts/test_t2_quality_mmr.py` — selection extremes, tie-breaks, permutation properties, lambda validation.
+- `tests/integration/test_t2_mmr_enabled_traces.py` — MMR reorders when enabled; no-op when disabled; text-only tokenization path; asserts gated metrics `t2q.mmr.lambda`, `t2q.mmr.selected`, and `t2q.diversity_avg_pairwise`.
 
 ## [0.6.0] - 2025-09-22
 ### Added

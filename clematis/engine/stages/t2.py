@@ -11,6 +11,7 @@ import datetime as dt
 from types import SimpleNamespace as NS
 from .hybrid import rerank_with_gel
 from .t2_quality_trace import emit_trace as emit_quality_trace
+from .t2_quality_mmr import MMRItem, avg_pairwise_distance
 
 def _metrics_gate_on(cfg) -> bool:
     """True only when perf.enabled && perf.metrics.report_memory."""
@@ -433,7 +434,6 @@ def t2_semantic(ctx, state, text: str, t1) -> T2Result:
         ep_by_id = dict(raw_hits_by_id)
 
     # Reference 'now' from ctx if available
-    now_str = getattr(ctx, "now", None)
     now_utc = _parse_iso(now_str) if now_str else dt.datetime.now(dt.timezone.utc)
 
     HORIZON_DAYS = 365.0  # normalization horizon for recency
@@ -491,6 +491,8 @@ def t2_semantic(ctx, state, text: str, t1) -> T2Result:
     # PR37 fusion bookkeeping
     q_fusion_used = False
     q_fusion_meta = {}
+    # PR38 fusion bookkeeping
+    q_mmr_used = False
 
     # --- PR37: Optional lexical BM25 + fusion (alpha), behind t2.quality.enabled ---
     try:
@@ -529,6 +531,28 @@ def t2_semantic(ctx, state, text: str, t1) -> T2Result:
                 if new_order:
                     retrieved = new_order
                     q_fusion_used = True
+                # --- PR38: Optional MMR diversification over fused list ---
+                try:
+                    from .t2_quality import maybe_apply_mmr as quality_mmr  # type: ignore
+                except Exception:
+                    quality_mmr = None
+                try:
+                    mmr_enabled = bool(_cfg_get(cfg, ["t2", "quality", "mmr", "enabled"], False))
+                except Exception:
+                    mmr_enabled = False
+                if quality_mmr is not None and mmr_enabled:
+                    qcfg = _cfg_get(cfg, ["t2", "quality"], {}) or {}
+                    mmr_items = quality_mmr(fused_items, qcfg)
+                    # Reorder EpisodeRefs according to MMR output
+                    id_to_ref = {r.id: r for r in retrieved}
+                    mmr_order = []
+                    for it in (mmr_items or []):
+                        iid = it.get("id")
+                        if iid in id_to_ref:
+                            mmr_order.append(id_to_ref[iid])
+                    if mmr_order:
+                        retrieved = mmr_order
+                        q_mmr_used = True
     except Exception:
         # Fusion must never break retrieval; if anything goes wrong, keep baseline ordering
         q_fusion_used = False
@@ -676,6 +700,24 @@ def t2_semantic(ctx, state, text: str, t1) -> T2Result:
             except Exception:
                 # Never fail the request due to tracing issues
                 pass
+        # PR38: emit MMR metrics only when quality+MMR are enabled and MMR ran
+        if bool(_cfg_get(cfg, ["t2", "quality", "enabled"], False)) and q_mmr_used:
+            try:
+                lam = float(_cfg_get(cfg, ["t2", "quality", "mmr", "lambda"], 0.5))
+                metrics["t2q.mmr.lambda"] = lam
+                k_val = _cfg_get(cfg, ["t2", "quality", "mmr", "k"], None)
+                head_n = int(k_val) if isinstance(k_val, int) and k_val > 0 else len(retrieved)
+                metrics["t2q.mmr.selected"] = int(head_n)
+                import unicodedata, re
+                head_refs = retrieved[:head_n]
+                mmr_items_head = []
+                for r in head_refs:
+                    s = unicodedata.normalize("NFKC", getattr(r, "text", "") or "").lower()
+                    toks = [t for t in re.split(r"[^0-9a-zA-Z]+", s) if t]
+                    mmr_items_head.append(MMRItem(id=str(getattr(r, "id", "")), rel=0.0, toks=frozenset(toks)))
+                metrics["t2q.diversity_avg_pairwise"] = float(avg_pairwise_distance(mmr_items_head))
+            except Exception:
+                pass
         # PR33: gated perf counters (namespaced)
         metrics["t2.embed_dtype"] = "fp32"
         metrics["t2.embed_store_dtype"] = pr33_store_dtype
@@ -703,11 +745,9 @@ def t2_semantic(ctx, state, text: str, t1) -> T2Result:
 
     # --- PR36: Shadow tracing (no-op) — triple-gated; does not mutate rankings or metrics ---
     try:
-        perf_enabled = bool(_cfg_get(cfg, ["perf", "enabled"], False))
-        report_memory = bool(_cfg_get(cfg, ["perf", "metrics", "report_memory"], False))
         q_enabled = bool(_cfg_get(cfg, ["t2", "quality", "enabled"], False))
         q_shadow = bool(_cfg_get(cfg, ["t2", "quality", "shadow"], False))
-        if perf_enabled and report_memory and q_shadow and not q_enabled:
+        if perf_enabled and metrics_enabled and q_shadow and not q_enabled:
             cfg_snap = _quality_cfg_snapshot(cfg)
             # serialize only id+score for trace; keep ordering identical to returned list
             trace_items = [{"id": h.id, "score": float(getattr(h, "score", 0.0))} for h in retrieved]
