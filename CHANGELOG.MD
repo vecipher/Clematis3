@@ -281,3 +281,15 @@ All notable changes to this project will be documented in this file.
 
 ### Tests (PR40)
 - `tests/integration/test_t2_reader_parity.py` — emits `t2.reader_mode=flat` under gate; `partition`/`auto` fall back to `flat` when unavailable; metric suppressed when `report_memory=false`.
+
+### Added (PR41 — Retrieval Quality evaluation harness; offline, deterministic)
+- **CLI:** `scripts/rq_eval.py` — A/B evaluator that computes `recall@k`, `MRR@k`, and `nDCG@k` with stable JSON (and optional CSV). Fully local (no network), no RNG/wall-clock. Optional `--emit-traces` respects the existing triple gate; trace `meta.reason` may remain `"enabled"` depending on runtime.
+- **Fixtures:** `tests/fixtures/rq/{corpus.jsonl,queries.tsv,qrels.tsv}` — tiny toy set for stable tests.
+- **CI (smoke):** `.github/workflows/pr41_rq_eval_smoke.yml` — runs metric unit + CLI E2E smoke on relevant changes; uploads artifacts on failure.
+
+### Changed (PR41)
+- **Observability:** The evaluator records digests of inputs (`corpus/queries/qrels`) and configuration for reproducibility. No runtime behavior changes.
+
+### Tests (PR41)
+- `tests/scripts/test_rq_eval_cli.py` — unit tests for metric functions and CLI schema/CSV; skips gracefully if runtime entrypoint is unavailable.
+- `tests/integration/test_rq_eval_end_to_end.py` — subprocess smoke; verifies outputs; trace presence is optional and sanity-checked only when present.
