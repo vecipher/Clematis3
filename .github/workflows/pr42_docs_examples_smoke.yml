@@ -1,0 +1,53 @@
+
+
+name: PR42 Docs & Examples Smoke
+
+on:
+  pull_request:
+    paths:
+      - 'docs/m7/**'
+      - 'examples/quality/**'
+      - 'scripts/examples_smoke.py'
+      - '.github/workflows/pr42_docs_examples_smoke.yml'
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    env:
+      CLEMATIS_GIT_SHA: ${{ github.sha }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install deps
+        run: |
+          python -m pip install -U pip wheel
+          if [ -f requirements.txt ]; then
+            python -m pip install -r requirements.txt
+          else
+            python -m pip install pytest pyyaml
+          fi
+          if [ -f pyproject.toml ] || [ -f setup.py ]; then
+            python -m pip install -e .
+          fi
+
+      - name: Run examples smoke
+        run: |
+          python scripts/examples_smoke.py --all --no-check-traces
+
+      - name: Upload artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr42-docs-examples-smoke
+          path: |
+            logs/quality/**
+            .pytest_cache
+          if-no-files-found: ignore

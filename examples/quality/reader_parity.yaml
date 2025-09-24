@@ -1,0 +1,29 @@
+
+
+# PR40 example — Reader parity (flat remains default)
+# Triple gate for metrics/traces must be ON to see t2.reader_mode in metrics:
+#   perf.enabled && perf.metrics.report_memory && (t2.quality.shadow || t2.quality.enabled)
+
+perf:
+  enabled: true
+  metrics:
+    report_memory: true
+
+# Reader selection only affects how data is iterated, not scoring/order.
+# Set mode to one of: flat | auto | partition
+# - flat:      always use the legacy flat reader
+# - auto:      prefer partitioned reader when available; else flat
+# - partition: require partitioned reader; if unavailable, fall back to flat deterministically
+
+t2:
+  # Use shadow to satisfy the triple gate without changing results.
+  quality:
+    shadow: true
+
+  reader:
+    mode: flat  # change to 'auto' or 'partition' to experiment
+
+  # Storage/fixture root used by availability checks for the partitioned reader.
+  # If this path does not exist as a directory, the code falls back to 'flat'.
+  # To simulate unavailability in a smoke run, point to a clearly non-existent path.
+  # embed_root: /no/such/partition/root

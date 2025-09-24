@@ -73,6 +73,23 @@ All notable changes to this project will be documented in this file.
 - `tests/quality/test_t2_quality_normalizer_aliases.py` — normalization (NFKC/lower/whitespace), tokenization (stops/minlen/stemmer), aliasing rewrite/expansion, alias map I/O; idempotency.
 - `tests/integration/test_t2_quality_normalizer_aliases_integration.py` — alias map deterministically changes the MMR head (λ=1.0, k=2); repeatability.
 
+### Added (PR42 — Docs & Examples Round-Up)
+- **Docs:**
+  - `docs/m7/overview.md` — milestone invariants, feature summaries (PR36–PR41), enablement path.
+  - `docs/m7/troubleshooting.md` — triple-gate checklist; symptom→cause→fix for shadow/fusion/MMR/aliases/reader parity; rollback.
+  - `docs/m7/rq_eval.md` — CLI quickstart; input formats; metric definitions; JSON/CSV schema; determinism notes.
+- **Examples:**
+  - `examples/quality/normalizer_aliases.yaml` — enabled path with PR39 normalizer & PR38 MMR; `aliasing.map_path` wired.
+  - `examples/quality/aliases.yaml` — example alias map used by the above.
+  - `examples/quality/reader_parity.yaml` — PR40 parity example; uses shadow to satisfy triple gate without result changes.
+- **Tooling:** `scripts/examples_smoke.py` — validates example YAMLs, runs short queries via `run_t2`, checks determinism, asserts gated metrics (`t2.reader_mode`, and `t2q.mmr.*` when MMR enabled). Caches disabled per run to avoid cross-config pollution.
+
+### CI (PR42)
+- `.github/workflows/pr42_docs_examples_smoke.yml` — runs `examples_smoke.py` on changes to docs/examples; uploads logs on failure.
+
+### Notes (PR42)
+- Comparator ignore pattern narrowing (from any `rq_traces.jsonl` to `**/logs/quality/rq_traces.jsonl`) remains an optional improvement and is **not** applied in this PR.
+
 ## [0.6.0] - 2025-09-22
 ### Added
 - **CI:** `disabled-path-identity` workflow at `.github/workflows/disabled_identity.yml`:

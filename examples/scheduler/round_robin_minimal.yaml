@@ -4,8 +4,8 @@ scheduler:
   policy: round_robin
   quantum_ms: 20
   budgets:
-    t1_iters: 1
-    t1_pops: 0
+    t1_iters: 1 # - whole levels of pops
+    t1_pops: 0 # - setting to change total node props
     t2_k: 1
     t3_ops: 1
     wall_ms: 200

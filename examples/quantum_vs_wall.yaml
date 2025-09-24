@@ -12,3 +12,5 @@ scheduler:
   fairness:
     max_consecutive_turns: 1
     aging_ms: 200
+
+# similar to quantum tunelling -=- gets out of metastable positions

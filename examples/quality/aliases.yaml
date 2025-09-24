@@ -1,0 +1,6 @@
+# PR39 example alias map — exact token -> canonical form
+cuda: nvidia_cuda
+pytorch: torch
+llm: large language model
+gpu: graphics_processing_unit
+rag: retrieval_augmented_generation

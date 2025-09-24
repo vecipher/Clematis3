@@ -232,9 +232,11 @@ ALLOWED_PERF_METRICS = {"report_memory"}
 ALLOWED_T2_QUALITY = {"enabled", "shadow", "trace_dir", "redact", "normalizer", "aliasing", "lexical", "fusion", "mmr", "cache"}
 ALLOWED_T2_QUALITY_NORMALIZER = {"enabled", "case", "unicode", "stopwords", "stemmer", "min_token_len"}
 ALLOWED_T2_QUALITY_ALIASING = {"enabled", "map_path", "max_expansions_per_token"}
-ALLOWED_T2_QUALITY_LEXICAL = {"enabled", "bm25"}
+# Accept both canonical nested BM25 keys and flat convenience keys used in PR37 examples
+ALLOWED_T2_QUALITY_LEXICAL = {"enabled", "bm25", "bm25_k1", "bm25_b", "stopwords"}
 ALLOWED_T2_QUALITY_BM25 = {"k1", "b", "doclen_floor"}
-ALLOWED_T2_QUALITY_FUSION = {"enabled", "alpha_semantic", "score_norm"}
+# Fusion supports an explicit 'mode' (PR37: only 'score_interp' allowed)
+ALLOWED_T2_QUALITY_FUSION = {"enabled", "mode", "alpha_semantic", "score_norm"}
 ALLOWED_T2_QUALITY_MMR = {"enabled", "lambda", "lambda_relevance", "diversity_by_owner", "diversity_by_token", "k", "k_final"}
 ALLOWED_T2_QUALITY_CACHE = {"salt"}
 

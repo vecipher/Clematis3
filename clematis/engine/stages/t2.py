@@ -530,6 +530,7 @@ def t2_semantic(ctx, state, text: str, t1) -> T2Result:
     q_fusion_meta = {}
     # PR38 fusion bookkeeping
     q_mmr_used = False
+    q_mmr_selected_n = 0
 
     # --- PR37: Optional lexical BM25 + fusion (alpha), behind t2.quality.enabled ---
     try:
@@ -580,20 +581,47 @@ def t2_semantic(ctx, state, text: str, t1) -> T2Result:
                 if quality_mmr is not None and mmr_enabled:
                     qcfg = _cfg_get(cfg, ["t2", "quality"], {}) or {}
                     mmr_items = quality_mmr(fused_items, qcfg)
-                    # Reorder EpisodeRefs according to MMR output
+                    # Mark that MMR executed, even if it yields an empty/no-op selection
+                    q_mmr_used = True
+                    # Reorder EpisodeRefs according to MMR output (when any ids are returned)
                     id_to_ref = {r.id: r for r in retrieved}
                     mmr_order = []
                     for it in (mmr_items or []):
                         iid = it.get("id")
                         if iid in id_to_ref:
                             mmr_order.append(id_to_ref[iid])
+                    q_mmr_selected_n = len(mmr_order)
                     if mmr_order:
                         retrieved = mmr_order
-                        q_mmr_used = True
     except Exception:
         # Fusion must never break retrieval; if anything goes wrong, keep baseline ordering
         q_fusion_used = False
         q_fusion_meta = {}
+
+    # PR38 fallback: if fusion step failed/was skipped, still attempt MMR over current ordering
+    if not q_mmr_used:
+        try:
+            try:
+                from .t2_quality import maybe_apply_mmr as _quality_mmr_fallback  # type: ignore
+            except Exception:
+                _quality_mmr_fallback = None
+            _mmr_enabled_fb = bool(_cfg_get(cfg, ["t2", "quality", "mmr", "enabled"], False))
+            if _quality_mmr_fallback is not None and _mmr_enabled_fb:
+                _items_fb = _items_for_fusion(retrieved)
+                _qcfg_fb = _cfg_get(cfg, ["t2", "quality"], {}) or {}
+                _mmr_items_fb = _quality_mmr_fallback(_items_fb, _qcfg_fb)
+                q_mmr_used = True
+                id_to_ref_fb = {r.id: r for r in retrieved}
+                _mmr_order_fb = []
+                for it in (_mmr_items_fb or []):
+                    _iid = it.get("id")
+                    if _iid in id_to_ref_fb:
+                        _mmr_order_fb.append(id_to_ref_fb[_iid])
+                q_mmr_selected_n = len(_mmr_order_fb)
+                if _mmr_order_fb:
+                    retrieved = _mmr_order_fb
+        except Exception:
+            pass
 
     # --- M5 scheduler slice caps (use-only clamp) ---
     # We cap how many retrieval hits are **used** downstream in this slice (not how many are fetched).
@@ -747,11 +775,10 @@ def t2_semantic(ctx, state, text: str, t1) -> T2Result:
             try:
                 lam = float(_cfg_get(cfg, ["t2", "quality", "mmr", "lambda"], 0.5))
                 metrics["t2q.mmr.lambda"] = lam
-                k_val = _cfg_get(cfg, ["t2", "quality", "mmr", "k"], None)
-                head_n = int(k_val) if isinstance(k_val, int) and k_val > 0 else len(retrieved)
-                metrics["t2q.mmr.selected"] = int(head_n)
+                selected_n = int(q_mmr_selected_n or 0)
+                metrics["t2q.mmr.selected"] = selected_n
                 import unicodedata, re
-                head_refs = retrieved[:head_n]
+                head_refs = retrieved[:selected_n] if selected_n > 0 else []
                 mmr_items_head = []
                 for r in head_refs:
                     s = unicodedata.normalize("NFKC", getattr(r, "text", "") or "").lower()

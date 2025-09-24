@@ -1,11 +1,46 @@
+# PR36 example — Shadow tracing (no-op)
+# Triple gate for metrics/traces must be ON to see quality traces:
+#   perf.enabled && perf.metrics.report_memory && (t2.quality.shadow || t2.quality.enabled)
+
 perf:
   enabled: true
   metrics:
     report_memory: true
 
+# Shadow mode: no ranking/metric changes; traces only under the gate.
+# Keep enabled=false to preserve disabled-path identity.
+
 t2:
   quality:
-    enabled: false   # PR36 forbids true
-    shadow: true     # emit traces only
-    trace_dir: "logs/quality"
-    redact: true     # redact human-readable text in traces
+    enabled: false
+    shadow: true
+    trace_dir: logs/quality
+    redact: true
+
+  # Reader knobs are orthogonal and safe to tweak even in shadow (PR40)
+  reader:
+    mode: flat  # change to 'auto' or 'partition' to experiment (observability only)
+
+# ────────────────────────────────────────────────────────────────────────────
+# Guidance for PR37/PR39 knobs (commented out to keep validator happy in shadow)
+# When you flip `t2.quality.enabled` to true, uncomment and adjust below.
+#
+# t2:
+#   quality:
+#     lexical:
+#       bm25:
+#         k1: 1.2
+#         b: 0.75
+#       stopwords: en-basic
+#     fusion:
+#       mode: rank           # or 'score_interp' if supported in your build
+#       alpha_semantic: 0.6
+#     normalizer:
+#       enabled: true
+#       case: lower
+#       unicode: NFKC
+#
+#     mmr:
+#       enabled: true
+#       lambda: 0.5
+#       k: 20
