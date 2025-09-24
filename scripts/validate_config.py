@@ -1,5 +1,3 @@
-
-
 #!/usr/bin/env python3
 """
 Validate a Clematis3 config file.
@@ -92,6 +90,8 @@ def main(argv: list[str]) -> int:
                     help="Path to config file (YAML preferred). Use '-' for STDIN.")
     ap.add_argument("--strict", action="store_true",
                     help="Treat warnings as errors (non-zero exit if warnings present).")
+    ap.add_argument("--json", action="store_true",
+                    help="Print normalized config and warnings as JSON (suppresses summary lines).")
     args = ap.parse_args(argv[1:])
 
     path = args.path
@@ -123,6 +123,10 @@ def main(argv: list[str]) -> int:
             print(w)
         return 1
 
+    if args.json:
+        print(json.dumps({"normalized": normalized, "warnings": sorted(warnings)}, ensure_ascii=False))
+        return 0
+
     # Success summary (non-verbose)
     t4 = normalized.get("t4", {})
     cache = t4.get("cache", {})
@@ -147,7 +151,7 @@ def main(argv: list[str]) -> int:
             comp=perf_snap.get("compression"),
         )
     )
-    print("t2.quality: enabled={qe}  # prep-only in M6".format(qe=q_cfg.get("enabled")))
+    print("t2.quality: enabled={qe}  # M7 shadow/traces gated".format(qe=q_cfg.get("enabled")))
     # Print warnings (if any) without failing the run
     for w in sorted(warnings):
         print(w)

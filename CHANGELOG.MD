@@ -2,7 +2,28 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
-## [0.7.0-M7] - 2025-09-29 (planned)
+## [0.7.0-M7] - 2025-09-24
+
+### M7 roll-up summary
+
+#### Added
+- `t2_pipeline(cfg, query, emit_metric=None, ctx=None)` shim for integration tests.
+- Quality trace writer: deterministic JSONL; honors `perf.metrics.trace_dir`; persists `meta.reason` (from `ctx.trace_reason` or `perf.metrics.trace_reason`).
+
+#### Changed
+- Comparator ignore narrowed to `**/logs/quality/rq_traces.jsonl`.
+- MMR metrics now always emitted under the quality gate: `t2q.mmr.selected`, `t2q.mmr.lambda`, `t2q.diversity_avg_pairwise`.
+- T2 cache key now includes a quality-config digest when `t2.quality.enabled=true`.
+- Reader parity: one-time availability warning; `t2.reader_mode` always recorded under the triple gate.
+- Examples smoke: added `--examples-glob` and `--fail-fast`; trace check precedence matches writer.
+- `scripts/validate_config.py`: added `--json` output flag.
+
+#### Deprecated
+- `t2.quality.mmr.k_final` (accepted with warning; normalized to `k`).
+
+#### Fixed
+- Trace reason passthrough in both enabled and shadow traces (fallback to `perf.metrics.trace_reason`).
+
 
 ### Added (PR36 — Quality scaffold & shadow mode; defaults OFF)
 - **Engine (T2):** `clematis/engine/stages/t2_quality_trace.py` — shadow tracing emitter that writes `rq_traces.jsonl` **without** mutating rankings or metrics. Deterministic headers: `trace_schema_version=1`, `git_sha` (from `CLEMATIS_GIT_SHA` or `"unknown"`), **semantic-only** `config_digest` (excludes `trace_dir`), `query_id` (Unicode NFKC + collapsed whitespace, lowercased), `clock=0`, `seed=0`.

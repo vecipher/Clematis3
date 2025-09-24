@@ -13,11 +13,15 @@ on:
 jobs:
   smoke:
     runs-on: ubuntu-latest
-    env:
-      CLEMATIS_GIT_SHA: ${{ github.sha }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Export GIT SHA
+        run: |
+          echo "CLEMATIS_GIT_SHA=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -40,8 +44,8 @@ jobs:
       - name: Run PR41 smoke tests
         run: |
           pytest -q tests/scripts/test_rq_eval_cli.py::test_metric_functions_on_toy_set
-          pytest -q tests/scripts/test_rq_eval_cli.py::test_cli_produces_json_and_csv -q
-          pytest -q tests/integration/test_rq_eval_end_to_end.py -q
+          pytest -q tests/scripts/test_rq_eval_cli.py::test_cli_produces_json_and_csv
+          pytest -q tests/integration/test_rq_eval_end_to_end.py
 
       - name: Upload artifacts on failure
         if: failure()
@@ -49,7 +53,7 @@ jobs:
         with:
           name: pr41-rq-eval-smoke
           path: |
-            .pytest_cache
-            out/**
             logs/quality/**
+            .pytest_cache/**
+            out/**
           if-no-files-found: ignore

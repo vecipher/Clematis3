@@ -14,6 +14,12 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Export GIT SHA
+        run: |
+          echo "CLEMATIS_GIT_SHA=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -32,3 +38,13 @@ jobs:
         run: |
           . .venv/bin/activate
           pytest -q --maxfail=1
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr37-smoke-logs
+          path: |
+            logs/quality/**
+            .pytest_cache/**
+          if-no-files-found: ignore

@@ -1,4 +1,15 @@
-# Clematis v3 — Scaffold (M1 + M2)
+
+# Clematis v3 — Scaffold (M1–M7)
+
+> M7 wrap: This repo now spans M1–M7. To avoid README bloat, detailed notes live in:
+> - docs/m7/ (validator shapes, quality tracing, MMR λ semantics)
+> - docs/updates/ (progressive PR notes; see template in docs/updates/_template.md)
+>
+> For a pre-M8 hardening overview, see Changelog/PreM8Hardening.txt.
+
+### Updates stream (rolling)
+
+See docs/updates/ for progressive notes per PR (lightweight, append-only).
 
 Minimal scaffold matching the Clematis v2 steering capsule. Stages are pure; the orchestrator handles I/O and logging.  
 The demo exercises the canonical turn loop and writes structured JSONL logs for first‑class observability.
@@ -22,6 +33,15 @@ pytest -q
 python3 scripts/rq_trace_dump.py --trace_dir logs/quality --limit 5
 ```
 
+**Examples smoke (M7):**
+```bash
+# Run all example configs; stop on first failure
+python3 scripts/examples_smoke.py --all --fail-fast
+
+# Or select a subset via globs
+python3 scripts/examples_smoke.py --examples-glob "examples/quality/*.yaml"
+```
+
 ## Validate your config (PR16)
 
 Use the built-in validator to sanity-check `configs/config.yaml` (or any YAML/JSON) before running:
@@ -36,11 +56,15 @@ python3 scripts/validate_config.py path/to/your.yaml
 # From STDIN
 cat path/to/your.yaml | python3 scripts/validate_config.py -
 ```
+```bash
+# Machine-readable
+python3 scripts/validate_config.py --json | jq .
+```
 
 **Expected success output**:
 ```text
 OK
-t4.cache: ttl_sec=600 namespaces=['t2:semantic'] cache_bust_mode=on-apply
+t4.cache: ttl_sec=600 namespaces=[] cache_bust_mode=on-apply
 ```
 
 **On error** you get explicit field paths, e.g.:
@@ -441,6 +465,7 @@ t4:
   cache_bust_mode: on-apply   # or "none"
   cache:
     enabled: true
+    # M4 centralized example; M7 default leaves namespaces empty and uses stage-local t2.cache
     namespaces:
       - "t2:semantic"
     max_entries: 512
@@ -453,6 +478,9 @@ t4:
 - **Orchestrator‑level** CacheManager around T2 (version‑aware, invalidated on Apply; `ttl_sec`).
 This is intentional for M4; consolidation is a later follow‑up.
 Use the validator to check TTLs and sizes across both layers quickly.
+
+> **M7 default:** stage-owned T2 cache; \
+> set `t4.cache.namespaces: []`. To centralize invalidation instead, disable `t2.cache` and set `t4.cache.namespaces: ["t2:semantic"]`.
 
 #### Cache coherency: end-to-end walkthrough
 
@@ -1592,6 +1620,9 @@ t2:
     fusion:
       mode: score_interp
       alpha_semantic: 0.6   # 0..1; higher = more semantic
+```
+
+> Note: In MMR, λ is the **diversity** weight (λ=0.0 → pure relevance; λ=1.0 → pure diversity). Ties break lex(id). Metrics: t2q.mmr.selected, t2q.mmr.lambda, t2q.diversity_avg_pairwise.
 
 ## Changelog & Releases
 - See the [CHANGELOG](./CHANGELOG.md) for notable changes.

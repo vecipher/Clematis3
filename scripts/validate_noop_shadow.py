@@ -2,14 +2,15 @@
 import sys, os
 from pathlib import Path
 
-IGNORE = {"rq_traces.jsonl"}
+# Narrowed ignore: only the canonical quality trace path, not any rq_traces.jsonl anywhere
+IGNORE_SUFFIXES = ("logs/quality/rq_traces.jsonl",)
 
 def list_files(root: Path):
     out = []
     for p in root.rglob("*"):
         if p.is_file():
             rel = p.relative_to(root).as_posix()
-            if rel.split("/")[-1] in IGNORE:
+            if rel.endswith(IGNORE_SUFFIXES):
                 continue
             out.append(rel)
     return sorted(out)

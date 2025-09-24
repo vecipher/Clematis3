@@ -1,0 +1,118 @@
+
+
+Pre‑M8 Hardening Plan — M1→M7 wrap
+=================================
+Owner: <fill>
+Date: 2025‑09‑24 (SGT)
+
+Purpose
+-------
+Finish M1→M7 by freezing behavior, pointing README to docs, and standing up a lightweight
+`docs/updates/` stream for progressive PR notes (so we stop overloading README).
+
+Summary of state (as of M7)
+---------------------------
+✅ t2_pipeline shim exported (metrics passthrough; stable signature)
+✅ Quality traces: deterministic JSONL; honors perf.metrics.trace_dir→t2.quality.trace_dir→logs/quality
+✅ `meta.reason` passthrough: ctx.trace_reason → fallback perf.metrics.trace_reason
+✅ MMR metrics always emitted under quality gate (keys exist even if selected=0)
+✅ Cache key hygiene: quality digest appended when quality.enabled=true
+✅ Reader parity: single availability warning; `t2.reader_mode` always emitted
+✅ Tests: determinism guard, enabled‑trace metrics, trace write path, MMR edges, normalizer alias idempotency
+✅ Examples smoke: `--examples-glob`, `--fail-fast`, trace check precedence
+✅ Config: `t4.cache.namespaces=[]` (avoid overlap with stage `t2.cache`)
+✅ CI: tests.yml + PR37/40/41/42 + Gate D export `CLEMATIS_GIT_SHA`, upload logs on failure, run on Python 3.12
+✅ Comparator: ignore narrowed to `**/logs/quality/rq_traces.jsonl`
+
+Release checklist (M7)
+----------------------
+[ ] CHANGELOG.md: add `[0.7.0-M7] — 2025-09-24` (SGT) with Added/Changed/Deprecated/Fixed (see below)
+[ ] README.md: add small "M7 Notes" pointer to `docs/m7/*` (no heavy details in README)
+[ ] Docs: ensure `docs/m7/validator.md`, `docs/m7/tracing.md`, `docs/m7/mmr.md` exist & match behavior
+[ ] Gate D job green; smoke jobs green on PR37/40/41/42; main tests green
+[ ] Tag + push: `git tag -a v0.7.0-M7 -m "Clematis 0.7.0-M7" && git push origin v0.7.0-M7`
+
+Proposed `docs/updates/` structure (progressive PR notes)
+---------------------------------------------------------
+Goal: short, append‑only updates per PR or per theme, linked from CHANGELOG entries.
+
+- docs/updates/_template.md — canonical skeleton for future notes
+- docs/updates/2025-09-24-m7-wrap.md — this release’s wrap (links to PR37/40/41/42)
+- docs/updates/2025-09-24-pr37-fusion-traces.md — enabled‑path trace details
+- docs/updates/2025-09-24-pr40-reader-parity.md — partitioned reader behavior & fallback
+- docs/updates/2025-09-24-pr41-rq-eval.md — rq‑eval CLI expectations & outputs
+- docs/updates/2025-09-24-pr42-examples-and-ci.md — examples smoke flags + CI norms
+
+Pasteable template (`docs/updates/_template.md`)
+------------------------------------------------
+# <Title succinctly>
+Date: <YYYY‑MM‑DD>
+PR(s): <#id,…>
+
+## Why
+Short rationale (1–3 lines) for the change.
+
+## What changed (user‑visible)
+- Bullets; prefer exact key paths & defaults
+
+## Developer notes (operational)
+- Guards/gates
+- Env vars (e.g., CLEMATIS_GIT_SHA)
+- Files touched (exact paths)
+
+## Tests
+- Unit/integration bullets (file names)
+
+## Rollback/compat
+- Any deprecations and how we warn/normalize
+
+M7 docs content (suggested bullets)
+----------------------------------
+### validator.md
+- Accept both `lexical.bm25.{k1,b}` and convenience `bm25_k1/bm25_b`; redundant ⇒ warn; nested wins.
+- `fusion.mode` accepted (`score_interp`/`rank`), but warn if inert (enabled=false or shadow mode only).
+- MMR: `k_final` deprecated; accept → normalize to `k` with warning.
+- Normalizer: if `t2.quality.enabled=true` and `normalizer.enabled` is unset → default to true; if explicitly false, warn about drift vs docs/examples.
+
+### tracing.md
+- Triple gate: `perf.enabled` ∧ `perf.metrics.report_memory` ∧ (`t2.quality.enabled` ∨ `t2.quality.shadow`).
+- Path precedence: `perf.metrics.trace_dir` → `t2.quality.trace_dir` → `logs/quality/`.
+- Record: `trace_schema_version=1`, deterministic content (no wall clock).
+- Reason: `ctx.trace_reason` if present; else `perf.metrics.trace_reason`; defaults: `"enabled"`/`"shadow"`.
+
+### mmr.md
+- Lambda semantics: **λ is diversity weight** (`λ=0` → pure relevance, `λ=1` → pure diversity).
+- Metrics emitted when quality gate true: `t2q.mmr.selected`, `t2q.mmr.lambda`, `t2q.diversity_avg_pairwise` (head empty ⇒ 0.0).
+- Edges: `k=1` → first is top fused; ties break lex(id).
+
+CHANGELOG (pasteable for `[0.7.0-M7]`)
+--------------------------------------
+### Added
+- `t2_pipeline(cfg, query, emit_metric=None, ctx=None)` shim for integration tests.
+- Quality trace writer: deterministic JSONL; honors custom `perf.metrics.trace_dir`.
+
+### Changed
+- Comparator ignore narrowed to `**/logs/quality/rq_traces.jsonl`.
+- MMR metrics always emitted under quality gate (keys always present).
+- T2 cache key now includes a quality digest when `quality.enabled=true`.
+- Reader: single availability warning; `t2.reader_mode` always recorded.
+
+### Deprecated
+- `t2.quality.mmr.k_final` (accepted with warning; normalized to `k`).
+
+### Fixed
+- `meta.reason` passthrough via `ctx.trace_reason` or `perf.metrics.trace_reason` in both enabled/shadow traces.
+
+Runbook (one‑liners)
+--------------------
+- Validate config (strict): `python scripts/validate_config.py --strict`
+- Examples smoke all: `python scripts/examples_smoke.py --all --fail-fast`
+- Specific examples set: `python scripts/examples_smoke.py --examples-glob "examples/quality/*.yaml"`
+- Full tests: `pytest -q`
+- Gate D comparator: `python scripts/validate_noop_shadow.py`
+
+Open nits for M8 (candidates)
+-----------------------------
+- Alias cycles/collisions test (guard against loops like {a→b, b→a}).
+- Optional: central cache plane (t4‑owned) with parity on T2 cache key digest.
+- Optional: expand trace schema with small, stable counters (no timestamps) if/when needed.

@@ -38,6 +38,10 @@ from dataclasses import dataclass
 from typing import Callable, Dict, Iterable, Iterator, List, Mapping, MutableMapping, Optional, Sequence, Tuple
 import os
 import numpy as np
+import logging
+_logger = logging.getLogger(__name__)
+__WARNED_PARTITION_UNAVAILABLE = False
+__WARNED_NO_METADATA = False
 
 __all__ = [
     "LancePartitionSpec",
@@ -96,8 +100,28 @@ class PartitionedReader:
         """
         try:
             root = self._spec.root
-            return bool(root) and os.path.isdir(root)
+            ok = bool(root) and os.path.isdir(root)
+            # Warn only once per process if unavailable; callers will fall back to flat.
+            global __WARNED_PARTITION_UNAVAILABLE
+            if not ok and not __WARNED_PARTITION_UNAVAILABLE:
+                try:
+                    _logger.warning(
+                        "t2_lance_reader: partition root not available (%r); falling back to flat reader (one-time warning).",
+                        root,
+                    )
+                finally:
+                    __WARNED_PARTITION_UNAVAILABLE = True
+            return ok
         except Exception:
+            # Be conservative: treat as unavailable and warn once.
+            global __WARNED_PARTITION_UNAVAILABLE
+            if not __WARNED_PARTITION_UNAVAILABLE:
+                try:
+                    _logger.warning(
+                        "t2_lance_reader: exception during availability check; falling back to flat reader (one-time warning)."
+                    )
+                finally:
+                    __WARNED_PARTITION_UNAVAILABLE = True
             return False
 
     # ----------------------------- Iteration API ----------------------------
@@ -119,6 +143,14 @@ class PartitionedReader:
         for ids, embeds, norms in self._flat_iter():
             if not self._spec.by or not self._meta:
                 # No partitioning information — passthrough for parity.
+                global __WARNED_NO_METADATA
+                if not __WARNED_NO_METADATA:
+                    try:
+                        _logger.info(
+                            "t2_lance_reader: no partition metadata/fields; using flat reader order (one-time notice)."
+                        )
+                    finally:
+                        __WARNED_NO_METADATA = True
                 yield ids, embeds, norms
                 continue
 

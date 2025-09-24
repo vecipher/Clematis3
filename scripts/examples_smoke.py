@@ -8,6 +8,7 @@ Runs a tiny, deterministic smoke over the shipped example configs to catch drift
   • Runs a couple of queries through the pipeline (run_t2)
   • Checks determinism across repeated runs
   • When the triple gate is ON, expects the reader mode metric (t2.reader_mode)
+  • Supports --examples-glob and --fail-fast
 
 Exit non‑zero if any example fails. Keep output terse and actionable.
 """
@@ -172,7 +173,9 @@ def _run_example(path: str, validate_config_verbose, run_t2, queries: Sequence[s
 
     # Optional: trace sanity (best-effort)
     if gate_on and check_traces:
-        tdir = ((cfg.get("t2") or {}).get("quality") or {}).get("trace_dir") or "logs/quality"
+        perf = (cfg.get("perf") or {})
+        metrics = (perf.get("metrics") or {})
+        tdir = metrics.get("trace_dir") or ((cfg.get("t2") or {}).get("quality") or {}).get("trace_dir") or "logs/quality"
         tried = [os.path.join(str(tdir), "rq_traces.jsonl")]
         ok = False
         for candidate in tried:
@@ -197,9 +200,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     p = argparse.ArgumentParser(description="Smoke-check example YAMLs for M7")
     p.add_argument("--examples", nargs="*", help="Specific example YAMLs to run (glob patterns supported)")
+    p.add_argument("--examples-glob", nargs="*", help="Additional glob patterns for examples (e.g., 'examples/quality/*.yaml')")
     p.add_argument("--all", action="store_true", help="Run the default set of examples/quality/*.yaml")
     p.add_argument("--repeat", type=int, default=2, help="Repeat runs per example to check determinism (default 2)")
     p.add_argument("--no-check-traces", action="store_true", help="Do not verify presence of rq_traces.jsonl when gate is on")
+    p.add_argument("--fail-fast", action="store_true", help="Exit immediately on first example failure")
 
     args = p.parse_args(argv)
 
@@ -214,6 +219,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     targets: List[str] = []
     if args.examples:
         for pat in args.examples:
+            targets.extend(glob.glob(pat))
+    if args.examples_glob:
+        for pat in args.examples_glob:
             targets.extend(glob.glob(pat))
     if args.all or not targets:
         for pat in default_globs:
@@ -246,6 +254,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print(f"[{status}] {path}: {msg}")
         if not ok:
             failures.append((path, msg))
+            if args.fail_fast:
+                print("\nSummary: fail-fast enabled; stopping on first failure.")
+                return 1
 
     if failures:
         print("\nSummary: some examples failed:")

@@ -77,8 +77,7 @@ t4:
   cache_bust_mode: on-apply
   cache:
     enabled: true
-    namespaces:
-      - "t2:semantic"
+    namespaces: []
     max_entries: 512
     ttl_sec: 600
 budgets: {time_ms: 1000, ops: 1000, tokens: 1024, time_ms_reflection: 6000}

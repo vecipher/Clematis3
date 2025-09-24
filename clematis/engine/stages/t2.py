@@ -35,23 +35,27 @@ def _quality_cfg_snapshot(cfg_obj) -> Dict[str, Any]:
     """Build a minimal config dict with only the parts used by the quality trace emitter."""
     perf_enabled = bool(_cfg_get(cfg_obj, ["perf", "enabled"], False))
     report_memory = bool(_cfg_get(cfg_obj, ["perf", "metrics", "report_memory"], False))
+    perf_trace_dir = _cfg_get(cfg_obj, ["perf", "metrics", "trace_dir"], None)
+    if isinstance(perf_trace_dir, str):
+        perf_trace_dir = perf_trace_dir.strip() or None
+
     q_enabled = bool(_cfg_get(cfg_obj, ["t2", "quality", "enabled"], False))
     q_shadow = bool(_cfg_get(cfg_obj, ["t2", "quality", "shadow"], False))
     q_trace_dir = str(_cfg_get(cfg_obj, ["t2", "quality", "trace_dir"], "logs/quality"))
     q_redact = bool(_cfg_get(cfg_obj, ["t2", "quality", "redact"], True))
+
+    metrics = {"report_memory": report_memory}
+    if perf_trace_dir:
+        metrics["trace_dir"] = perf_trace_dir
+
     return {
-        "perf": {
-            "enabled": perf_enabled,
-            "metrics": {"report_memory": report_memory},
-        },
-        "t2": {
-            "quality": {
-                "enabled": q_enabled,
-                "shadow": q_shadow,
-                "trace_dir": q_trace_dir,
-                "redact": q_redact,
-            }
-        },
+        "perf": {"enabled": perf_enabled, "metrics": metrics},
+        "t2": {"quality": {
+            "enabled": q_enabled,
+            "shadow": q_shadow,
+            "trace_dir": q_trace_dir,
+            "redact": q_redact,
+        }},
     }
 
 # Helper: build a deterministic items list for quality fusion based on current ordering
@@ -261,6 +265,15 @@ def _init_index_from_cfg(state: dict, cfg_t2: dict):
         state["mem_backend_fallback_reason"] = fallback_reason
     return idx, backend, fallback_reason
 
+import hashlib, json
+
+def _quality_digest(qcfg: dict) -> str:
+    keys = ["enabled","lexical","fusion","mmr"]
+    # keep it slim but stable; omit heavy nested stuff if absent
+    slim = {k: qcfg.get(k) for k in keys if k in qcfg}
+    js = json.dumps(slim, sort_keys=True, separators=(",",":"))
+    return hashlib.sha1(js.encode("utf-8")).hexdigest()[:12]
+
 def t2_semantic(ctx, state, text: str, t1) -> T2Result:
     cfg = ctx.cfg
     # Accept both dict-based and namespace configs (tests use a namespace; CLIs may pass dicts)
@@ -349,6 +362,9 @@ def t2_semantic(ctx, state, text: str, t1) -> T2Result:
         "sim_threshold": sim_threshold,
         "clusters_top_m": clusters_top_m,
     }
+    qcfg = _cfg_get(cfg, ["t2","quality"], {}) or {}
+    if bool(qcfg.get("enabled", False)):
+        ckey_payload["q_digest"] = _quality_digest(qcfg)
     if use_reader:
         ckey_payload["embed_store"] = {
             "dtype": pr33_store_dtype,
@@ -744,6 +760,19 @@ def t2_semantic(ctx, state, text: str, t1) -> T2Result:
         # PR37: enabled-path tracing (triple-gated). Writes fused ordering details.
         if bool(_cfg_get(cfg, ["t2", "quality", "enabled"], False)) and q_fusion_used:
             try:
+                # Prefer a caller-supplied reason (e.g., "examples_smoke", "eval"); fallback to "enabled"
+                _reason_en = None
+                try:
+                    _reason_en = getattr(ctx, "trace_reason", None)
+                    if _reason_en is None and isinstance(ctx, dict):  # tolerate dict-style ctx
+                        _reason_en = ctx.get("trace_reason")
+                except Exception:
+                    _reason_en = None
+                if _reason_en is None:
+                    try:
+                        _reason_en = _cfg_get(cfg, ["perf", "metrics", "trace_reason"], None)
+                    except Exception:
+                        _reason_en = None
                 cfg_snap = _quality_cfg_snapshot(cfg)
                 sem_rank_map = {}
                 score_fused_map = {}
@@ -761,7 +790,7 @@ def t2_semantic(ctx, state, text: str, t1) -> T2Result:
                     })
                 meta = {
                     "k": len(retrieved),
-                    "reason": "enabled",
+                    "reason": str(_reason_en) if _reason_en else "enabled",
                     "note": "PR37 enabled trace; fused ordering active",
                     "alpha": float(_cfg_get(cfg, ["t2", "quality", "fusion", "alpha_semantic"], 0.6)),
                     "lex_hits": int(q_fusion_meta.get("t2q.lex_hits", 0)) if isinstance(q_fusion_meta, dict) else 0,
@@ -771,20 +800,22 @@ def t2_semantic(ctx, state, text: str, t1) -> T2Result:
                 # Never fail the request due to tracing issues
                 pass
         # PR38: emit MMR metrics only when quality+MMR are enabled and MMR ran
-        if bool(_cfg_get(cfg, ["t2", "quality", "enabled"], False)) and q_mmr_used:
+        if bool(_cfg_get(cfg, ["t2","quality","enabled"], False)):
             try:
-                lam = float(_cfg_get(cfg, ["t2", "quality", "mmr", "lambda"], 0.5))
+                lam = float(_cfg_get(cfg, ["t2","quality","mmr","lambda"], 0.5))
                 metrics["t2q.mmr.lambda"] = lam
-                selected_n = int(q_mmr_selected_n or 0)
+                selected_n = int(q_mmr_selected_n or 0) if q_mmr_used else 0
                 metrics["t2q.mmr.selected"] = selected_n
-                import unicodedata, re
+                # compute diversity over head if any; else 0.0
                 head_refs = retrieved[:selected_n] if selected_n > 0 else []
                 mmr_items_head = []
+                import unicodedata, re
                 for r in head_refs:
                     s = unicodedata.normalize("NFKC", getattr(r, "text", "") or "").lower()
                     toks = [t for t in re.split(r"[^0-9a-zA-Z]+", s) if t]
+                    from .t2_quality_mmr import MMRItem, avg_pairwise_distance
                     mmr_items_head.append(MMRItem(id=str(getattr(r, "id", "")), rel=0.0, toks=frozenset(toks)))
-                metrics["t2q.diversity_avg_pairwise"] = float(avg_pairwise_distance(mmr_items_head))
+                metrics["t2q.diversity_avg_pairwise"] = float(avg_pairwise_distance(mmr_items_head)) if mmr_items_head else 0.0
             except Exception:
                 pass
         # PR33: gated perf counters (namespaced)
@@ -817,12 +848,25 @@ def t2_semantic(ctx, state, text: str, t1) -> T2Result:
         q_enabled = bool(_cfg_get(cfg, ["t2", "quality", "enabled"], False))
         q_shadow = bool(_cfg_get(cfg, ["t2", "quality", "shadow"], False))
         if perf_enabled and metrics_enabled and q_shadow and not q_enabled:
+            # Prefer a caller-supplied reason; fallback to "shadow"
+            _reason_sh = None
+            try:
+                _reason_sh = getattr(ctx, "trace_reason", None)
+                if _reason_sh is None and isinstance(ctx, dict):
+                    _reason_sh = ctx.get("trace_reason")
+            except Exception:
+                _reason_sh = None
+            if _reason_sh is None:
+                try:
+                    _reason_sh = _cfg_get(cfg, ["perf", "metrics", "trace_reason"], None)
+                except Exception:
+                    _reason_sh = None
             cfg_snap = _quality_cfg_snapshot(cfg)
             # serialize only id+score for trace; keep ordering identical to returned list
             trace_items = [{"id": h.id, "score": float(getattr(h, "score", 0.0))} for h in retrieved]
             meta = {
                 "k": len(retrieved),
-                "reason": "shadow",
+                "reason": str(_reason_sh) if _reason_sh else "shadow",
                 "note": "PR36 shadow trace; rankings unchanged",
             }
             emit_quality_trace(cfg_snap, q_text, trace_items, meta)
@@ -859,3 +903,31 @@ def run_t2(cfg, corpus_dir: str | None = None, query: str = "", **kwargs):
 
     q = str(query or "").strip()
     return t2_semantic(_Ctx(cfg), state, q, _T1())
+
+def t2_pipeline(cfg, query: str, emit_metric=None, ctx=None):
+    # Propagate trace_reason into cfg so deeper stages (which see engine ctx) can still read it deterministically
+    _reason = None
+    try:
+        _reason = getattr(ctx, "trace_reason", None)
+        if _reason is None and isinstance(ctx, dict):
+            _reason = ctx.get("trace_reason")
+    except Exception:
+        _reason = None
+    if _reason:
+        try:
+            if "perf" not in cfg or not isinstance(cfg["perf"], dict):
+                cfg["perf"] = {}
+            if "metrics" not in cfg["perf"] or not isinstance(cfg["perf"]["metrics"], dict):
+                cfg["perf"]["metrics"] = {}
+            cfg["perf"]["metrics"]["trace_reason"] = str(_reason)
+        except Exception:
+            pass
+
+    res = run_t2(cfg, query=query, ctx=ctx)
+    if emit_metric and hasattr(res, "metrics"):
+        for k, v in res.metrics.items():
+            try:
+                emit_metric(k, v)
+            except Exception:
+                pass
+    return res

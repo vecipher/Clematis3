@@ -2,13 +2,17 @@ name: Gate D — Quality shadow is a no-op
 on:
   pull_request:
     branches: [ main ]
-env:
-  CLEMATIS_GIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
 jobs:
   gate-d:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Export GIT SHA
+        run: |
+          echo "CLEMATIS_GIT_SHA=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
       - uses: actions/setup-python@v5
         with: { python-version: '3.12' }
       - name: Setup
@@ -35,3 +39,12 @@ jobs:
         run: |
           . .venv/bin/activate
           python scripts/validate_noop_shadow.py
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gate-d-logs
+          path: |
+            logs/quality/**
+            .pytest_cache/**
+          if-no-files-found: ignore
