@@ -269,6 +269,9 @@ All notable changes to this project will be documented in this file.
 - **Safety:** `mem_compact.py` writes to a new directory, never in‑place; deterministic ordering and headers.
 - **Optional dependency:** `zstandard` is only required when reading/writing `.zst` files; included in dev/test deps.
 
+## [0.6.1] - 2025-09-24
+### i make changes on a whim
+
 ### Added (PR40 — Lance partition reader parity; optional, default flat)
 - **Engine (T2):** `clematis/engine/stages/t2_lance_reader.py` — dependency-light, deterministic partition wrapper over a flat reader; preserves content and within-partition order; never raises during availability checks.
 - **Stage wiring:** `clematis/engine/stages/t2.py` — accepts `t2.reader.mode ∈ {flat, auto, partition}`; selects partition mode only when available; otherwise deterministically falls back to flat. Emits gated metric `t2.reader_mode` ("flat"|"partition"). No scoring/order changes.

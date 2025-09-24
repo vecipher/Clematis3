@@ -331,6 +331,12 @@ def t2_semantic(ctx, state, text: str, t1) -> T2Result:
     sim_threshold: float = float(cfg_t2.get("sim_threshold", 0.3))
     clusters_top_m: int = int(cfg_t2.get("clusters_top_m", 3))
     now_str = getattr(ctx, "now", None)
+    # PR41: floor "now" to midnight UTC so exact_recent_days is inclusive by calendar day
+    if not now_str:
+        _now_dt = dt.datetime.now(dt.timezone.utc)
+        _now_floor = dt.datetime(_now_dt.year, _now_dt.month, _now_dt.day, tzinfo=dt.timezone.utc)
+        # Use Z suffix for downstream parsers expecting ISO8601 with Z
+        now_str = _now_floor.isoformat().replace("+00:00", "Z")
     # Cache setup
     cache, cache_kind = _get_cache(ctx, cfg_t2)
     try:
