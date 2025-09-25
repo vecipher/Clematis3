@@ -1,0 +1,57 @@
+name: pkg_repro
+on:
+  pull_request:
+    paths:
+      - "pyproject.toml"
+      - "MANIFEST.in"
+      - "clematis/**"
+      - "packaging/**"
+      - "scripts/**"
+  workflow_dispatch: {}
+
+jobs:
+  repro:
+    runs-on: ubuntu-latest
+    env:
+      SOURCE_DATE_EPOCH: "1700000000"
+      TZ: "UTC"
+      LC_ALL: "C.UTF-8"
+      LANG: "C.UTF-8"
+      PYTHONHASHSEED: "0"
+      PYTHONUTF8: "1"
+      UMASK: "0022"
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+      PIP_NO_PYTHON_VERSION_WARNING: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Show env
+        run: env | sort
+      - name: Install build
+        run: python -m pip install --upgrade build
+      - name: Build #1
+        run: |
+          rm -rf dist build *.egg-info
+          python -m build
+          python - <<'PY' > .repro_sha_1.json
+          import hashlib, glob, os, json
+          art = sorted(glob.glob("dist/*"))
+          shas = {os.path.basename(p): hashlib.sha256(open(p,"rb").read()).hexdigest() for p in art}
+          print(json.dumps(shas, sort_keys=True))
+          PY
+      - name: Build #2
+        run: |
+          rm -rf dist build *.egg-info
+          python -m build
+          python - <<'PY' > .repro_sha_2.json
+          import hashlib, glob, os, json
+          art = sorted(glob.glob("dist/*"))
+          shas = {os.path.basename(p): hashlib.sha256(open(p,"rb").read()).hexdigest() for p in art}
+          print(json.dumps(shas, sort_keys=True))
+          PY
+      - name: Compare checksums
+        run: diff -u .repro_sha_1.json .repro_sha_2.json

@@ -54,7 +54,43 @@ python3 scripts/llm_smoke.py
 # Manual tests (only when you explicitly ask for them)
 pytest -q -m manual           # runs tests/llm/test_manual_smoke_marker.py
 ```
-> CI never runs these manual tests and never hits the network; it uses fixtures only.
+
+## Packaging & reproducible builds (PR45)
+
+We ship scripts and CI to make source & wheel packages bit‑for‑bit reproducible across two consecutive builds on the **same OS/Python**.
+
+**Fast path**
+```bash
+./scripts/repro_check.sh
+```
+This builds twice and diffs SHA256s of all artifacts under `dist/`. It should print `Reproducible: checksums identical.`
+
+**Manual build with knobs**
+```bash
+source packaging/repro_env.sh
+python -m build
+```
+
+The env file sets:
+- `SOURCE_DATE_EPOCH` (default `1700000000`)
+- `TZ=UTC`, `LC_ALL=C.UTF-8`, `LANG=C.UTF-8`
+- `PYTHONHASHSEED=0`, `PYTHONUTF8=1`, `UMASK=0022`
+
+**Notes**
+- Fixtures live under `clematis/fixtures/**` and are included in the sdist/wheel deterministically.
+- `pyproject.toml` uses `setuptools>=77` and non‑namespace package discovery.
+- CI workflow **pkg_repro** builds twice and asserts identical checksums.
+
+**Troubleshooting (checksum drift)**
+- Ensure you’re on `setuptools>=77` and `wheel` up‑to‑date.
+- Make sure you sourced `packaging/repro_env.sh` (locale/time/umask matter).
+- Check `pyproject.toml` has:
+  ```toml
+  [tool.setuptools.packages.find]
+  include = ["clematis*"]
+  namespaces = false
+  ```
+- Avoid writing non-deterministic files during build (timestamps, temp paths, etc.).
 
 ## Validate your config (PR16)
 
@@ -1659,3 +1695,4 @@ t2:
 ## Changelog & Releases
 - See the [CHANGELOG](./CHANGELOG.md) for notable changes.
 - Binary / source packages and release notes are on the [Releases] page.
+
