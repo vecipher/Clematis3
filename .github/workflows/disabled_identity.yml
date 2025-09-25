@@ -80,16 +80,22 @@ jobs:
           fi
 
       - name: Identity unit test
+        env:
+          CLEMATIS_NETWORK_BAN: "1"
+          CI: "true"
         shell: bash
         run: |
           set -euxo pipefail
-          pytest -q tests/test_identity_disabled_path.py::test_disabled_perf_and_quality_identity_to_base
+          pytest -q -m "not manual" tests/test_identity_disabled_path.py::test_disabled_perf_and_quality_identity_to_base
 
       - name: CLI validator smoke (quiet config)
+        env:
+          CLEMATIS_NETWORK_BAN: "1"
+          CI: "true"
         shell: bash
         run: |
           set -euxo pipefail
-          pytest -q tests/test_config_perf_quality.py::test_cli_validator_smoke
+          pytest -q -m "not manual" tests/test_config_perf_quality.py::test_cli_validator_smoke
 
       - name: Run golden disabled identity guard
         shell: bash

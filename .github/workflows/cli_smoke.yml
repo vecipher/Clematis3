@@ -1,5 +1,3 @@
-
-
 name: PR35 — CLI Smoke
 
 on:
@@ -56,12 +54,15 @@ jobs:
             python -m pip install pytest hypothesis
           fi
       
-      - name: Run CLI tests
+      - name: Run CLI tests (offline)
+        env:
+          CLEMATIS_NETWORK_BAN: "1"
+          CI: "true"
         shell: bash
         run: |
           set -euxo pipefail
           if [ -d tests/cli ]; then
-            pytest -q tests/cli
+            pytest -q -m "not manual" tests/cli
           else
             echo "No CLI tests found (tests/cli) — skipping" && exit 0
           fi

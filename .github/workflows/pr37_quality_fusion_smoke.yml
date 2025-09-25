@@ -35,9 +35,11 @@ jobs:
       - name: Run tests w/ PR37 enabled (fusion)
         env:
           CLEMATIS_CONFIG: examples/quality/lexical_fusion.yaml
+          CLEMATIS_NETWORK_BAN: "1"
+          CI: "true"
         run: |
           . .venv/bin/activate
-          pytest -q --maxfail=1
+          pytest -q --maxfail=1 -m "not manual"
 
       - name: Upload logs on failure
         if: failure()

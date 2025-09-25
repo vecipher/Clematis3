@@ -23,18 +23,22 @@ jobs:
       - name: Baseline run (disabled-path)
         env:
           BASE_ARTIFACTS: artifacts/base
+          CLEMATIS_NETWORK_BAN: "1"
+          CI: "true"
         run: |
           . .venv/bin/activate
           mkdir -p "$BASE_ARTIFACTS"
-          pytest -q --maxfail=1
+          pytest -q --maxfail=1 -m "not manual"
       - name: Shadow run (triple gate)
         env:
           CLEMATIS_CONFIG: examples/quality/shadow.yaml
           SHADOW_ARTIFACTS: artifacts/shadow
+          CLEMATIS_NETWORK_BAN: "1"
+          CI: "true"
         run: |
           . .venv/bin/activate
           mkdir -p "$SHADOW_ARTIFACTS"
-          pytest -q --maxfail=1
+          pytest -q --maxfail=1 -m "not manual"
       - name: Compare artifacts (ignore rq_traces.jsonl only)
         run: |
           . .venv/bin/activate

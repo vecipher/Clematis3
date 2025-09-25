@@ -41,11 +41,14 @@ jobs:
             python -m pip install -e .
           fi
 
-      - name: Run PR41 smoke tests
+      - name: Run PR41 smoke tests (offline)
+        env:
+          CLEMATIS_NETWORK_BAN: "1"
+          CI: "true"
         run: |
-          pytest -q tests/scripts/test_rq_eval_cli.py::test_metric_functions_on_toy_set
-          pytest -q tests/scripts/test_rq_eval_cli.py::test_cli_produces_json_and_csv
-          pytest -q tests/integration/test_rq_eval_end_to_end.py
+          pytest -q -m "not manual" tests/scripts/test_rq_eval_cli.py::test_metric_functions_on_toy_set
+          pytest -q -m "not manual" tests/scripts/test_rq_eval_cli.py::test_cli_produces_json_and_csv
+          pytest -q -m "not manual" tests/integration/test_rq_eval_end_to_end.py
 
       - name: Upload artifacts on failure
         if: failure()

@@ -1,5 +1,3 @@
-
-
 name: PR34 — Snapshots Smoke
 
 on:
@@ -37,9 +35,12 @@ jobs:
           python -m pip install -U pip
           pip install -e ".[dev,test]" zstandard
       
-      - name: Run snapshot tests (round-trip & fallback)
+      - name: Run snapshot tests (offline)
+        env:
+          CLEMATIS_NETWORK_BAN: "1"
+          CI: "true"
         run: |
-          pytest -q tests/snapshots -k "delta_roundtrip or fallback"
+          pytest -q -m "not manual" tests/snapshots -k "delta_roundtrip or fallback"
       
       - name: Upload diagnostics on failure
         if: failure()

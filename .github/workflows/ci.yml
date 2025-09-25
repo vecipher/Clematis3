@@ -83,8 +83,11 @@ jobs:
           show("import clematis.engine.stages.t4", import_t4)
           PY
 
-      - name: Run tests
-        run: pytest -q
+      - name: Run tests (offline)
+        env:
+          CLEMATIS_NETWORK_BAN: "1"
+          CI: "true"
+        run: pytest -q -m "not manual"
 
   golden_disabled_identity:
     name: Golden identity (scheduler.disabled)

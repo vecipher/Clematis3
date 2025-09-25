@@ -1,5 +1,3 @@
-
-
 name: Gate C — T2 Reader Parity
 on:
   pull_request:
@@ -66,8 +64,10 @@ jobs:
         env:
           PERF_T2_DTYPE: ${{ matrix.dtype }}
           PERF_T2_PRECOMPUTE_NORMS: ${{ matrix.precompute_norms }}
+          CLEMATIS_NETWORK_BAN: "1"
+          CI: "true"
         run: |
-          pytest -q \
+          pytest -q -m "not manual" \
             tests/t2/test_fp16_parity.py \
             tests/t2/test_partition_reader.py \
             tests/t2/test_reader_backcompat.py \
@@ -102,5 +102,8 @@ jobs:
           pip install -e ".[dev,test]"
 
       - name: Run gate identity test
+        env:
+          CLEMATIS_NETWORK_BAN: "1"
+          CI: "true"
         run: |
-          pytest -q tests/t2/test_t2_reader_gate_identity.py
+          pytest -q -m "not manual" tests/t2/test_t2_reader_gate_identity.py

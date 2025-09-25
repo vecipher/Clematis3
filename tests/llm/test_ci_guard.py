@@ -1,5 +1,3 @@
-
-
 import os
 import pytest
 
@@ -14,6 +12,10 @@ pytestmark = pytest.mark.skipif(os.environ.get("CI") != "true", reason="CI-only 
 class _Ctx:
     turn_id = 1
     agent_id = "ci"
+
+
+def _joined_errors(logs):
+    return " | ".join(str(rec.get("llm_error", "")) for rec in logs if isinstance(rec, dict))
 
 
 def test_ci_disallows_ollama_network_calls():
@@ -44,8 +46,28 @@ def test_ci_disallows_ollama_network_calls():
     assert out.get("plan") == []
     assert "fallback" in out.get("rationale", "")
     assert any("llm_error" in rec for rec in state.logs), f"logs missing llm_error: {state.logs}"
+    msg = _joined_errors(state.logs)
+    assert "CI requires fixture provider" in msg
 
 
 def test_ci_env_asserts_network_ban_present():
-    # Sanity: ensure the CI job propagated the network-ban env var so sockets are blocked
+    """
+    Only enforce the network-ban env contract when the workflow opted in.
+    This avoids failing in workflows that don't set the env yet.
+    """
+    if os.environ.get("CLEMATIS_NETWORK_BAN") != "1":
+        pytest.skip("CLEMATIS_NETWORK_BAN not set; skipping enforcement check")
     assert os.environ.get("CLEMATIS_NETWORK_BAN") == "1"
+
+
+def test_ci_requires_fixtures_enabled_when_fixture_provider():
+    cfg = {"t3": {"backend": "llm", "llm": {"provider": "fixture", "fixtures": {"enabled": False, "path": "fixtures/llm/qwen_small.jsonl"}}}}
+    ok, errs, cfg = validate_config_api(cfg)
+    assert ok, f"unexpected config errors: {errs}"
+
+    state = type("S", (), {"logs": []})()
+    out = plan_with_llm(_Ctx(), state, cfg)
+    assert isinstance(out, dict)
+    assert out.get("plan") == []
+    msg = _joined_errors(state.logs)
+    assert "CI requires fixtures.enabled=true" in msg

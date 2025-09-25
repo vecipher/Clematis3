@@ -48,9 +48,12 @@ jobs:
           fi
 
       - name: Run reader parity smoke tests
+        env:
+          CLEMATIS_NETWORK_BAN: "1"
+          CI: "true"
         shell: bash
         run: |
-          pytest -q tests/integration/test_t2_reader_parity.py
+          pytest -q -m "not manual" tests/integration/test_t2_reader_parity.py
 
       - name: Upload artifacts on failure
         if: failure()
