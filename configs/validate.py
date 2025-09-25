@@ -11,7 +11,7 @@ Public API:
 from __future__ import annotations
 from typing import Any, Dict, List
 
-__all__ = ["validate_config", "validate_config_verbose"]
+__all__ = ["validate_config", "validate_config_verbose", "validate_config_api"]
 
 
 # ------------------------------
@@ -99,6 +99,18 @@ DEFAULTS: Dict[str, Any] = {
         "max_rag_loops": 1,
         "max_ops_per_turn": 8,
         "backend": "rulebased",
+        "llm": {
+            "provider": "fixture",
+            "model": "qwen3:4b-instruct-q4_K_M",
+            "endpoint": "http://localhost:11434/api/generate",
+            "max_tokens": 256,
+            "temp": 0.2,
+            "timeout_ms": 10000,
+            "fixtures": {
+                "enabled": True,
+                "path": "fixtures/llm/qwen_small.jsonl",
+            },
+        },
     },
     "t4": {
         "enabled": True,
@@ -193,6 +205,8 @@ ALLOWED_T2 = {"backend", "k_retrieval", "sim_threshold", "cache", "ranking", "hy
               "residual_cap_per_turn", "lancedb", "archive", "quality", "embed_root", "reader_batch", "reader"}
 ALLOWED_T3 = {"max_rag_loops", "max_ops_per_turn", "backend",
               "tokens", "temp", "allow_reflection", "dialogue", "policy", "llm"}
+ALLOWED_T3_LLM = {"provider", "model", "endpoint", "max_tokens", "temp", "timeout_ms", "fixtures"}
+ALLOWED_T3_LLM_FIXTURES = {"enabled", "path"}
 ALLOWED_T4 = {
     "enabled", "delta_norm_cap_l2", "novelty_cap_per_node", "churn_cap_edges",
     "cooldowns", "weight_min", "weight_max", "snapshot_every_n_turns", "snapshot_dir",
@@ -299,6 +313,8 @@ def _validate_config_normalize_impl(cfg: Dict[str, Any]) -> Dict[str, Any]:
     raw_t1 = _ensure_dict(cfg_in.get("t1"))
     raw_t2 = _ensure_dict(cfg_in.get("t2"))
     raw_t3 = _ensure_dict(cfg_in.get("t3"))
+    raw_t3_llm = _ensure_dict(raw_t3.get("llm"))
+    raw_t3_llm_fixtures = _ensure_dict(raw_t3_llm.get("fixtures"))
     raw_t4 = _ensure_dict(cfg_in.get("t4"))
     raw_t1_cache = _ensure_dict(raw_t1.get("cache"))
     raw_t2_cache = _ensure_dict(raw_t2.get("cache"))
@@ -361,6 +377,18 @@ def _validate_config_normalize_impl(cfg: Dict[str, Any]) -> Dict[str, Any]:
             sug = _suggest_key(k, ALLOWED_T3)
             hint = f" (did you mean '{sug}')" if sug else ""
             _err(errors, f"t3.{k}", f"unknown key{hint}")
+
+    for k in raw_t3_llm.keys():
+        if k not in ALLOWED_T3_LLM:
+            sug = _suggest_key(k, ALLOWED_T3_LLM)
+            hint = f" (did you mean '{sug}')" if sug else ""
+            _err(errors, f"t3.llm.{k}", f"unknown key{hint}")
+
+    for k in raw_t3_llm_fixtures.keys():
+        if k not in ALLOWED_T3_LLM_FIXTURES:
+            sug = _suggest_key(k, ALLOWED_T3_LLM_FIXTURES)
+            hint = f" (did you mean '{sug}')" if sug else ""
+            _err(errors, f"t3.llm.fixtures.{k}", f"unknown key{hint}")
 
     for k in raw_t4.keys():
         if k not in ALLOWED_T4:
@@ -696,6 +724,47 @@ def _validate_config_normalize_impl(cfg: Dict[str, Any]) -> Dict[str, Any]:
     t3_backend = str(t3.get("backend", "rulebased"))
     if t3_backend not in {"rulebased", "llm"}:
         _err(errors, "t3.backend", f"must be one of {{rulebased,llm}}, got: {t3_backend!r}")
+
+    # t3.llm normalization (config-only in M3-07; no runtime wiring yet)
+    llm = _ensure_subdict(t3, "llm")
+    provider = str(llm.get("provider", "fixture"))
+    if provider not in {"fixture", "ollama"}:
+        _err(errors, "t3.llm.provider", "must be one of {fixture,ollama}")
+    llm["provider"] = provider
+
+    model = llm.get("model", "qwen2:4b-instruct-q4_K_M")
+    if not isinstance(model, str) or not model.strip():
+        _err(errors, "t3.llm.model", "must be a non-empty string")
+    else:
+        llm["model"] = model
+
+    endpoint = llm.get("endpoint", "http://localhost:11434/api/generate")
+    if not isinstance(endpoint, str) or not endpoint.strip():
+        _err(errors, "t3.llm.endpoint", "must be a non-empty string")
+    else:
+        llm["endpoint"] = endpoint
+
+    llm["max_tokens"] = _coerce_int(llm.get("max_tokens", 256))
+    if llm["max_tokens"] < 1:
+        _err(errors, "t3.llm.max_tokens", "must be >= 1")
+
+    llm["temp"] = _coerce_float(llm.get("temp", 0.2))
+    if not (0.0 <= llm["temp"] <= 1.0):
+        _err(errors, "t3.llm.temp", "must be in [0,1]")
+
+    llm["timeout_ms"] = _coerce_int(llm.get("timeout_ms", 10000))
+    if llm["timeout_ms"] < 1:
+        _err(errors, "t3.llm.timeout_ms", "must be >= 1")
+
+    fixtures = _ensure_subdict(llm, "fixtures")
+    fixtures["enabled"] = _coerce_bool(fixtures.get("enabled", True))
+    fpath = fixtures.get("path", "fixtures/llm/qwen_small.jsonl")
+    if not isinstance(fpath, str) or not fpath.strip():
+        _err(errors, "t3.llm.fixtures.path", "must be a non-empty string")
+    else:
+        fixtures["path"] = fpath
+    llm["fixtures"] = fixtures
+    t3["llm"] = llm
 
     # ---- T4 ----
     t4 = _ensure_subdict(merged, "t4")
@@ -1523,6 +1592,22 @@ def validate_config_verbose(cfg: Dict[str, Any]) -> Tuple[Dict[str, Any], List[s
 # Public API (unified):
 # - validate_config(cfg) -> dict (normalized)  [primary path]
 # - validate_config(cfg, strict=..., verbose=...) -> (errors, warnings)  [compat path for a few tests]
+
+def validate_config_api(cfg: Dict[str, Any]):
+    """Stable, test-friendly API for M3-07.
+
+    Returns a tuple: (ok: bool, errs: list[str], cfg_or_none).
+    - On success: (True, [], normalized_cfg)
+    - On validation error: (False, [messages...], None)
+    Does not raise; wraps the strict normalizer.
+    """
+    try:
+        normalized = _validate_config_normalize_impl(cfg)
+        return True, [], normalized
+    except ValueError as e:
+        msg = str(e).strip()
+        errs = msg.split("\n") if msg else ["invalid configuration"]
+        return False, errs, None
 
 def validate_config(cfg: Dict[str, Any], **kwargs):
     """Validate configuration.

@@ -57,11 +57,16 @@ t3:
     tau_low: 0.4
     epsilon_edit: 0.10
   llm:
-    provider: qwen
-    model: qwen3-4b-instruct
-    temperature: 0.2
-    max_tokens_default: 256
-    timeout_s: 30
+    # M3-07 LLM adapter scaffolding — defaults OFF and fixture-driven in CI
+    provider: fixture           # "fixture" | "ollama"
+    model: qwen3:4b-instruct-q4_K_M
+    endpoint: http://localhost:11434/api/generate
+    max_tokens: 256
+    temp: 0.2
+    timeout_ms: 10000
+    fixtures:
+      enabled: true
+      path: fixtures/llm/qwen_small.jsonl
 t4:
   enabled: true
   delta_norm_cap_l2: 1.5

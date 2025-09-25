@@ -59,7 +59,12 @@ def test_t2_exact_semantic_recent_and_threshold():
     # Seed T1 touching the apple node to include label in query
     t1 = T1Result(graph_deltas=[{"op":"upsert_node","id":"n:apple"}], metrics={})
 
-    r = t2_semantic(type("Ctx", (), {"cfg": cfg})(), state, "tell me about", t1)
+    # Freeze 'now' so the 30d recency window includes 2025-08-25 and 2025-08-26
+    Ctx = type("Ctx", (), {})
+    ctx = Ctx()
+    ctx.cfg = cfg
+    ctx.now = "2025-09-01T00:00:00Z"
+    r = t2_semantic(ctx, state, "tell me about", t1)
 
     ids = {h.id for h in r.retrieved}
     # Old one filtered by recent window

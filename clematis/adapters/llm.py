@@ -1,6 +1,9 @@
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, Protocol
+import json
+import pathlib
+import hashlib
 
 # PR8: LLM adapter interface + deterministic test double + Qwen adapter thin wrapper.
 # This module performs no network I/O. Real calls are injected via a user-provided callable.
@@ -11,6 +14,20 @@ def _approx_token_count(text: str) -> int:
     if not text:
         return 0
     return len(text.split())
+
+
+# ---- Helpers for deterministic fixture hashing (M3-07) ----
+def _canon_prompt(s: str) -> str:
+    # Normalize newlines only; avoid over-normalizing spaces/order.
+    s = s or ""
+    return s.replace("\r\n", "\n").replace("\r", "\n")
+
+def _prompt_hash(s: str) -> str:
+    return hashlib.sha256(_canon_prompt(s).encode("utf-8")).hexdigest()
+
+
+class LLMAdapterError(Exception):
+    """Uniform adapter error for fixture missing keys, bad files, or provider failures."""
 
 
 @dataclass
@@ -42,6 +59,51 @@ class DeterministicLLMAdapter:
         toks = prompt.split()
         if max_tokens <= 0:
             return LLMResult(text="", tokens=0, truncated=True)
+        truncated = len(toks) > max_tokens
+        kept = toks[:max_tokens]
+        text = " ".join(kept)
+        return LLMResult(text=text, tokens=len(kept), truncated=truncated)
+
+
+class FixtureLLMAdapter:
+    """
+    Offline, deterministic adapter backed by a JSONL fixture file.
+    Each line: {"prompt_hash": "<sha256>", "completion": "<raw text>"}
+    Optional keys like "meta" are ignored by the adapter.
+
+    Notes:
+    - Deterministic and CI-safe; no I/O after construction.
+    - Completion is token-clipped to max_tokens on generate().
+    """
+    name = "FixtureLLMAdapter"
+
+    def __init__(self, path: str):
+        p = pathlib.Path(path)
+        if not p.exists():
+            raise LLMAdapterError(f"Fixture file not found: {p}")
+        self._map: Dict[str, str] = {}
+        with p.open("r", encoding="utf-8") as f:
+            for i, line in enumerate(f, 1):
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                    key = rec["prompt_hash"]
+                    comp = rec["completion"]
+                except Exception as e:
+                    raise LLMAdapterError(f"Bad fixture JSONL at line {i}: {e}")
+                # Last-write-wins to allow local overrides later in the file
+                self._map[str(key)] = str(comp)
+
+    def generate(self, prompt: str, max_tokens: int, temperature: float) -> LLMResult:
+        key = _prompt_hash(prompt)
+        if key not in self._map:
+            raise LLMAdapterError("No fixture for prompt hash")
+        raw = self._map[key] or ""
+        toks = raw.split()
+        if max_tokens <= 0:
+            return LLMResult(text="", tokens=0, truncated=bool(toks))
         truncated = len(toks) > max_tokens
         kept = toks[:max_tokens]
         text = " ".join(kept)
