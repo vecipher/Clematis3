@@ -1,7 +1,11 @@
 from __future__ import annotations
 from typing import Dict, Any, List, Tuple, Callable, Optional
 from datetime import datetime, timezone
+
 import os
+
+from ..policy.json_schemas import PLANNER_V1
+from ..policy.sanitize import parse_and_validate
 
 from ..types import Plan, SpeakOp, EditGraphOp, RequestRetrieveOp
 # PR8/M3-08: Optional LLM adapter types (duck-typed if unavailable)
@@ -898,13 +902,19 @@ def plan_with_llm(ctx, state: Any, cfg: Dict[str, Any]) -> Dict[str, Any]:
         raw = getattr(result, "text", None)
         if raw is None and isinstance(result, dict):
             raw = result.get("text", "")
-        obj = _json.loads(raw if isinstance(raw, str) else "")
-        # Minimal shape check (strict schema arrives in M3-10)
-        if not isinstance(obj, dict) or "plan" not in obj or "rationale" not in obj:
-            raise ValueError("planner output missing required keys")
-        if not isinstance(obj.get("plan"), list) or not isinstance(obj.get("rationale"), str):
-            raise ValueError("planner output wrong types")
-        return {"plan": [str(x) for x in obj["plan"]][:16], "rationale": str(obj["rationale"])[:2000]}
+        ok, parsed = parse_and_validate(raw if isinstance(raw, str) else "", PLANNER_V1)
+        if not ok:
+            try:
+                logs = getattr(state, "logs", None)
+                if isinstance(logs, list):
+                    prov = str((((cfg.get("t3", {}) or {}).get("llm", {}) or {}).get("provider", "unknown")))
+                    ci = str(os.environ.get("CI", ""))
+                    logs.append({"llm_validation_failed": str(parsed), "provider": prov, "ci": ci})
+            except Exception:
+                pass
+            return {"plan": [], "rationale": "fallback: invalid llm output"}
+        # parsed is a normalized dict with keys {plan, rationale}
+        return parsed
     except Exception as e:
         try:
             logs = getattr(state, "logs", None)

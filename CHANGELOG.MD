@@ -2,6 +2,65 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+## [0.8.0-M3] - 2025-09-25
+
+### M3 — T3 Policy Tier (LLM backend; opt-in, defaults OFF)
+
+#### Added (PR8 — LLM adapter scaffolding)
+- **Adapters:** `clematis/adapters/llm.py` — minimal interface with two concrete adapters:
+  - `FixtureLLMAdapter`: deterministic lookup via `fixtures/llm/*.jsonl` (maps `prompt_hash → completion`).
+  - `QwenLLMAdapter`: local runtime via Ollama (no streaming; simple POST to `/api/generate`).
+- **Config surface (defaults OFF):**
+  ```yaml
+  t3:
+    backend: "rulebased"               # "rulebased" | "llm"
+    llm:
+      provider: "fixture"              # "fixture" | "ollama"
+      model: "qwen3:4b-instruct"
+      endpoint: "http://localhost:11434/api/generate"
+      max_tokens: 256
+      temp: 0.2
+      timeout_ms: 10000
+      fixtures:
+        enabled: true
+        path: "fixtures/llm/qwen_small.jsonl"
+  ```
+- **Validator:** `configs/validate.py` gains `validate_config_api(...)` and strict checks for `t3.backend` and `t3.llm.*` (enums, bounds, unknown-key detection).
+
+#### Added (PR9 — Qwen runtime wiring; opt-in, non‑CI)
+- **Stage wiring:** `clematis/engine/stages/t3.py` — `_get_llm_adapter_from_cfg(...)` constructs either fixture or Ollama adapter; rule‑based path remains the default.
+- **Prompt builder:** `make_planner_prompt(ctx)` produces a deterministic prompt bundle.
+- **Local smoke:** `scripts/llm_smoke.py` — runs Qwen3 via Ollama and prints planner JSON. **CI never calls this.**
+- **Docs:** `docs/m3/llm_adapter.md` — quickstart, config, and smoke instructions.
+
+#### Added (PR10 — LLM smoke runner (manual) + CI skip)
+- **Manual marker:** `tests/llm/test_manual_smoke_marker.py` (decorated `@pytest.mark.manual`).
+- **Pytest gating:** `tests.yml` runs `pytest -q -m "not manual"`; manual smokes only run when explicitly requested locally.
+- **CI guards:** `tests/llm/test_ci_guard.py` ensures CI sets `CLEMATIS_NETWORK_BAN=1` and that the LLM provider is `fixture` with `fixtures.enabled=true`. When mis‑configured, T3 returns a safe fallback and logs the reason.
+- **Workflows:** standardized pytest steps to run offline and skip manual tests by default:
+  - `ci.yml`, `cli_smoke.yml`, `disabled_identity.yml`, `gate_d_quality_shadow.yml`, `pr37_quality_fusion_smoke.yml`, `pr40_reader_parity_smoke.yml`, `pr41_rq_eval_smoke.yml`, `snapshots_smoke.yml`, `t2_reader_parity.yml` now set `CLEMATIS_NETWORK_BAN=1`, `CI=true`, and append `-m "not manual"`.
+
+#### Added (PR11 — Prompt & safety hardening)
+- **Schema:** `clematis/engine/policy/json_schemas.py` — `PLANNER_V1` (strict JSON: `{plan: list[str], rationale: str}`, caps: ≤16 items, ≤200 chars/item, rationale ≤2000; `additionalProperties=false`).
+- **Sanitizer:** `clematis/engine/policy/sanitize.py` — `parse_and_validate(text, PLANNER_V1)` enforces:
+  - JSON‑only (no prose; code fences rejected),
+  - type/shape/length caps, and
+  - size guards to prevent oversized outputs.
+- **Enforcement:** `clematis/engine/stages/t3.py` calls `parse_and_validate(...)` on LLM output. **On failure:** returns `{"plan": [], "rationale": "fallback: invalid llm output"}` and appends a `llm_validation_failed` log entry; **no graph edits** occur.
+
+#### Tests (PR8–PR11)
+- `tests/llm/test_adapter_fixture.py`, `tests/llm/test_adapter_errors.py` — fixture determinism and failure modes.
+- `tests/llm/test_config_validation.py` — strict config validation.
+- `tests/llm/test_ci_guard.py` — CI offline/fixture guardrails.
+- `tests/llm/test_prompt_safety.py` — sanitizer unit coverage (non‑JSON, fences, size caps, whitespace‑only items).
+- `tests/llm/test_t3_validation_enforcement.py` — end‑to‑end: invalid → fallback+log; valid → pass‑through.
+
+#### CI
+- All workflows running pytest set `CLEMATIS_NETWORK_BAN=1` and use `-m "not manual"` to maintain determinism and avoid network use. Manual smokes are opt‑in locally.
+
+#### Identity & rollback
+- **Disabled‑path identity preserved (Gate A):** with `t3.backend=rulebased` (default), outputs and logs are byte‑for‑byte identical to M7.
+- **Fallback safety:** any adapter or validation error yields an empty plan with a logged reason; state is never mutated by invalid completions.
 ## [0.7.0-M7] - 2025-09-24
 
 ### M7 roll-up summary

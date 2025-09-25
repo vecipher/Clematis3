@@ -160,3 +160,66 @@ pytest -q
 - **M3‑08:** runtime wiring (`t3.backend="llm"` path), `make_planner_prompt()` prompt; update fixture hash for real prompt.
 - **M3‑09:** CI guards (manual smoke marker, network ban).
 - **M3‑10:** JSON schema + sanitizer (PLANNER_V1); reject unsafe output; no state mutation on invalid JSON.
+
+---
+
+## M3‑08 — Runtime wiring & local smoke (opt‑in)
+
+**Status:** Shipped.
+
+- **Wiring:** `clematis/engine/stages/t3.py` selects the adapter when `t3.backend="llm"`.
+- **Prompt:** `make_planner_prompt(ctx)` produces a deterministic bundle used for hashing fixtures and for the LLM call.
+- **Local smoke (Ollama/Qwen3):**
+  ```bash
+  ollama pull qwen3:4b-instruct
+  python scripts/llm_smoke.py
+  ```
+  Expect a **strict JSON** object printed (no markdown, no fences). CI never runs this.
+
+---
+
+## M3‑09 — CI offline discipline
+
+**Status:** Shipped.
+
+- **Policy:** CI must be deterministic and offline.
+- **How enforced:**
+  - All workflows set `CLEMATIS_NETWORK_BAN=1` and run `pytest -m "not manual"`.
+  - In CI, only `provider: fixture` is allowed and `fixtures.enabled: true` is required; otherwise T3 **falls back** and logs the reason.
+- **Manual smoke marker:** tests tagged `@pytest.mark.manual` are skipped in CI; run locally when you want to exercise real runtimes.
+
+---
+
+## M3‑10 — Safety & validation (strict JSON)
+
+**Status:** Shipped.
+
+- **Contract:** The planner must return **ONLY valid JSON** with keys `{plan: list[str], rationale: str}`. **No prose. No markdown. No code fences.**
+- **Caps:**
+  - `plan`: ≤ 16 items; each item 1–200 chars, non‑empty after `strip()`
+  - `rationale`: 1–2000 chars
+  - No additional keys (`additionalProperties=false`)
+- **Enforcement:**
+  - Schema at `clematis/engine/policy/json_schemas.py` (`PLANNER_V1`).
+  - Sanitizer at `clematis/engine/policy/sanitize.py` (rejects non‑JSON, oversized output, wrong types, unknown fields, whitespace‑only items, and markdown/fences).
+  - T3 calls the sanitizer; **on failure** it returns `{"plan": [], "rationale": "fallback: invalid llm output"}` and logs `llm_validation_failed` (no graph edits occur).
+- **Fixture guidance:** For planner tests/fixtures, prefer storing the `completion` as a JSON string matching the schema, e.g.:
+  ```json
+  {"plan":["step1","step2"],"rationale":"why"}
+  ```
+
+### Quick verification
+
+```bash
+# 1) Default identity posture (rulebased):
+pytest -q
+
+# 2) Fixture mapping sanity (deterministic):
+pytest -q tests/llm/test_adapter_fixture.py
+
+# 3) Safety unit tests:
+pytest -q tests/llm/test_prompt_safety.py
+
+# 4) End‑to‑end validation enforcement:
+pytest -q tests/llm/test_t3_validation_enforcement.py
+```
