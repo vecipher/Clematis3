@@ -1,5 +1,3 @@
-
-
 # M3 — LLM Adapter (Scaffolding & Fixtures)
 
 **Status:** M3‑07 shipped (adapter scaffolding).  
@@ -18,7 +16,7 @@ Components (paths are relative to repo root):
     backend: "rulebased"      # "rulebased" | "llm"
     llm:
       provider: "fixture"      # "fixture" | "ollama"
-      model: "qwen2:4b-instruct-q4_K_M"
+      model: "qwen3:4b-instruct"
       endpoint: "http://localhost:11434/api/generate"
       max_tokens: 256
       temp: 0.2
@@ -35,7 +33,7 @@ Components (paths are relative to repo root):
   - `FixtureLLMAdapter` — offline JSONL fixture adapter
   - `LLMAdapterError` — uniform error surface
   - `_prompt_hash()` / `_canon_prompt()` — deterministic hash helpers
-  - (Runtime `QwenLLMAdapter` exists but is **not wired** in M3‑07)
+  - (Runtime `QwenLLMAdapter` exists; wiring lands in M3‑08)
 - **Fixtures (data)** — `fixtures/llm/qwen_small.jsonl`
   - JSONL mapping: `prompt_hash → completion` (one JSON object per line)
 - **Tests (offline)** — `tests/llm/`
@@ -55,7 +53,7 @@ Each line is a standalone JSON object:
 {
   "prompt_hash": "<sha256 of canonicalized prompt>",
   "completion": "<raw text returned by adapter>",
-  "meta": { "model": "qwen2:4b-instruct-q4_K_M", "note": "optional info" },
+  "meta": { "model": "qwen3:4b-instruct", "note": "optional info" },
   "prompt_preview": "first ~120 chars of the prompt (for humans)"
 }
 ```
@@ -70,7 +68,7 @@ Notes:
 
 Example entry:
 ```json
-{"prompt_hash":"6ee0071ff0f58ff850f48672cac37eb24d6cebb3e250f2a6890ff672e1f5073f","completion":"{\"plan\":[\"a\"],\"rationale\":\"r\"}","meta":{"model":"qwen2:4b-instruct-q4_K_M","note":"simple sanity mapping for early tests"},"prompt_preview":"SYSTEM: Return ONLY valid JSON. STATE: {\"turn\":1}"}
+{"prompt_hash":"6ee0071ff0f58ff850f48672cac37eb24d6cebb3e250f2a6890ff672e1f5073f","completion":"{\"plan\":[\"a\"],\"rationale\":\"r\"}","meta":{"model":"qwen3:4b-instruct","note":"simple sanity mapping for early tests"},"prompt_preview":"SYSTEM: Return ONLY valid JSON. STATE: {\"turn\":1}"}
 ```
 
 The repo includes `fixtures/llm/qwen_small.jsonl` with:
@@ -86,9 +84,8 @@ You can compute the SHA‑256 for any prompt via the helper in `clematis/adapter
 ```bash
 python - <<'PY'
 from clematis.adapters.llm import _prompt_hash
-prompt = """SYSTEM: Return ONLY valid JSON matching keys {plan: list[str], rationale: str}. No prose. No markdown. No trailing commas.
+prompt = """SYSTEM: Return ONLY valid JSON with keys {plan: list[str], rationale: str}. No prose. No markdown. No trailing commas.
 STATE: {"turn":1,"agent":"demo"}
-SCHEMA: {"plan":["string"], "rationale":"string"}
 USER: Propose up to 4 next steps as short strings; include a brief rationale."""
 print(_prompt_hash(prompt))
 PY
@@ -117,10 +114,10 @@ EOF
   - Use `provider: fixture`
   - Keep network disabled; tests do not import or call network code
 - **Local (M3‑08+ only):** switch to `provider: ollama` to smoke Qwen (manual)
-  - Requires the M3‑08 wiring (`make_dialog_bundle()` and adapter selection)
+  - Requires the M3‑08 wiring (`make_planner_prompt()` and adapter selection)
   - Example (once M3‑08 lands):
     ```bash
-    ollama pull qwen2:4b-instruct-q4_K_M
+    ollama pull qwen3:4b-instruct
     python scripts/llm_smoke.py
     ```
 
@@ -160,6 +157,6 @@ pytest -q
 ## Roadmap alignment
 
 - **M3‑07 (this doc):** adapter scaffolding + fixtures + tests; defaults OFF.
-- **M3‑08:** runtime wiring (`t3.backend="llm"` path), `make_dialog_bundle()` prompt; update fixture hash for real prompt.
+- **M3‑08:** runtime wiring (`t3.backend="llm"` path), `make_planner_prompt()` prompt; update fixture hash for real prompt.
 - **M3‑09:** CI guards (manual smoke marker, network ban).
 - **M3‑10:** JSON schema + sanitizer (PLANNER_V1); reject unsafe output; no state mutation on invalid JSON.

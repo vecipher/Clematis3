@@ -3,12 +3,22 @@ from typing import Dict, Any, List, Tuple, Callable, Optional
 from datetime import datetime, timezone
 
 from ..types import Plan, SpeakOp, EditGraphOp, RequestRetrieveOp
-# PR8: Optional LLM adapter types (duck-typed if unavailable)
+# PR8/M3-08: Optional LLM adapter types (duck-typed if unavailable)
 try:  # runtime optional
-    from ...adapters.llm import LLMAdapter, LLMResult  # type: ignore
+    from ...adapters.llm import (
+        LLMAdapter,
+        LLMResult,
+        FixtureLLMAdapter,
+        QwenLLMAdapter,
+        LLMAdapterError,
+    )  # type: ignore
 except Exception:  # pragma: no cover
     LLMAdapter = object  # type: ignore
     LLMResult = object   # type: ignore
+    FixtureLLMAdapter = None  # type: ignore
+    QwenLLMAdapter = None  # type: ignore
+    class LLMAdapterError(Exception):  # type: ignore
+        pass
 
 # PR4: Pure T3 bundle assembly (no policy/RAG/dialogue yet)
 # Deterministic: all lists sorted; explicit caps; empty defaults when absent.
@@ -768,3 +778,111 @@ def llm_speak(dialog_bundle: Dict[str, Any], plan: Plan, adapter: Any) -> Tuple[
         "adapter": getattr(adapter, "name", adapter.__class__.__name__ if hasattr(adapter, "__class__") else "Unknown"),
     }
     return text_capped, metrics
+
+# --- M3-08: LLM Planner (opt-in, defaults OFF) ---
+
+def make_planner_prompt(ctx) -> str:
+    """Deterministic, compact planner prompt for the LLM backend.
+    Kept intentionally small so fixtures remain stable; M3-10 will add schema hardening.
+    """
+    import json as _json
+    summary = {
+        "turn": getattr(ctx, "turn_id", 0),
+        "agent": getattr(ctx, "agent_id", "agent"),
+    }
+    return (
+        "SYSTEM: Return ONLY valid JSON with keys {plan: list[str], rationale: str}. "
+        "No prose. No markdown. No trailing commas.\n"
+        f"STATE: {_json.dumps(summary, separators=(',',':'))}\n"
+        "USER: Propose up to 4 next steps as short strings; include a brief rationale."
+    )
+
+def _get_llm_adapter_from_cfg(cfg: Dict[str, Any]):
+    """Build an LLM adapter instance from cfg when backend=='llm'.
+    Returns None when backend is not 'llm' or when adapters are unavailable.
+    """
+    try:
+        t3 = cfg.get("t3", {}) if isinstance(cfg, dict) else {}
+    except Exception:
+        t3 = {}
+    if str(t3.get("backend", "rulebased")) != "llm":
+        return None
+    llm = t3.get("llm", {}) if isinstance(t3, dict) else {}
+    provider = str(llm.get("provider", "fixture"))
+    if provider == "fixture":
+        if FixtureLLMAdapter is None:
+            return None
+        path = ((llm.get("fixtures", {}) or {}).get("path")
+                or "fixtures/llm/qwen_small.jsonl")
+        return FixtureLLMAdapter(path)
+    if provider == "ollama":
+        if QwenLLMAdapter is None:
+            return None
+        endpoint = llm.get("endpoint", "http://localhost:11434/api/generate")
+        model = llm.get("model", "qwen3:4b-instruct")
+        temp = float(llm.get("temp", 0.2))
+        timeout_s = max(1, int(int(llm.get("timeout_ms", 10000)) / 1000))
+
+        # Build an Ollama call_fn matching QwenLLMAdapter's expected signature
+        def _ollama_call(prompt: str, *, model: str, max_tokens: int, temperature: float, timeout_s: int) -> str:
+            import json as _json
+            import urllib.request as _ur
+            body = _json.dumps({
+                "model": model,
+                "prompt": prompt,
+                "options": {"temperature": float(temperature), "num_predict": int(max_tokens)},
+                "stream": False,
+                # Hint to return strict JSON when possible
+                "format": "json",
+            }).encode("utf-8")
+            req = _ur.Request(endpoint, data=body, headers={"Content-Type": "application/json"})
+            with _ur.urlopen(req, timeout=timeout_s) as resp:
+                payload = _json.loads(resp.read().decode("utf-8"))
+            txt = payload.get("response")
+            if not isinstance(txt, str):
+                raise LLMAdapterError("Ollama returned no text response")
+            return txt
+
+        return QwenLLMAdapter(call_fn=_ollama_call, model=model, temperature=temp, timeout_s=timeout_s)
+    # Unknown provider -> surface as validation error upstream; here we fail closed.
+    return None
+
+def plan_with_llm(ctx, state: Any, cfg: Dict[str, Any]) -> Dict[str, Any]:
+    """Run the opt-in LLM planner and return a minimal planner dict.
+    Shape: {"plan": list[str], "rationale": str}
+    On any failure, returns {"plan": [], "rationale": "fallback: invalid llm output"} and logs a reason in state.logs if present.
+    Does not mutate graphs or downstream state.
+    """
+    import json as _json
+    adapter = _get_llm_adapter_from_cfg(cfg)
+    if adapter is None:
+        # Not enabled or not available -> return empty plan (caller may fall back to rulebased)
+        return {"plan": [], "rationale": "fallback: llm backend not active"}
+
+    prompt = make_planner_prompt(ctx)
+    try:
+        llm_max = int(((cfg.get("t3", {}) or {}).get("llm", {}) or {}).get("max_tokens", 256))
+        llm_temp = float(((cfg.get("t3", {}) or {}).get("llm", {}) or {}).get("temp", 0.2))
+    except Exception:
+        llm_max, llm_temp = 256, 0.2
+
+    try:
+        result = adapter.generate(prompt, max_tokens=llm_max, temperature=llm_temp)
+        raw = getattr(result, "text", None)
+        if raw is None and isinstance(result, dict):
+            raw = result.get("text", "")
+        obj = _json.loads(raw if isinstance(raw, str) else "")
+        # Minimal shape check (strict schema arrives in M3-10)
+        if not isinstance(obj, dict) or "plan" not in obj or "rationale" not in obj:
+            raise ValueError("planner output missing required keys")
+        if not isinstance(obj.get("plan"), list) or not isinstance(obj.get("rationale"), str):
+            raise ValueError("planner output wrong types")
+        return {"plan": [str(x) for x in obj["plan"]][:16], "rationale": str(obj["rationale"])[:2000]}
+    except Exception as e:
+        try:
+            logs = getattr(state, "logs", None)
+            if isinstance(logs, list):
+                logs.append({"llm_error": str(e)})
+        except Exception:
+            pass
+        return {"plan": [], "rationale": "fallback: invalid llm output"}

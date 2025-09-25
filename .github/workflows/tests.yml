@@ -48,8 +48,12 @@ jobs:
               subprocess.check_call([sys.executable, "-m", "pip", "install", *missing])
           PY
 
-      - name: Run tests
-        run: pytest -q
+      - name: Run tests (offline)
+        env:
+          CLEMATIS_NETWORK_BAN: "1"
+          CI: "true"
+        run: |
+          pytest -q -m "not manual"
 
       - name: Upload logs on failure
         if: failure()

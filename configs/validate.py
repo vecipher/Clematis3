@@ -732,7 +732,7 @@ def _validate_config_normalize_impl(cfg: Dict[str, Any]) -> Dict[str, Any]:
         _err(errors, "t3.llm.provider", "must be one of {fixture,ollama}")
     llm["provider"] = provider
 
-    model = llm.get("model", "qwen2:4b-instruct-q4_K_M")
+    model = llm.get("model", "qwen3:4b-instruct-q4_K_M")
     if not isinstance(model, str) or not model.strip():
         _err(errors, "t3.llm.model", "must be a non-empty string")
     else:
