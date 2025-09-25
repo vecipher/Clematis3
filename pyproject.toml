@@ -1,34 +1,57 @@
 [project]
 name = "clematis"
-version = "0.0.1"
-description = "Clematis v2 scaffold (turn-based, graph-only, multi-agent)."
+dynamic = ["version"]
+description = "Clematis — deterministic mind-like simulation engine (M1–M7 baseline)"
 readme = "README.md"
-requires-python = ">=3.10"
-authors = [{ name = "Clematis Dev" }]
+requires-python = ">=3.11,<3.13"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "vecipher" }]
 
 dependencies = []
 
+classifiers = [
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Operating System :: OS Independent",
+]
+
 [project.optional-dependencies]
 dev = [
-  "pytest>=8",
-  "hypothesis>=6",
-  "zstandard>=0.22"
+  "build>=1.2.1,<2",
+  "wheel>=0.43,<1",
+  "pytest>=8,<9",
+  "hypothesis>=6,<7",
+  "ruff>=0.6,<1",
+  "pyright>=1.1,<2",
 ]
 test = [
-  "pytest>=8",
-  "hypothesis>=6",
-  "zstandard>=0.22"
+  "pytest>=8,<9",
+  "hypothesis>=6,<7",
+  "zstandard>=0.22,<0.23",
+]
+lancedb = [
+  "lancedb>=0.8,<1",
+  "pyarrow>=15,<19",
+]
+zstd = [
+  "zstandard>=0.22,<0.23",
 ]
 
- 
-
 [build-system]
-requires = ["setuptools>=68", "wheel"]
+requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["clematis*"]
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.dynamic]
+version = { file = "clematis/VERSION" }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

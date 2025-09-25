@@ -1,0 +1,3 @@
+include README.md LICENSE
+graft clematis
+global-exclude __pycache__ *.py[cod] *.so .DS_Store
