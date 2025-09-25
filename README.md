@@ -4,6 +4,7 @@
 > M7 wrap: This repo now spans M1–M7. To avoid README bloat, detailed notes live in:
 > - docs/m7/ (validator shapes, quality tracing, MMR λ semantics)
 > - docs/updates/ (progressive PR notes; see template in docs/updates/_template.md)
+> - docs/m3/llm_adapter.md (LLM adapter, fixtures, CI guardrails)
 >
 > For a pre-M8 hardening overview, see Changelog/PreM8Hardening.txt.
 
@@ -41,6 +42,19 @@ python3 scripts/examples_smoke.py --all --fail-fast
 # Or select a subset via globs
 python3 scripts/examples_smoke.py --examples-glob "examples/quality/*.yaml"
 ```
+
+**LLM smoke (M3, optional local):**
+```bash
+# Ensure Ollama is running and the model is installed
+ollama pull qwen3:4b-instruct
+
+# Run a strict-JSON sanity check against the local model
+python3 scripts/llm_smoke.py
+
+# Manual tests (only when you explicitly ask for them)
+pytest -q -m manual           # runs tests/llm/test_manual_smoke_marker.py
+```
+> CI never runs these manual tests and never hits the network; it uses fixtures only.
 
 ## Validate your config (PR16)
 
@@ -385,22 +399,34 @@ Opt-in LLM-driven dialogue while keeping the default rule-based backend and dete
 t3:
   backend: rulebased   # or "llm"
   llm:
-    provider: qwen
-    model: qwen3-4b-instruct
-    temperature: 0.2
-    max_tokens_default: 256
-    timeout_s: 30
+    provider: fixture   # "fixture" | "ollama"
+    model: qwen3:4b-instruct
+    endpoint: http://localhost:11434/api/generate
+    max_tokens: 256
+    temp: 0.2
+    timeout_ms: 10000
+    fixtures:
+      enabled: true
+      path: fixtures/llm/qwen_small.jsonl
 ```
 
 **Provide an adapter at runtime** (no network in CI):
 ```python
 from clematis.adapters.llm import QwenLLMAdapter
 
-def qwen_chat(prompt: str, *, model: str, max_tokens: int, temperature: float, timeout_s: int) -> str:
-    # Your client code to call Qwen (DashScope/Ollama/etc.) and return text
-    return "..."
+# Endpoint-based (Ollama)
+state["llm_adapter"] = QwenLLMAdapter(
+    endpoint="http://localhost:11434/api/generate",
+    model="qwen3:4b-instruct",
+    max_tokens=256,
+    temperature=0.2,
+    timeout_s=30,
+)
 
-state["llm_adapter"] = QwenLLMAdapter(call_fn=qwen_chat, model="qwen3-4b-instruct", temperature=0.2, timeout_s=30)
+# Alternative: custom call_fn if you integrate a different runtime
+def qwen_chat(prompt: str, *, model: str, max_tokens: int, temperature: float, timeout_s: int) -> str:
+    ...  # return raw text
+state["llm_adapter"] = QwenLLMAdapter(call_fn=qwen_chat, model="qwen3:4b-instruct", temperature=0.2, timeout_s=30)
 ```
 
 **Deterministic tests**
@@ -410,6 +436,12 @@ state["llm_adapter"] = QwenLLMAdapter(call_fn=qwen_chat, model="qwen3-4b-instruc
 - If `t3.backend: llm` but no adapter is present, orchestrator falls back to rule-based and logs:
   - `t3_plan.jsonl`: `backend_fallback`, `fallback_reason: "no_adapter"`
   - `t3_dialogue.jsonl`: `backend: "rulebased"`
+
+**CI guardrails (summary)**
+- Network ban enforced in CI; providers other than `fixture` are rejected.
+- If `t3.backend=llm` in CI, `fixtures.enabled` must be `true` and the `fixtures.path` must exist.
+- Every LLM output is parsed and validated against `PLANNER_V1`; invalid JSON or shape ⇒ empty plan with a logged reason.
+- See also: `docs/m3/llm_adapter.md` for fixture format and prompt hashing.
 
 ## M4 — T4 Meta‑Filter & Apply/Persist
 
