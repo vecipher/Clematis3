@@ -9,11 +9,14 @@ clematis/scheduler.py
 clematis.egg-info/PKG-INFO
 clematis.egg-info/SOURCES.txt
 clematis.egg-info/dependency_links.txt
+clematis.egg-info/entry_points.txt
 clematis.egg-info/requires.txt
 clematis.egg-info/top_level.txt
 clematis/adapters/__init__.py
 clematis/adapters/embeddings.py
 clematis/adapters/llm.py
+clematis/cli/__init__.py
+clematis/cli/main.py
 clematis/engine/__init__.py
 clematis/engine/apply.py
 clematis/engine/cache.py
@@ -36,6 +39,7 @@ clematis/engine/stages/t2_quality_norm.py
 clematis/engine/stages/t2_quality_trace.py
 clematis/engine/stages/t3.py
 clematis/engine/stages/t4.py
+clematis/engine/util/__init__.py
 clematis/engine/util/embed_store.py
 clematis/engine/util/lru_bytes.py
 clematis/engine/util/lru_det.py
@@ -61,6 +65,7 @@ tests/test_apply.py
 tests/test_cache_coherency.py
 tests/test_cache_guardrails.py
 tests/test_cache_legacy_lru.py
+tests/test_cli_help.py
 tests/test_config_perf_quality.py
 tests/test_config_validate.py
 tests/test_gel_merge_split.py

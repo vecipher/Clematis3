@@ -1,8 +1,41 @@
-__pycache__/
-*.pyc
-*.pyo
-*.DS_Store
+# Virtual envs
 .venv/
-.logs/
-dist/
+venv/
+env/
+.clean/
+.env/
+.python-version
+
+# Python cache/compiled
+__pycache__/
+*.py[cod]
+*.so
+
+# Build & packaging
 build/
+dist/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+
+# Test/coverage
+.pytest_cache/
+.coverage*
+htmlcov/
+.tox/
+.nox/
+.hypothesis/
+
+# Linters / type checkers
+.mypy_cache/
+.pyre/
+.pytype/
+.ruff_cache/
+
+# IDE/editor
+.vscode/
+.idea/
+*.swp
+
+# OS junk
+.DS_Store

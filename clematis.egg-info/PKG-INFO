@@ -1,9 +1,12 @@
 Metadata-Version: 2.4
 Name: clematis
 Version: 0.8.0a0
-Summary: Clematis — deterministic mind-like simulation engine (M1–M7 baseline)
+Summary: Clematis — deterministic mind-like simulation engine (M1–M8 baseline)
 Author: vecipher
 License-Expression: MIT
+Project-URL: Homepage, https://github.com/vecipher/Clematis3
+Project-URL: Repository, https://github.com/vecipher/Clematis3.git
+Project-URL: Issues, https://github.com/vecipher/Clematis3/issues
 Classifier: Programming Language :: Python :: 3 :: Only
 Classifier: Programming Language :: Python :: 3.11
 Classifier: Programming Language :: Python :: 3.12
@@ -30,16 +33,23 @@ Requires-Dist: zstandard<0.23,>=0.22; extra == "zstd"
 Dynamic: license-file
 
 
-# Clematis v3 — Scaffold (M1–M7)
+# Clematis v3 — Scaffold (M1–M8)
 
-> M7 wrap: This repo now spans M1–M7. To avoid README bloat, detailed notes live in:
-> - docs/m7/ (validator shapes, quality tracing, MMR λ semantics)
-> - docs/updates/ (progressive PR notes; see template in docs/updates/_template.md)
-> - docs/m3/llm_adapter.md (LLM adapter, fixtures, CI guardrails)
+> M8 status: M1–M7 landed. **PR45 (packaging hardening) is in; PR44 (umbrella CLI skeleton) is pending.**
+> - Detailed notes live in `docs/` (see index below) to keep this README lean.
+> - Progressive notes per PR live in `docs/updates/` (append-only).
+> - LLM adapter + fixtures: see `docs/m3/llm_adapter.md`.
 >
-> For a pre-M8 hardening overview, see Changelog/PreM8Hardening.txt.
+> For pre‑M8 hardening notes, see `Changelog/PreM8Hardening.txt`.
+
+## Docs index
+
+- `docs/m7/` — validator shapes, quality tracing, MMR λ semantics
+- `docs/updates/` — progressive PR notes; template at `docs/updates/_template.md`
+- `docs/m3/llm_adapter.md` — LLM adapter, fixtures, CI guardrails
 
 ### Updates stream (rolling)
+
 
 See docs/updates/ for progressive notes per PR (lightweight, append-only).
 
@@ -85,7 +95,67 @@ python3 scripts/llm_smoke.py
 # Manual tests (only when you explicitly ask for them)
 pytest -q -m manual           # runs tests/llm/test_manual_smoke_marker.py
 ```
-> CI never runs these manual tests and never hits the network; it uses fixtures only.
+
+## Packaging & reproducible builds (PR45)
+
+We ship scripts and CI to make source & wheel packages bit‑for‑bit reproducible across two consecutive builds on the **same OS/Python**.
+
+**Fast path**
+```bash
+./scripts/repro_check.sh
+```
+This builds twice and diffs SHA256s of all artifacts under `dist/`. It should print `Reproducible: checksums identical.`
+
+**Manual build with knobs**
+```bash
+source packaging/repro_env.sh
+python -m build
+```
+
+**Manual one‑liner**
+```bash
+SOURCE_DATE_EPOCH=1700000000 TZ=UTC LC_ALL=C.UTF-8 python -m build
+```
+
+The env file sets:
+- `SOURCE_DATE_EPOCH` (default `1700000000`)
+- `TZ=UTC`, `LC_ALL=C.UTF-8`, `LANG=C.UTF-8`
+- `PYTHONHASHSEED=0`, `PYTHONUTF8=1`, `UMASK=0022`
+
+**Notes**
+- Fixtures live under `clematis/fixtures/**` and are included in the sdist/wheel deterministically.
+- `pyproject.toml` uses `setuptools>=77` and non‑namespace package discovery.
+- CI workflow **pkg_repro** builds twice and asserts identical checksums.
+
+**Troubleshooting (checksum drift)**
+- Ensure you’re on `setuptools>=77` and `wheel` up‑to‑date.
+- Make sure you sourced `packaging/repro_env.sh` (locale/time/umask matter).
+- Check `pyproject.toml` has:
+  ```toml
+  [tool.setuptools.packages.find]
+  include = ["clematis*"]
+  namespaces = false
+  ```
+- Avoid writing non-deterministic files during build (timestamps, temp paths, etc.).
+
+**Quick verify**
+```bash
+# Check that LLM fixtures are packaged in the sdist
+tar -tzf dist/*.tar.gz | grep -E 'clematis/fixtures/llm/qwen_small.jsonl'
+
+# (Re)install the wheel explicitly
+pip install --force-reinstall dist/*.whl
+```
+
+## CLI (PR44 — umbrella entrypoint, pending)
+
+A minimal command‑line interface will land in PR44:
+
+- Entry point: `[project.scripts] clematis = "clematis.cli.main:main"`
+- Commands: `clematis --help`, `clematis --version`
+- Deterministic help/version output with a tiny unit test
+
+Until PR44 merges, the CLI is not installed; use the Python module invocations shown in **Quick start**.
 
 ## Validate your config (PR16)
 
@@ -1690,3 +1760,4 @@ t2:
 ## Changelog & Releases
 - See the [CHANGELOG](./CHANGELOG.md) for notable changes.
 - Binary / source packages and release notes are on the [Releases] page.
+

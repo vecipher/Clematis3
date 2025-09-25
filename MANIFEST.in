@@ -1,4 +1,7 @@
-include README.md LICENSE
-graft clematis
-recursive-include clematis/fixtures *.jsonl *.json *.yaml *.yml *.txt
+graft clematis/fixtures
+
+include README.md
+include LICENSE
+include clematis/VERSION
+
 global-exclude __pycache__ *.py[cod] *.so .DS_Store

@@ -1,14 +1,21 @@
 
-# Clematis v3 — Scaffold (M1–M7)
+# Clematis v3 — Scaffold (M1–M8)
 
-> M7 wrap: This repo now spans M1–M7. To avoid README bloat, detailed notes live in:
-> - docs/m7/ (validator shapes, quality tracing, MMR λ semantics)
-> - docs/updates/ (progressive PR notes; see template in docs/updates/_template.md)
-> - docs/m3/llm_adapter.md (LLM adapter, fixtures, CI guardrails)
+> M8 status: M1–M7 landed. **PR45 (packaging hardening) is in; PR44 (umbrella CLI skeleton) is pending.**
+> - Detailed notes live in `docs/` (see index below) to keep this README lean.
+> - Progressive notes per PR live in `docs/updates/` (append-only).
+> - LLM adapter + fixtures: see `docs/m3/llm_adapter.md`.
 >
-> For a pre-M8 hardening overview, see Changelog/PreM8Hardening.txt.
+> For pre‑M8 hardening notes, see `Changelog/PreM8Hardening.txt`.
+
+## Docs index
+
+- `docs/m7/` — validator shapes, quality tracing, MMR λ semantics
+- `docs/updates/` — progressive PR notes; template at `docs/updates/_template.md`
+- `docs/m3/llm_adapter.md` — LLM adapter, fixtures, CI guardrails
 
 ### Updates stream (rolling)
+
 
 See docs/updates/ for progressive notes per PR (lightweight, append-only).
 
@@ -71,6 +78,11 @@ source packaging/repro_env.sh
 python -m build
 ```
 
+**Manual one‑liner**
+```bash
+SOURCE_DATE_EPOCH=1700000000 TZ=UTC LC_ALL=C.UTF-8 python -m build
+```
+
 The env file sets:
 - `SOURCE_DATE_EPOCH` (default `1700000000`)
 - `TZ=UTC`, `LC_ALL=C.UTF-8`, `LANG=C.UTF-8`
@@ -91,6 +103,25 @@ The env file sets:
   namespaces = false
   ```
 - Avoid writing non-deterministic files during build (timestamps, temp paths, etc.).
+
+**Quick verify**
+```bash
+# Check that LLM fixtures are packaged in the sdist
+tar -tzf dist/*.tar.gz | grep -E 'clematis/fixtures/llm/qwen_small.jsonl'
+
+# (Re)install the wheel explicitly
+pip install --force-reinstall dist/*.whl
+```
+
+## CLI (PR44 — umbrella entrypoint, pending)
+
+A minimal command‑line interface will land in PR44:
+
+- Entry point: `[project.scripts] clematis = "clematis.cli.main:main"`
+- Commands: `clematis --help`, `clematis --version`
+- Deterministic help/version output with a tiny unit test
+
+Until PR44 merges, the CLI is not installed; use the Python module invocations shown in **Quick start**.
 
 ## Validate your config (PR16)
 
