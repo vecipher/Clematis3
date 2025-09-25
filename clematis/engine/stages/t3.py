@@ -1,6 +1,7 @@
 from __future__ import annotations
 from typing import Dict, Any, List, Tuple, Callable, Optional
 from datetime import datetime, timezone
+import os
 
 from ..types import Plan, SpeakOp, EditGraphOp, RequestRetrieveOp
 # PR8/M3-08: Optional LLM adapter types (duck-typed if unavailable)
@@ -809,6 +810,21 @@ def _get_llm_adapter_from_cfg(cfg: Dict[str, Any]):
         return None
     llm = t3.get("llm", {}) if isinstance(t3, dict) else {}
     provider = str(llm.get("provider", "fixture"))
+    # CI guard: enforce fixture-only provider and valid fixtures when running in CI
+    try:
+        ci = str(os.environ.get("CI", "")).lower() == "true"
+    except Exception:
+        ci = False
+    if ci:
+        if provider != "fixture":
+            raise LLMAdapterError(f"CI requires fixture provider; got {provider}")
+        fixtures = (llm.get("fixtures", {}) or {}) if isinstance(llm, dict) else {}
+        enabled = fixtures.get("enabled", True)
+        if not enabled:
+            raise LLMAdapterError("CI requires fixtures.enabled=true")
+        fx_path = fixtures.get("path") or "fixtures/llm/qwen_small.jsonl"
+        if not os.path.exists(fx_path):
+            raise LLMAdapterError(f"CI fixture path not found: {fx_path}")
     if provider == "fixture":
         if FixtureLLMAdapter is None:
             return None
@@ -854,7 +870,18 @@ def plan_with_llm(ctx, state: Any, cfg: Dict[str, Any]) -> Dict[str, Any]:
     Does not mutate graphs or downstream state.
     """
     import json as _json
-    adapter = _get_llm_adapter_from_cfg(cfg)
+    try:
+        adapter = _get_llm_adapter_from_cfg(cfg)
+    except Exception as e:
+        try:
+            logs = getattr(state, "logs", None)
+            if isinstance(logs, list):
+                prov = str((((cfg.get("t3", {}) or {}).get("llm", {}) or {}).get("provider", "unknown")))
+                ci = str(os.environ.get("CI", ""))
+                logs.append({"llm_error": str(e), "provider": prov, "ci": ci})
+        except Exception:
+            pass
+        return {"plan": [], "rationale": "fallback: invalid llm output"}
     if adapter is None:
         # Not enabled or not available -> return empty plan (caller may fall back to rulebased)
         return {"plan": [], "rationale": "fallback: llm backend not active"}
@@ -882,7 +909,9 @@ def plan_with_llm(ctx, state: Any, cfg: Dict[str, Any]) -> Dict[str, Any]:
         try:
             logs = getattr(state, "logs", None)
             if isinstance(logs, list):
-                logs.append({"llm_error": str(e)})
+                prov = str((((cfg.get("t3", {}) or {}).get("llm", {}) or {}).get("provider", "unknown")))
+                ci = str(os.environ.get("CI", ""))
+                logs.append({"llm_error": str(e), "provider": prov, "ci": ci})
         except Exception:
             pass
         return {"plan": [], "rationale": "fallback: invalid llm output"}
