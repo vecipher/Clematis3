@@ -4,6 +4,7 @@ README.md
 pyproject.toml
 clematis/VERSION
 clematis/__init__.py
+clematis/resources.py
 clematis/scheduler.py
 clematis.egg-info/PKG-INFO
 clematis.egg-info/SOURCES.txt
@@ -41,6 +42,7 @@ clematis/engine/util/lru_det.py
 clematis/engine/util/metrics.py
 clematis/engine/util/ring.py
 clematis/engine/util/snapshot_delta.py
+clematis/fixtures/llm/qwen_small.jsonl
 clematis/graph/__init__.py
 clematis/graph/store.py
 clematis/io/__init__.py

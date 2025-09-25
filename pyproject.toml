@@ -59,3 +59,12 @@ markers = [
   "perf: opt-in performance tests",
   "manual: tests that require external runtimes/models or network; excluded in CI",
 ]
+
+[tool.setuptools.package-data]
+clematis = [
+  "fixtures/**/*.jsonl",
+  "fixtures/**/*.txt",
+  "fixtures/**/*.yaml",
+  "fixtures/**/*.yml",
+  "fixtures/**/*.json",
+]
