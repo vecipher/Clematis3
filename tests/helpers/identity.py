@@ -36,12 +36,19 @@ def normalize_json_line(line: str) -> str:
 def normalize_json_lines(lines: list[str]) -> list[str]:
     return [normalize_json_line(ln) for ln in lines if ln.strip()]
 
-def normalize_logs_dir(p: str) -> str:
+def normalize_logs_dir(p: str, base: str | None = None) -> str:
     """
     Normalize a logs directory path deterministically for comparisons:
     - Expand ~ and environment vars
+    - If `base` is provided and `p` is relative, join against it
     - Resolve symlinks via realpath
     - Collapse redundant separators / trailing slashes via normpath
     """
+    # Normalize base first if present
+    if base:
+        base = os.path.normpath(os.path.realpath(os.path.expanduser(os.path.expandvars(base))))
+    # Expand and normalize p
     p = os.path.expanduser(os.path.expandvars(p))
+    if base and not os.path.isabs(p):
+        p = os.path.join(base, p)
     return os.path.normpath(os.path.realpath(p))
