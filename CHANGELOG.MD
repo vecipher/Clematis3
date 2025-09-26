@@ -421,3 +421,47 @@ All notable changes to this project will be documented in this file.
 ### Tests (PR41)
 - `tests/scripts/test_rq_eval_cli.py` — unit tests for metric functions and CLI schema/CSV; skips gracefully if runtime entrypoint is unavailable.
 - `tests/integration/test_rq_eval_end_to_end.py` — subprocess smoke; verifies outputs; trace presence is optional and sanity-checked only when present.
+
+---
+
+## CI guardrails !!!
+
+### 4.1 `.github/workflows/cli-smokes.yml` (new)
+```yaml
+name: CLI Smokes
+on:
+  push:
+    paths:
+      - 'clematis/cli/**'
+      - 'scripts/**'
+      - 'docs/cli.md'
+      - 'tests/cli/**'
+      - '.github/workflows/cli-smokes.yml'
+  pull_request:
+
+jobs:
+  cli:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.11' }
+      - run: pip install -e .[dev]
+      - name: Help matrix
+        run: |
+          python -m clematis --help >/dev/null
+          python -m clematis rotate-logs --help >/dev/null
+          python -m clematis inspect-snapshot --help >/dev/null
+          python -m clematis bench-t4 --help >/dev/null
+          python -m clematis seed-lance-demo --help >/dev/null
+      - name: Pass-through with leading --
+        run: |
+          python -m clematis --debug rotate-logs -- --dir ./.logs --dry-run 2>stderr.txt || true
+          head -n1 stderr.txt | grep "delegate -> scripts.rotate_logs"
+          head -n1 stderr.txt | grep "argv=\['--dir', './.logs', '--dry-run'\]"
+      - name: Script shim hint (deprecation stderr)
+        run: |
+          python scripts/rotate_logs.py --dry-run 1>out.txt 2>err.txt || true
+          head -n1 err.txt | grep "direct script is deprecated"
+      - name: CLI tests
+        run: pytest -q tests/cli

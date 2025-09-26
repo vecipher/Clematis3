@@ -1,4 +1,5 @@
 import argparse, importlib, importlib.util, inspect, sys
+from ._wrapper_common import maybe_debug
 from pathlib import Path
 
 _CANDIDATES = ("clematis.scripts.bench_t4", "scripts.bench_t4")
@@ -39,15 +40,20 @@ def _entrypoint(ns: argparse.Namespace) -> int:
     argv = list(getattr(ns, "args", []) or [])
     if argv and argv[0] == "--":
         argv = argv[1:]
+    # Intercept help for wrapper
+    if "-h" in argv or "--help" in argv:
+        parser = getattr(ns, "_parser", None)
+        if parser is not None:
+            parser.print_help()
+            return 0
+    maybe_debug(ns, resolved="scripts.bench_t4", argv=argv)
     return int(_delegate(argv) or 0)
 
 def register(subparsers: argparse._SubParsersAction) -> None:
     p = subparsers.add_parser(
         "bench-t4",
-        help="Tiny benchmark for T4 apply path (wrapper).",
+        help="Delegates to scripts/bench_t4.py",
         description="Delegates to scripts/bench_t4.py",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-        allow_abbrev=False,
     )
     p.add_argument("args", nargs=argparse.REMAINDER, help="Pass-through arguments for scripts/bench_t4.py.")
-    p.set_defaults(func=_entrypoint)
+    p.set_defaults(func=_entrypoint, _parser=p)

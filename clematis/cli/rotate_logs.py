@@ -1,5 +1,6 @@
 import argparse, importlib, importlib.util, inspect, sys
 from pathlib import Path
+from ._wrapper_common import maybe_debug
 
 _CANDIDATES = ("clematis.scripts.rotate_logs", "scripts.rotate_logs")
 
@@ -35,19 +36,24 @@ def _delegate(argv):
     except SystemExit as e:
         return int(getattr(e, "code", 0) or 0)
 
-def _entrypoint(ns: argparse.Namespace) -> int:
-    argv = list(getattr(ns, "args", []) or [])
+def _entrypoint(ns):
+    argv = list(ns.args or [])
     if argv and argv[0] == "--":
         argv = argv[1:]
+    # Intercept help for the wrapper itself (REM AINDER would swallow it)
+    if "-h" in argv or "--help" in argv:
+        parser = getattr(ns, "_parser", None)
+        if parser is not None:
+            parser.print_help()
+            return 0
+    maybe_debug(ns, resolved="scripts.rotate_logs", argv=argv)
     return int(_delegate(argv) or 0)
 
 def register(subparsers: argparse._SubParsersAction) -> None:
     p = subparsers.add_parser(
         "rotate-logs",
-        help="Rotate/compress *.jsonl logs in a directory (wrapper).",
+        help="Delegates to scripts/rotate_logs.py",
         description="Delegates to scripts/rotate_logs.py",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-        allow_abbrev=False,
     )
-    p.add_argument("args", nargs=argparse.REMAINDER, help="Pass-through arguments for scripts/rotate_logs.py.")
-    p.set_defaults(func=_entrypoint)
+    p.add_argument("args", nargs=argparse.REMAINDER)
+    p.set_defaults(func=_entrypoint, _parser=p)

@@ -1,0 +1,1 @@
+[clematis] delegate -> scripts.rotate_logs argv=['--dir', './.logs', '--dry-run']

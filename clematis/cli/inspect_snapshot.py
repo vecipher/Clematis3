@@ -1,4 +1,5 @@
 import argparse, importlib, importlib.util, inspect, sys
+from ._wrapper_common import maybe_debug
 from pathlib import Path
 
 _CANDIDATES = ("clematis.scripts.inspect_snapshot", "scripts.inspect_snapshot")
@@ -39,15 +40,20 @@ def _entrypoint(ns: argparse.Namespace) -> int:
     argv = list(getattr(ns, "args", []) or [])
     if argv and argv[0] == "--":
         argv = argv[1:]
+    # Intercept help for wrapper
+    if "-h" in argv or "--help" in argv:
+        parser = getattr(ns, "_parser", None)
+        if parser is not None:
+            parser.print_help()
+            return 0
+    maybe_debug(ns, resolved="scripts.inspect_snapshot", argv=argv)
     return int(_delegate(argv) or 0)
 
 def register(subparsers: argparse._SubParsersAction) -> None:
     p = subparsers.add_parser(
         "inspect-snapshot",
-        help="Inspect snapshots directory and emit JSON summary (wrapper).",
+        help="Delegates to scripts/inspect_snapshot.py",
         description="Delegates to scripts/inspect_snapshot.py",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-        allow_abbrev=False,
     )
     p.add_argument("args", nargs=argparse.REMAINDER, help="Pass-through arguments for scripts/inspect_snapshot.py.")
-    p.set_defaults(func=_entrypoint)
+    p.set_defaults(func=_entrypoint, _parser=p)

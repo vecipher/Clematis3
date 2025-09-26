@@ -1,58 +1,90 @@
 # clematis/cli/main.py
 import argparse
-from clematis import __version__
+import sys
+from typing import List
+from . import rotate_logs, inspect_snapshot, bench_t4, seed_lance_demo
+
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(
+    parser = argparse.ArgumentParser(
         prog="clematis",
-        description="Clematis CLI",
+        description="Clematis umbrella CLI",
         allow_abbrev=False,
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    p.add_argument("--version", action="version", version=f"clematis {__version__}")
-    subs = p.add_subparsers(dest="command", metavar="<command>")
+    # Top-level version flag (kept for help determinism/tests)
+    try:
+        from clematis import __version__ as _VER  # lazy import to avoid side effects
+    except Exception:
+        _VER = "unknown"
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"clematis {_VER}",
+    )
+    # Quiet breadcrumb only; not forwarded to subcommands.
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help=argparse.SUPPRESS,
+    )
+    subparsers = parser.add_subparsers(dest="command")
 
-    # Register subcommands (wrappers) — keep imports local to avoid heavy imports at import time.
-    from . import rotate_logs as _rotate_logs
-    from . import inspect_snapshot as _inspect_snapshot
-    from . import bench_t4 as _bench_t4
-    from . import seed_lance_demo as _seed_lance_demo
-    # (Optional extras; wire them now or in a follow-up)
-    # from . import mem_inspect as _mem_inspect
-    # from . import mem_compact as _mem_compact
-    # from . import llm_smoke as _llm_smoke
-    # from . import rq_trace_dump as _rq_trace_dump
+    # Register wrappers (pass-through pattern)
+    rotate_logs.register(subparsers)
+    inspect_snapshot.register(subparsers)
+    bench_t4.register(subparsers)
+    seed_lance_demo.register(subparsers)
 
-    _rotate_logs.register(subs)
-    _inspect_snapshot.register(subs)
-    _bench_t4.register(subs)
-    _seed_lance_demo.register(subs)
-    # _mem_inspect.register(subs)
-    # _mem_compact.register(subs)
-    # _llm_smoke.register(subs)
-    # _rq_trace_dump.register(subs)
+    return parser
 
-    return p
 
-def main(argv=None) -> int:
+def main(argv: List[str] | None = None) -> int:
+    if argv is None:
+        argv = sys.argv[1:]
     parser = build_parser()
+
+    # Prefer parsing from the first subcommand onward to tolerate unknown
+    # top-level flags (which should be treated as extras for the subcommand).
+    try:
+        sub_actions = [
+            a for a in parser._actions
+            if isinstance(a, argparse._SubParsersAction)
+        ]
+        choices = sub_actions[0].choices if sub_actions else {}
+    except Exception:
+        choices = {}
+
+    idx = next((i for i, tok in enumerate(argv) if tok in choices), -1)
+    if idx >= 0:
+        pre = [t for t in argv[:idx] if t != "--debug"]  # extras before subcommand
+        # Parse only the subcommand token to bind the correct subparser/func
+        ns, _ = parser.parse_known_args([argv[idx]])
+        if not hasattr(ns, "func"):
+            parser.print_help(sys.stderr)
+            return 2
+        # Propagate top-level --debug if it was in the preamble
+        if "--debug" in argv[:idx]:
+            setattr(ns, "debug", True)
+        # Everything after the subcommand is the sub-argv for the wrapper
+        sub_args = list(argv[idx + 1:])
+        if sub_args and sub_args[0] == "--":
+            sub_args = sub_args[1:]
+        merged = pre + sub_args
+        setattr(ns, "args", merged)
+        return ns.func(ns)
+
+    # Fallback: no subcommand present; behave as before.
     ns, extras = parser.parse_known_args(argv)
-
-    func = getattr(ns, "func", None)
-    if func is None:
-        parser.print_help()
+    if not hasattr(ns, "func"):
+        parser.print_help(sys.stderr)
         return 2
+    sub_args = list(getattr(ns, "args", []))
+    if sub_args and sub_args[0] == "--":
+        sub_args = sub_args[1:]
+    merged = list(extras) + sub_args
+    setattr(ns, "args", merged)
+    return ns.func(ns)
 
-    # PR46: preserve user order. Top-level unknown flags (extras) may contain a flag whose value
-    # was captured by the subparser's REMAINDER. Prepend extras before ns.args.
-    if extras:
-        if hasattr(ns, "args") and isinstance(getattr(ns, "args", None), list):
-            ns.args = extras + ns.args
-        else:
-            ns.args = extras
-
-    result = func(ns)
-    return int(result) if isinstance(result, int) else 0
 
 if __name__ == "__main__":
     raise SystemExit(main())
