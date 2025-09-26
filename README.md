@@ -1,7 +1,7 @@
 
 # Clematis v3 — Scaffold (M1–M8)
 
-> M8 status: M1–M7 landed. **PR45 (packaging hardening) is in; PR44 (umbrella CLI skeleton) is pending.**
+> M8 status: M1–M7 landed. **PR45 (packaging hardening) and PR46 (CLI wrappers & merge-order fix) are in.** Umbrella CLI is available via `python -m clematis` (console script optional).
 > - Detailed notes live in `docs/` (see index below) to keep this README lean.
 > - Progressive notes per PR live in `docs/updates/` (append-only).
 > - LLM adapter + fixtures: see `docs/m3/llm_adapter.md`.
@@ -25,6 +25,7 @@ The demo exercises the canonical turn loop and writes structured JSONL logs for 
 ## Quick start
 
 
+
 ```bash
 # Run the end-to-end demo turn (writes logs under .logs/)
 python3 scripts/run_demo.py
@@ -39,6 +40,30 @@ python3 scripts/rq_trace_dump.py --trace_dir logs/quality --limit 5
 export CLEMATIS_CONFIG=examples/quality/lexical_fusion.yaml
 pytest -q
 python3 scripts/rq_trace_dump.py --trace_dir logs/quality --limit 5
+```
+
+```
+### CLI quick start (PR46)
+
+Minimal examples using the umbrella CLI (`python -m clematis`). These are offline‑safe and deterministic.
+
+```bash
+# Umbrella CLI entrypoint
+python -m clematis --help
+python -m clematis rotate-logs --help
+
+# Rotate logs (dry‑run)
+python -m clematis rotate-logs --dir ./.logs --pattern '*.jsonl' --max-bytes 10000000 --backups 1 --dry-run
+
+# Inspect latest snapshot
+python -m clematis inspect-snapshot --dir ./.data/snapshots --format json
+
+# Tiny microbench (JSON output)
+python -m clematis bench-t4 --num 1 --runs 1 --json
+
+# Seed a tiny LanceDB demo locally
+python -m clematis seed-lance-demo --uri ./.data/lance-demo --overwrite
+```
 ```
 
 **Examples smoke (M7):**
@@ -113,15 +138,30 @@ tar -tzf dist/*.tar.gz | grep -E 'clematis/fixtures/llm/qwen_small.jsonl'
 pip install --force-reinstall dist/*.whl
 ```
 
-## CLI (PR44 — umbrella entrypoint, pending)
+## CLI (PR46 — umbrella entrypoint + pass‑through wrappers)
 
-A minimal command‑line interface will land in PR44:
+The umbrella CLI is available via **`python -m clematis`**. When installed as a package, a console script `clematis` may also be available (optional). Version/help:
+```bash
+python -m clematis --version
+python -m clematis --help
+```
+### Subcommands (wrappers)
+These thin wrappers delegate to `scripts/<name>.py` and pass through all remaining arguments. They are offline‑safe and deterministic.
 
-- Entry point: `[project.scripts] clematis = "clematis.cli.main:main"`
-- Commands: `clematis --help`, `clematis --version`
-- Deterministic help/version output with a tiny unit test
+| Command             | Purpose                                      | Example |
+|---|---|---|
+| `rotate-logs`       | Rotate/compress JSONL logs by size           | `python -m clematis rotate-logs --dir ./.logs --pattern '*.jsonl' --max-bytes 10000000 --backups 1 --dry-run` |
+| `inspect-snapshot`  | Summarize latest snapshot (JSON/table)       | `python -m clematis inspect-snapshot --dir ./.data/snapshots --format json` |
+| `bench-t4`          | Tiny meta‑filter microbench (JSON option)    | `python -m clematis bench-t4 --num 1 --runs 1 --json` |
+| `seed-lance-demo`   | Seed a tiny LanceDB demo shard locally       | `python -m clematis seed-lance-demo --uri ./.data/lance-demo --overwrite` |
 
-Until PR44 merges, the CLI is not installed; use the Python module invocations shown in **Quick start**.
+**Notes**
+- Argument parsing fix (PR46): flags discovered at the top level are **prepended** before subparser `REMAINDER` to preserve `--flag value` pairs. This unblocks patterns like `--dir ./path --dry-run` and `--num 1 --runs 1 --json`.
+- Leading `--` is supported for strict pass‑through, e.g. `python -m clematis rotate-logs -- --dir ./.logs --dry-run`.
+- Wrappers search for the underlying module in `scripts.<name>` and `clematis.scripts.<name>`, then fall back to a repo‑local `scripts/<name>.py`. Running from the repo root is recommended.
+
+### CI: help smokes
+A lightweight CI smoke runs `python -m clematis <sub> --help` for each wrapper to guard wiring and the merge‑order rule. See `.github/workflows/cli-smokes.yml`.
 
 ## Validate your config (PR16)
 
