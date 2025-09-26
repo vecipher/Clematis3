@@ -69,7 +69,7 @@ jobs:
           show("import clematis", lambda: __import__("clematis"))
           try:
               import clematis
-              print("clematis.__file__:", getattr(clematis, "__file__", None))
+              print("clematis.__file__:", getattr(clemmatis, "__file__", None))
               root = os.path.dirname(getattr(clematis, "__file__", "") or "")
               print("ls clematis root:", os.listdir(root) if root and os.path.isdir(root) else "N/A")
           except Exception:
@@ -202,6 +202,9 @@ jobs:
                       # Skip egg-info metadata folders; only hash payload semantics
                       if "/.egg-info/" in m.name or m.name.endswith(".egg-info"):
                           continue
+                      # Also skip top-level PKG-INFO (sdist metadata)
+                      if m.name == "PKG-INFO" or m.name.endswith("/PKG-INFO"):
+                          continue
                       if not m.isfile():
                           continue
                       f = tf.extractfile(m)
@@ -257,6 +260,9 @@ jobs:
                   for m in tf.getmembers():
                       # Skip egg-info metadata folders; only hash payload semantics
                       if "/.egg-info/" in m.name or m.name.endswith(".egg-info"):
+                          continue
+                      # Also skip top-level PKG-INFO (sdist metadata)
+                      if m.name == "PKG-INFO" or m.name.endswith("/PKG-INFO"):
                           continue
                       if not m.isfile():
                           continue
