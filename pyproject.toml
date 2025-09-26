@@ -30,10 +30,12 @@ dev = [
   "hypothesis>=6,<7",
   "ruff>=0.6,<1",
   "pyright>=1.1,<2",
+  "numpy>=1.26,<2",
 ]
 test = [
   "pytest>=8,<9",
   "hypothesis>=6,<7",
+  "numpy>=1.26,<2",
   "zstandard>=0.22,<0.23",
 ]
 lancedb = [
