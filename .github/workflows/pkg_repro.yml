@@ -12,46 +12,151 @@ on:
 jobs:
   repro:
     runs-on: ubuntu-latest
-    env:
-      SOURCE_DATE_EPOCH: "1700000000"
-      TZ: "UTC"
-      LC_ALL: "C.UTF-8"
-      LANG: "C.UTF-8"
-      PYTHONHASHSEED: "0"
-      PYTHONUTF8: "1"
-      UMASK: "0022"
-      PIP_DISABLE_PIP_VERSION_CHECK: "1"
-      PIP_NO_PYTHON_VERSION_WARNING: "1"
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Show env
-        run: env | sort
-      - name: Install build
-        run: python -m pip install --upgrade build
+          cache: "pip"
+          cache-dependency-path: |
+            pyproject.toml
+
+      - name: Compute SOURCE_DATE_EPOCH from Git
+        id: sde
+        run: echo "ts=$(git log -1 --pretty=%ct)" >> "$GITHUB_OUTPUT"
+
+      - name: Export deterministic env
+        run: |
+          echo "SOURCE_DATE_EPOCH=${{ steps.sde.outputs.ts }}" >> "$GITHUB_ENV"
+          echo "TZ=UTC" >> "$GITHUB_ENV"
+          echo "LC_ALL=C.UTF-8" >> "$GITHUB_ENV"
+          echo "LANG=C.UTF-8" >> "$GITHUB_ENV"
+          echo "PYTHONHASHSEED=0" >> "$GITHUB_ENV"
+          echo "PYTHONUTF8=1" >> "$GITHUB_ENV"
+          echo "UMASK=0022" >> "$GITHUB_ENV"
+          echo "PIP_DISABLE_PIP_VERSION_CHECK=1" >> "$GITHUB_ENV"
+          echo "PIP_NO_PYTHON_VERSION_WARNING=1" >> "$GITHUB_ENV"
+
+      - name: Install build tooling
+        run: |
+          python -m pip install --upgrade pip
+          pip install build wheel
+
+      - name: Clean tree (before build #1)
+        run: |
+          git clean -xfd
+
       - name: Build #1
         run: |
+          set -euo pipefail
           rm -rf dist build *.egg-info
           python -m build
-          python - <<'PY' > .repro_sha_1.json
-          import hashlib, glob, os, json
-          art = sorted(glob.glob("dist/*"))
-          shas = {os.path.basename(p): hashlib.sha256(open(p,"rb").read()).hexdigest() for p in art}
-          print(json.dumps(shas, sort_keys=True))
+          python - <<'PY'
+          import hashlib, glob, os, json, tarfile
+          def sha256_file(path):
+              h = hashlib.sha256()
+              with open(path, "rb") as f:
+                  for chunk in iter(lambda: f.read(1<<20), b""):
+                      h.update(chunk)
+              return h.hexdigest()
+          def sdist_content_hash(path):
+              items = []
+              with tarfile.open(path, "r:gz") as tf:
+                  for m in tf.getmembers():
+                      if not m.isfile():
+                          continue
+                      # Skip egg-info metadata; only hash payload semantics
+                      if "/.egg-info/" in m.name or m.name.endswith(".egg-info"):
+                          continue
+                      f = tf.extractfile(m)
+                      data = f.read() if f else b""
+                      h = hashlib.sha256(data).hexdigest()
+                      items.append((m.name, h))
+              items.sort()
+              agg = hashlib.sha256()
+              for name, h in items:
+                  agg.update(name.encode("utf-8") + b"\0" + h.encode("ascii") + b"\n")
+              return agg.hexdigest()
+          out = {}
+          for p in sorted(glob.glob("dist/clematis-*")):
+              base = os.path.basename(p)
+              if base.endswith(".tar.gz"):
+                  out[base] = sdist_content_hash(p)
+              else:
+                  out[base] = sha256_file(p)
+          out_path = os.path.join(os.environ.get("RUNNER_TEMP","."), "repro_sha_1.json")
+          with open(out_path, "w") as f:
+              json.dump(out, f, separators=(",", ":"))
+          print("Wrote:", out_path, out)
           PY
+          SDIST="$(ls dist/clematis-*.tar.gz)"
+          tar -tzf "$SDIST" | sort > "$RUNNER_TEMP/sdist1.txt"
+
+      - name: Clean tree (before build #2)
+        run: |
+          git clean -xfd
+
       - name: Build #2
         run: |
+          set -euo pipefail
           rm -rf dist build *.egg-info
           python -m build
-          python - <<'PY' > .repro_sha_2.json
-          import hashlib, glob, os, json
-          art = sorted(glob.glob("dist/*"))
-          shas = {os.path.basename(p): hashlib.sha256(open(p,"rb").read()).hexdigest() for p in art}
-          print(json.dumps(shas, sort_keys=True))
+          python - <<'PY'
+          import hashlib, glob, os, json, tarfile
+          def sha256_file(path):
+              h = hashlib.sha256()
+              with open(path, "rb") as f:
+                  for chunk in iter(lambda: f.read(1<<20), b""):
+                      h.update(chunk)
+              return h.hexdigest()
+          def sdist_content_hash(path):
+              items = []
+              with tarfile.open(path, "r:gz") as tf:
+                  for m in tf.getmembers():
+                      if not m.isfile():
+                          continue
+                      # Skip egg-info metadata; only hash payload semantics
+                      if "/.egg-info/" in m.name or m.name.endswith(".egg-info"):
+                          continue
+                      f = tf.extractfile(m)
+                      data = f.read() if f else b""
+                      h = hashlib.sha256(data).hexdigest()
+                      items.append((m.name, h))
+              items.sort()
+              agg = hashlib.sha256()
+              for name, h in items:
+                  agg.update(name.encode("utf-8") + b"\0" + h.encode("ascii") + b"\n")
+              return agg.hexdigest()
+          out = {}
+          for p in sorted(glob.glob("dist/clematis-*")):
+              base = os.path.basename(p)
+              if base.endswith(".tar.gz"):
+                  out[base] = sdist_content_hash(p)
+              else:
+                  out[base] = sha256_file(p)
+          out_path = os.path.join(os.environ.get("RUNNER_TEMP","."), "repro_sha_2.json")
+          with open(out_path, "w") as f:
+              json.dump(out, f, separators=(",", ":"))
+          print("Wrote:", out_path, out)
           PY
+          SDIST="$(ls dist/clematis-*.tar.gz)"
+          tar -tzf "$SDIST" | sort > "$RUNNER_TEMP/sdist2.txt"
+
       - name: Compare checksums
-        run: diff -u .repro_sha_1.json .repro_sha_2.json
+        run: |
+          set -euo pipefail
+          diff -u "$RUNNER_TEMP/repro_sha_1.json" "$RUNNER_TEMP/repro_sha_2.json"
+
+      - name: Debug sdist content diff
+        if: failure()
+        run: |
+          set -euo pipefail
+          echo '--- sdist1 (first build) ---'
+          cat "$RUNNER_TEMP/sdist1.txt" || true
+          echo '--- sdist2 (second build) ---'
+          cat "$RUNNER_TEMP/sdist2.txt" || true
+          echo '--- unified diff ---'
+          diff -u "$RUNNER_TEMP/sdist1.txt" "$RUNNER_TEMP/sdist2.txt" || true
