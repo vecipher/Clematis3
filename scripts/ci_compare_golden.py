@@ -1,5 +1,3 @@
-
-
 #!/usr/bin/env python3
 """
 CI Golden Identity Guard (disabled path)
@@ -25,6 +23,8 @@ from typing import Any, Dict, List
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
+
+NORM_DIR = os.path.join(REPO_ROOT, ".norm")
 
 # Lazy imports after path setup
 from clematis.io.config import load_config  # type: ignore
@@ -155,6 +155,10 @@ def main(argv: List[str] | None = None) -> int:
     else:
         files = args.files
 
+    # Ensure normalized output dirs exist for external diffs in CI
+    os.makedirs(os.path.join(NORM_DIR, "golden"), exist_ok=True)
+    os.makedirs(os.path.join(NORM_DIR, "actual"), exist_ok=True)
+
     diffs: List[str] = []
     for fname in files:
         actual_path = os.path.join(ld, fname)
@@ -176,6 +180,11 @@ def main(argv: List[str] | None = None) -> int:
         actual_cmp = actual_lines
         if len(golden_lines) == 1 and len(actual_lines) >= 1:
             actual_cmp = [actual_lines[0]]
+
+        # Materialize normalized lines for CI-side shell diffs (if any)
+        _write_lines(os.path.join(NORM_DIR, "golden", fname), golden_lines)
+        _write_lines(os.path.join(NORM_DIR, "actual", fname), actual_cmp)
+
         if actual_cmp != golden_lines:
             diff = "\n".join(
                 difflib.unified_diff(
@@ -194,6 +203,7 @@ def main(argv: List[str] | None = None) -> int:
         return 0
 
     if diffs:
+        print("Normalized logs written to ./.norm")
         return 2
 
     print("Golden identity check passed.")
