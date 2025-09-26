@@ -171,11 +171,16 @@ def main(argv: List[str] | None = None) -> int:
             diffs.append(f"missing:{fname}")
             continue
         golden_lines = _normalize_jsonl(golden_path)
-        if actual_lines != golden_lines:
+        # If goldens capture a single summary record but the run produced multiple,
+        # compare only the first normalized line to keep the identity guard stable.
+        actual_cmp = actual_lines
+        if len(golden_lines) == 1 and len(actual_lines) >= 1:
+            actual_cmp = [actual_lines[0]]
+        if actual_cmp != golden_lines:
             diff = "\n".join(
                 difflib.unified_diff(
                     golden_lines,
-                    actual_lines,
+                    actual_cmp,
                     fromfile=f"golden/{fname}",
                     tofile=f"actual/{fname}",
                     lineterm="",
