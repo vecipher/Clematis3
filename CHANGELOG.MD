@@ -2,6 +2,34 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+```
+### M8 — Packaging & CLI (PR46 — pass-through wrappers & merge-order fix)
+
+#### Added
+- **CLI wrappers** under `clematis/cli/`: `rotate-logs`, `inspect-snapshot`, `bench-t4`, `seed-lance-demo`. Each delegates to `scripts/<name>.py`, accepts `REMAINDER` arguments, and strips a leading `--` when present to preserve parity with direct script invocation.
+- **Entry-point**: `clematis/__main__.py` trampoline enables `python -m clematis …`.
+- **Docs**: README gains a short subcommands table and example invocations for the four wrappers.
+
+#### Fixed
+- **Argparse merge-order** in `clematis/cli/main.py`: `parse_known_args` can split a `--flag value` pair across `extras` (flag) and the subparser’s `REMAINDER` (value). We now **prepend** `extras` to `ns.args` (`ns.args = extras + ns.args`) so flags remain adjacent to their values. Fixes failures like:
+  - `python -m clematis rotate-logs --dir ./.logs --dry-run`
+  - `python -m clematis bench-t4 --num 1 --runs 1 --json`
+  - `python -m clematis seed-lance-demo --uri ./.data/lance-demo --overwrite`
+
+#### CI
+- **CLI help smokes**: lightweight offline checks to guard wrapper wiring and argument merging. Add as a step in the main test workflow or as a tiny dedicated workflow (`.github/workflows/cli-smokes.yml`) that runs:
+  ```
+  python -m clematis --help
+  python -m clematis rotate-logs --help
+  python -m clematis inspect-snapshot --help
+  python -m clematis bench-t4 --help
+  python -m clematis seed-lance-demo --help
+  ```
+  Environment: `CI=true`, `CLEMATIS_NETWORK_BAN=1`.
+
+#### Tests
+- `tests/cli/test_pr46_merge_order.py`: regression coverage for (a) preserving flag→value pairing via **extras + ns.args** merge and (b) stripping a leading `--` in wrapper pass-through. Fully offline and deterministic.
+```
 ## [0.8.0-M3] - 2025-09-25
 
 ### M3 — T3 Policy Tier (LLM backend; opt-in, defaults OFF)

@@ -3,33 +3,33 @@ on:
   push: { branches: [main] }
   pull_request: { branches: [main] }
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: |
+            pyproject.toml
 
       - name: Upgrade pip
         run: python -m pip install --upgrade pip
 
-      # If you added requirements-dev.txt, this will install dev deps
-      - name: Install dev deps (if present)
+      - name: Install deps (dev+test extras) + YAML
         run: |
-          if [ -f requirements-dev.txt ]; then
-            pip install -r requirements-dev.txt
-          else
-            pip install pytest
-          fi
-          # Ensure minimal test deps are present regardless
-          pip install pyyaml numpy
-
-      # Install your package in editable mode (so `from clematis...` works)
-      - name: Install package
-        run: pip install -e .
+          python -m pip install -U pip
+          pip install -e .[dev,test]
+          # Ensure PyYAML is present (not included in extras)
+          pip install pyyaml
 
       - name: Sanity imports
         continue-on-error: true
@@ -69,7 +69,7 @@ jobs:
           show("import clematis", lambda: __import__("clematis"))
           try:
               import clematis
-              print("clematis.__file__:", getattr(clematis, "__file__", None))
+              print("clematis.__file__:", getattr(clemmatis, "__file__", None))
               root = os.path.dirname(getattr(clematis, "__file__", "") or "")
               print("ls clematis root:", os.listdir(root) if root and os.path.isdir(root) else "N/A")
           except Exception:
@@ -87,43 +87,179 @@ jobs:
         env:
           CLEMATIS_NETWORK_BAN: "1"
           CI: "true"
-        run: pytest -q -m "not manual"
+          PYTHONHASHSEED: "0"
+        run: |
+          set -euo pipefail
+          pytest -q -m "not manual"
 
-  golden_disabled_identity:
-    name: Golden identity (scheduler.disabled)
+  reproducible_build:
+    name: Reproducible build (wheel + sdist)
     needs: test
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: |
+            pyproject.toml
 
       - name: Upgrade pip
         run: python -m pip install --upgrade pip
 
-      - name: Install minimal deps
+      - name: Install build tooling
         run: |
-          pip install pytest pyyaml numpy
+          python -m pip install -U pip
+          pip install build wheel
 
-      - name: Install package (editable)
-        run: pip install -e .
+      - name: Compute SOURCE_DATE_EPOCH from Git
+        id: sde
+        run: echo "ts=$(git log -1 --pretty=%ct)" >> "$GITHUB_OUTPUT"
 
-      - name: Clean logs/data
+      - name: Export SDE for this job
+        run: echo "SOURCE_DATE_EPOCH=${{ steps.sde.outputs.ts }}" >> "$GITHUB_ENV"
+
+      - name: Export deterministic env
         run: |
-          rm -rf ./.logs || true
-          rm -rf ./.data || true
-          mkdir -p ./.logs
+          echo "PYTHONHASHSEED=0" >> "$GITHUB_ENV"
+          echo "TZ=UTC" >> "$GITHUB_ENV"
+          echo "LC_ALL=C.UTF-8" >> "$GITHUB_ENV"
+          echo "LANG=C.UTF-8" >> "$GITHUB_ENV"
 
-      # Run the golden comparison if the script exists; otherwise skip (so PRs can land script+fixtures together)
-      - name: Run golden disabled identity guard
+      - name: Clean tree (before build #1)
+        run: |
+          git clean -xfd
+
+      - name: Build #1 and record hashes
         run: |
           set -euo pipefail
-          if [ -f scripts/ci_compare_golden.py ]; then
-            echo "Running golden comparison (scheduler.enabled=false)…"
-            python scripts/ci_compare_golden.py
-          else
-            echo "Skipping golden comparison: scripts/ci_compare_golden.py not found."
-            echo "Add the script and fixtures under tests/golden/pre_m5_disabled/ to enable this check."
-          fi
+          rm -rf dist build
+          python -m build
+          # Record SHA256 hashes to RUNNER_TEMP (kept out of sdist)
+          python - <<'PY'
+          import hashlib, json, os, glob, tarfile
+
+          def sha256_file(path):
+              h = hashlib.sha256()
+              with open(path, "rb") as f:
+                  for chunk in iter(lambda: f.read(1<<20), b""):
+                      h.update(chunk)
+              return h.hexdigest()
+
+          def sdist_content_hash(path):
+              # Hash only the content of regular files inside the tar.gz, ignoring tar/gzip metadata.
+              items = []
+              with tarfile.open(path, "r:gz") as tf:
+                  for m in tf.getmembers():
+                      # Skip egg-info metadata folders; only hash payload semantics
+                      if "/.egg-info/" in m.name or m.name.endswith(".egg-info"):
+                          continue
+                      # Also skip top-level PKG-INFO (sdist metadata)
+                      if m.name == "PKG-INFO" or m.name.endswith("/PKG-INFO"):
+                          continue
+                      if not m.isfile():
+                          continue
+                      f = tf.extractfile(m)
+                      data = f.read() if f else b""
+                      h = hashlib.sha256(data).hexdigest()
+                      items.append((m.name, h))
+              items.sort()
+              agg = hashlib.sha256()
+              for name, h in items:
+                  agg.update(name.encode("utf-8") + b"\0" + h.encode("ascii") + b"\n")
+              return agg.hexdigest()
+
+          out = {}
+          for p in sorted(glob.glob("dist/clematis-*")):
+              base = os.path.basename(p)
+              if base.endswith(".tar.gz"):
+                  out[base] = sdist_content_hash(p)
+              else:
+                  out[base] = sha256_file(p)
+
+          out_path = os.path.join(os.environ.get("RUNNER_TEMP","."), "repro_sha_1.json")
+          with open(out_path, "w") as f:
+              json.dump(out, f, separators=(",", ":"))
+          print("Wrote:", out_path, out)
+          PY
+          # Capture sdist file listing for debugging
+          SDIST="$(ls dist/clematis-*.tar.gz)"
+          tar -tzf "$SDIST" | sort > "$RUNNER_TEMP/sdist1.txt"
+
+      - name: Clean tree (before build #2)
+        run: |
+          git clean -xfd
+
+      - name: Build #2 and record hashes (same SDE)
+        run: |
+          set -euo pipefail
+          rm -rf dist build
+          python -m build
+          # Record SHA256 hashes to RUNNER_TEMP (kept out of sdist)
+          python - <<'PY'
+          import hashlib, json, os, glob, tarfile
+
+          def sha256_file(path):
+              h = hashlib.sha256()
+              with open(path, "rb") as f:
+                  for chunk in iter(lambda: f.read(1<<20), b""):
+                      h.update(chunk)
+              return h.hexdigest()
+
+          def sdist_content_hash(path):
+              items = []
+              with tarfile.open(path, "r:gz") as tf:
+                  for m in tf.getmembers():
+                      # Skip egg-info metadata folders; only hash payload semantics
+                      if "/.egg-info/" in m.name or m.name.endswith(".egg-info"):
+                          continue
+                      # Also skip top-level PKG-INFO (sdist metadata)
+                      if m.name == "PKG-INFO" or m.name.endswith("/PKG-INFO"):
+                          continue
+                      if not m.isfile():
+                          continue
+                      f = tf.extractfile(m)
+                      data = f.read() if f else b""
+                      h = hashlib.sha256(data).hexdigest()
+                      items.append((m.name, h))
+              items.sort()
+              agg = hashlib.sha256()
+              for name, h in items:
+                  agg.update(name.encode("utf-8") + b"\0" + h.encode("ascii") + b"\n")
+              return agg.hexdigest()
+
+          out = {}
+          for p in sorted(glob.glob("dist/clematis-*")):
+              base = os.path.basename(p)
+              if base.endswith(".tar.gz"):
+                  out[base] = sdist_content_hash(p)
+              else:
+                  out[base] = sha256_file(p)
+
+          out_path = os.path.join(os.environ.get("RUNNER_TEMP","."), "repro_sha_2.json")
+          with open(out_path, "w") as f:
+              json.dump(out, f, separators=(",", ":"))
+          print("Wrote:", out_path, out)
+          PY
+          # Capture sdist file listing for debugging
+          SDIST="$(ls dist/clematis-*.tar.gz)"
+          tar -tzf "$SDIST" | sort > "$RUNNER_TEMP/sdist2.txt"
+
+      - name: Compare hashes (expect identical)
+        run: |
+          set -euo pipefail
+          diff -u "$RUNNER_TEMP/repro_sha_1.json" "$RUNNER_TEMP/repro_sha_2.json"
+
+      - name: Debug sdist content diff
+        if: failure()
+        run: |
+          set -euo pipefail
+          echo '--- sdist1 (first build) ---'
+          cat "$RUNNER_TEMP/sdist1.txt" || true
+          echo '--- sdist2 (second build) ---'
+          cat "$RUNNER_TEMP/sdist2.txt" || true
+          echo '--- unified diff ---'
+          diff -u "$RUNNER_TEMP/sdist1.txt" "$RUNNER_TEMP/sdist2.txt" || true

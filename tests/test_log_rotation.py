@@ -10,7 +10,7 @@ import importlib.util
 def _load_rotate_module():
     """Dynamically load scripts/rotate_logs.py as a module for testing."""
     repo_root = Path(__file__).resolve().parents[1]
-    mod_path = repo_root / "scripts" / "rotate_logs.py"
+    mod_path = repo_root / "clematis" / "scripts" / "rotate_logs.py"
     spec = importlib.util.spec_from_file_location("rotate_logs", str(mod_path))
     mod = importlib.util.module_from_spec(spec)  # type: ignore[arg-type]
     assert spec and spec.loader, "could not load rotate_logs.py"

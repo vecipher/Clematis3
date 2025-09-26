@@ -98,29 +98,14 @@ jobs:
           pytest -q -m "not manual" tests/test_config_perf_quality.py::test_cli_validator_smoke
 
       - name: Run golden disabled identity guard
+        env:
+          CLEMATIS_NETWORK_BAN: "1"
+          CI: "true"
         shell: bash
         run: |
           set -euo pipefail
-          echo "Running golden comparison (scheduler.enabled=false)…"
-
-          # 1) Produce fresh logs with disabled path
-          rm -rf ./.logs ./.norm || true
-          python3 scripts/run_demo.py --config .ci/disabled_path_config.yaml --policy round_robin --agents AgentA --steps 6 || true
-
-          # 2) Normalize actual and golden using the shared helper
-          python3 -c "from pathlib import Path; import sys,shutil; sys.path.insert(0, str(Path('.').resolve())); from tests.helpers.identity import normalize_logs_dir; actual=Path('./.logs'); assert actual.exists(), 'FATAL: ./.logs not found (run_demo did not produce logs)'; norm_root=Path('./.norm'); norm_root.mkdir(exist_ok=True); actual_out=norm_root/'actual'; golden_out=norm_root/'golden'; [shutil.rmtree(p) for p in (actual_out,golden_out) if p.exists()]; GOLD_DIR=Path('tests/golden/pre_m5_disabled'); assert GOLD_DIR.exists(), f'FATAL: golden dir not found: {GOLD_DIR}'; normalize_logs_dir(actual, actual_out); normalize_logs_dir(GOLD_DIR, golden_out); print('Normalized logs written to', norm_root)"
-
-          # 3) Compare normalized files deterministically
-          set +e
-          echo "DIFF for t2.jsonl:";   diff -u ./.norm/golden/t2.jsonl   ./.norm/actual/t2.jsonl; st1=$?
-          echo "DIFF for turn.jsonl:"; diff -u ./.norm/golden/turn.jsonl ./.norm/actual/turn.jsonl; st2=$?
-          set -e
-
-          if [ "$st1" -ne 0 ] || [ "$st2" -ne 0 ]; then
-            echo "Golden identity mismatch" >&2
-            exit 1
-          fi
-          echo "Golden identity OK"
+          # Use the shared Python guard which generates logs, normalizes, and compares
+          python3 scripts/ci_compare_golden.py
 
       - name: Upload artifacts on failure
         if: ${{ failure() }}

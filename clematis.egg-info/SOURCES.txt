@@ -4,6 +4,7 @@ README.md
 pyproject.toml
 clematis/VERSION
 clematis/__init__.py
+clematis/__main__.py
 clematis/resources.py
 clematis/scheduler.py
 clematis.egg-info/PKG-INFO
@@ -16,7 +17,11 @@ clematis/adapters/__init__.py
 clematis/adapters/embeddings.py
 clematis/adapters/llm.py
 clematis/cli/__init__.py
+clematis/cli/bench_t4.py
+clematis/cli/inspect_snapshot.py
 clematis/cli/main.py
+clematis/cli/rotate_logs.py
+clematis/cli/seed_lance_demo.py
 clematis/engine/__init__.py
 clematis/engine/apply.py
 clematis/engine/cache.py
@@ -58,6 +63,11 @@ clematis/memory/__init__.py
 clematis/memory/index.py
 clematis/memory/lance_index.py
 clematis/memory/models.py
+clematis/scripts/__init__.py
+clematis/scripts/bench_t4.py
+clematis/scripts/inspect_snapshot.py
+clematis/scripts/rotate_logs.py
+clematis/scripts/seed_lance_demo.py
 clematis/world/__init__.py
 clematis/world/scenario.py
 clematis/world/scheduler.py
