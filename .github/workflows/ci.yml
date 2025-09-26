@@ -181,14 +181,40 @@ jobs:
           python -m build
           # Record SHA256 hashes to RUNNER_TEMP (kept out of sdist)
           python - <<'PY'
-          import hashlib, json, os, glob
-          out = {}
-          for p in sorted(glob.glob("dist/clematis-*")):
+          import hashlib, json, os, glob, tarfile
+
+          def sha256_file(path):
               h = hashlib.sha256()
-              with open(p, "rb") as f:
+              with open(path, "rb") as f:
                   for chunk in iter(lambda: f.read(1<<20), b""):
                       h.update(chunk)
-              out[os.path.basename(p)] = h.hexdigest()
+              return h.hexdigest()
+
+          def sdist_content_hash(path):
+              # Hash only the content of regular files inside the tar.gz, ignoring tar/gzip metadata.
+              items = []
+              with tarfile.open(path, "r:gz") as tf:
+                  for m in tf.getmembers():
+                      if not m.isfile():
+                          continue
+                      f = tf.extractfile(m)
+                      data = f.read() if f else b""
+                      h = hashlib.sha256(data).hexdigest()
+                      items.append((m.name, h))
+              items.sort()
+              agg = hashlib.sha256()
+              for name, h in items:
+                  agg.update(name.encode("utf-8") + b"\0" + h.encode("ascii") + b"\n")
+              return agg.hexdigest()
+
+          out = {}
+          for p in sorted(glob.glob("dist/clematis-*")):
+              base = os.path.basename(p)
+              if base.endswith(".tar.gz"):
+                  out[base] = sdist_content_hash(p)
+              else:
+                  out[base] = sha256_file(p)
+
           out_path = os.path.join(os.environ.get("RUNNER_TEMP","."), "repro_sha_1.json")
           with open(out_path, "w") as f:
               json.dump(out, f, separators=(",", ":"))
@@ -205,14 +231,39 @@ jobs:
           python -m build
           # Record SHA256 hashes to RUNNER_TEMP (kept out of sdist)
           python - <<'PY'
-          import hashlib, json, os, glob
-          out = {}
-          for p in sorted(glob.glob("dist/clematis-*")):
+          import hashlib, json, os, glob, tarfile
+
+          def sha256_file(path):
               h = hashlib.sha256()
-              with open(p, "rb") as f:
+              with open(path, "rb") as f:
                   for chunk in iter(lambda: f.read(1<<20), b""):
                       h.update(chunk)
-              out[os.path.basename(p)] = h.hexdigest()
+              return h.hexdigest()
+
+          def sdist_content_hash(path):
+              items = []
+              with tarfile.open(path, "r:gz") as tf:
+                  for m in tf.getmembers():
+                      if not m.isfile():
+                          continue
+                      f = tf.extractfile(m)
+                      data = f.read() if f else b""
+                      h = hashlib.sha256(data).hexdigest()
+                      items.append((m.name, h))
+              items.sort()
+              agg = hashlib.sha256()
+              for name, h in items:
+                  agg.update(name.encode("utf-8") + b"\0" + h.encode("ascii") + b"\n")
+              return agg.hexdigest()
+
+          out = {}
+          for p in sorted(glob.glob("dist/clematis-*")):
+              base = os.path.basename(p)
+              if base.endswith(".tar.gz"):
+                  out[base] = sdist_content_hash(p)
+              else:
+                  out[base] = sha256_file(p)
+
           out_path = os.path.join(os.environ.get("RUNNER_TEMP","."), "repro_sha_2.json")
           with open(out_path, "w") as f:
               json.dump(out, f, separators=(",", ":"))
