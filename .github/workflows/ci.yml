@@ -167,11 +167,19 @@ jobs:
       - name: Export SDE for this job
         run: echo "SOURCE_DATE_EPOCH=${{ steps.sde.outputs.ts }}" >> "$GITHUB_ENV"
 
+      - name: Export deterministic env
+        run: |
+          echo "PYTHONHASHSEED=0" >> "$GITHUB_ENV"
+          echo "TZ=UTC" >> "$GITHUB_ENV"
+          echo "LC_ALL=C.UTF-8" >> "$GITHUB_ENV"
+          echo "LANG=C.UTF-8" >> "$GITHUB_ENV"
+
       - name: Build #1 and record hashes
         run: |
           set -euo pipefail
           rm -rf dist build
           python -m build
+          # Record SHA256 hashes to RUNNER_TEMP (kept out of sdist)
           python - <<'PY'
           import hashlib, json, os, glob
           out = {}
@@ -181,16 +189,21 @@ jobs:
                   for chunk in iter(lambda: f.read(1<<20), b""):
                       h.update(chunk)
               out[os.path.basename(p)] = h.hexdigest()
-          with open(".repro_sha_1.json", "w") as f:
+          out_path = os.path.join(os.environ.get("RUNNER_TEMP","."), "repro_sha_1.json")
+          with open(out_path, "w") as f:
               json.dump(out, f, separators=(",", ":"))
-          print(out)
+          print("Wrote:", out_path, out)
           PY
+          # Capture sdist file listing for debugging
+          SDIST="$(ls dist/clematis-*.tar.gz)"
+          tar -tzf "$SDIST" | sort > "$RUNNER_TEMP/sdist1.txt"
 
       - name: Build #2 and record hashes (same SDE)
         run: |
           set -euo pipefail
           rm -rf dist build
           python -m build
+          # Record SHA256 hashes to RUNNER_TEMP (kept out of sdist)
           python - <<'PY'
           import hashlib, json, os, glob
           out = {}
@@ -200,12 +213,27 @@ jobs:
                   for chunk in iter(lambda: f.read(1<<20), b""):
                       h.update(chunk)
               out[os.path.basename(p)] = h.hexdigest()
-          with open(".repro_sha_2.json", "w") as f:
+          out_path = os.path.join(os.environ.get("RUNNER_TEMP","."), "repro_sha_2.json")
+          with open(out_path, "w") as f:
               json.dump(out, f, separators=(",", ":"))
-          print(out)
+          print("Wrote:", out_path, out)
           PY
+          # Capture sdist file listing for debugging
+          SDIST="$(ls dist/clematis-*.tar.gz)"
+          tar -tzf "$SDIST" | sort > "$RUNNER_TEMP/sdist2.txt"
 
       - name: Compare hashes (expect identical)
         run: |
           set -euo pipefail
-          diff -u .repro_sha_1.json .repro_sha_2.json
+          diff -u "$RUNNER_TEMP/repro_sha_1.json" "$RUNNER_TEMP/repro_sha_2.json"
+
+      - name: Debug sdist content diff
+        if: failure()
+        run: |
+          set -euo pipefail
+          echo '--- sdist1 (first build) ---'
+          cat "$RUNNER_TEMP/sdist1.txt" || true
+          echo '--- sdist2 (second build) ---'
+          cat "$RUNNER_TEMP/sdist2.txt" || true
+          echo '--- unified diff ---'
+          diff -u "$RUNNER_TEMP/sdist1.txt" "$RUNNER_TEMP/sdist2.txt" || true
