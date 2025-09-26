@@ -42,7 +42,6 @@ pytest -q
 python3 scripts/rq_trace_dump.py --trace_dir logs/quality --limit 5
 ```
 
-```
 ### CLI quick start (PR46)
 
 Minimal examples using the umbrella CLI (`python -m clematis`). These are offline‑safe and deterministic.
@@ -64,8 +63,6 @@ python -m clematis bench-t4 --num 1 --runs 1 --json
 # Seed a tiny LanceDB demo locally
 python -m clematis seed-lance-demo --uri ./.data/lance-demo --overwrite
 ```
-```
-
 **Examples smoke (M7):**
 ```bash
 # Run all example configs; stop on first failure
@@ -1255,7 +1252,7 @@ python3 scripts/run_demo.py --config examples/scheduler/quantum_vs_wall.yaml \
 **Next (PR29)**
 - Single-source `scheduler.jsonl` records authored by the driver, including `queue_before/queue_after` in addition to `pick_reason`.
 
-M5 — Scheduler (PR29 driver-authored logs + CI golden identity; OFF by default)
+## M5 — Scheduler (PR29 driver-authored logs + CI golden identity; OFF by default)
 
 PR29 finishes M5 by (1) making the driver the single source of truth for scheduler.jsonl and (2) adding a CI Golden Identity Guard that ensures scheduler.enabled=false stays byte-for-byte identical to pre-M5 (after normalization).
 
@@ -1504,7 +1501,7 @@ Gotchas
 	•	Reader currently requires meta.json; shards without it will be rejected.
 	•	Disabled path remains the default; enabling the reader is opt-in and gated under perf.enabled=true.
 
--## M6 — Gate C (PR33.5): T2 reader parity & runtime‑flip invariants
+## M6 — Gate C (PR33.5): T2 reader parity & runtime‑flip invariants
 
 **What this adds (no behavior change by default)**
 - A required CI gate that proves the PR33 reader is **drop‑in**: Top‑K IDs/order identical and score drift ≤ `1e-6` across `{embed_store_dtype∈{fp32,fp16}} × {precompute_norms∈{true,false}}`.
@@ -1691,7 +1688,7 @@ Notes:
 - Tools are offline: they do not change runtime semantics or logs.
 - With `perf.enabled=false`, behavior/logs remain identical to PR29 goldens (guarded in CI).
 
--## M7 — Retrieval Quality: shadow tracing (PR36, defaults OFF)
+## M7 — Retrieval Quality: shadow tracing (PR36, defaults OFF)
 
 **Scope (no-op by default)**  
 Adds the `t2.quality.*` surface and a shadow tracing path that **does not change rankings or metrics**. When the **triple gate** is ON:
