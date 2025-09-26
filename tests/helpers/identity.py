@@ -2,6 +2,7 @@
 from __future__ import annotations
 import json
 from typing import Any
+import os
 
 # Drop keys that vary across runs or are not part of disabled-path identity
 _DROP_KEYS = {
@@ -34,3 +35,13 @@ def normalize_json_line(line: str) -> str:
 
 def normalize_json_lines(lines: list[str]) -> list[str]:
     return [normalize_json_line(ln) for ln in lines if ln.strip()]
+
+def normalize_logs_dir(p: str) -> str:
+    """
+    Normalize a logs directory path deterministically for comparisons:
+    - Expand ~ and environment vars
+    - Resolve symlinks via realpath
+    - Collapse redundant separators / trailing slashes via normpath
+    """
+    p = os.path.expanduser(os.path.expandvars(p))
+    return os.path.normpath(os.path.realpath(p))

@@ -3,9 +3,14 @@ on:
   push: { branches: [main] }
   pull_request: { branches: [main] }
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -91,6 +96,7 @@ jobs:
     name: Golden identity (scheduler.disabled)
     needs: test
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 
@@ -130,3 +136,76 @@ jobs:
             echo "Skipping golden comparison: scripts/ci_compare_golden.py not found."
             echo "Add the script and fixtures under tests/golden/pre_m5_disabled/ to enable this check."
           fi
+
+  reproducible_build:
+    name: Reproducible build (wheel + sdist)
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: |
+            pyproject.toml
+
+      - name: Upgrade pip
+        run: python -m pip install --upgrade pip
+
+      - name: Install build tooling
+        run: |
+          python -m pip install -U pip
+          pip install build wheel
+
+      - name: Compute SOURCE_DATE_EPOCH from Git
+        id: sde
+        run: echo "ts=$(git log -1 --pretty=%ct)" >> "$GITHUB_OUTPUT"
+
+      - name: Export SDE for this job
+        run: echo "SOURCE_DATE_EPOCH=${{ steps.sde.outputs.ts }}" >> "$GITHUB_ENV"
+
+      - name: Build #1 and record hashes
+        run: |
+          set -euo pipefail
+          rm -rf dist build
+          python -m build
+          python - <<'PY'
+          import hashlib, json, os, glob
+          out = {}
+          for p in sorted(glob.glob("dist/clematis-*")):
+              h = hashlib.sha256()
+              with open(p, "rb") as f:
+                  for chunk in iter(lambda: f.read(1<<20), b""):
+                      h.update(chunk)
+              out[os.path.basename(p)] = h.hexdigest()
+          with open(".repro_sha_1.json", "w") as f:
+              json.dump(out, f, separators=(",", ":"))
+          print(out)
+          PY
+
+      - name: Build #2 and record hashes (same SDE)
+        run: |
+          set -euo pipefail
+          rm -rf dist build
+          python -m build
+          python - <<'PY'
+          import hashlib, json, os, glob
+          out = {}
+          for p in sorted(glob.glob("dist/clematis-*")):
+              h = hashlib.sha256()
+              with open(p, "rb") as f:
+                  for chunk in iter(lambda: f.read(1<<20), b""):
+                      h.update(chunk)
+              out[os.path.basename(p)] = h.hexdigest()
+          with open(".repro_sha_2.json", "w") as f:
+              json.dump(out, f, separators=(",", ":"))
+          print(out)
+          PY
+
+      - name: Compare hashes (expect identical)
+        run: |
+          set -euo pipefail
+          diff -u .repro_sha_1.json .repro_sha_2.json
