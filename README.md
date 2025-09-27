@@ -34,6 +34,8 @@ python -m clematis --version
 python -m clematis rotate-logs -- --dir ./.logs --dry-run
 # or
 python -m clematis --dir ./.logs rotate-logs -- --dry-run
+
+# For bench-t4 and seed-lance-demo, install extras: pip install clematis[cli-extras].
 ```
 
 CLI details, delegation rules, and recipes live in **[docs/m8/cli.md](docs/m8/cli.md)**.

@@ -43,3 +43,6 @@
 {"turn": "demo-1", "agent": "AgentA", "tokens": 6, "truncated": false, "style_prefix_used": false, "snippet_count": 0, "ms": 0.022, "backend": "rulebased", "now": "2025-09-27T02:40:48.716710+00:00"}
 {"turn": "demo-1", "agent": "AgentA", "tokens": 6, "truncated": false, "style_prefix_used": false, "snippet_count": 0, "ms": 0.017, "backend": "rulebased", "now": "2025-09-27T02:40:48.720757+00:00"}
 {"turn": "demo-1", "agent": "AgentA", "tokens": 6, "truncated": false, "style_prefix_used": false, "snippet_count": 0, "ms": 0.021, "backend": "rulebased", "now": "2025-09-27T02:40:49.634499+00:00"}
+{"turn": "demo-1", "agent": "AgentA", "tokens": 6, "truncated": false, "style_prefix_used": false, "snippet_count": 0, "ms": 0.025, "backend": "rulebased", "now": "2025-09-27T05:49:17.285640+00:00"}
+{"turn": "demo-1", "agent": "AgentA", "tokens": 6, "truncated": false, "style_prefix_used": false, "snippet_count": 0, "ms": 0.021, "backend": "rulebased", "now": "2025-09-27T05:49:17.291040+00:00"}
+{"turn": "demo-1", "agent": "AgentA", "tokens": 6, "truncated": false, "style_prefix_used": false, "snippet_count": 0, "ms": 0.024, "backend": "rulebased", "now": "2025-09-27T05:49:18.338590+00:00"}

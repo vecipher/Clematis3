@@ -45,6 +45,14 @@ lancedb = [
 zstd = [
   "zstandard>=0.22,<0.23",
 ]
+bench = [
+  "numpy>=1.26,<2",
+]
+cli-extras = [
+  "numpy>=1.26,<2",
+  "lancedb>=0.8,<1",
+  "pyarrow>=15,<19",
+]
 
 [build-system]
 requires = ["setuptools>=77", "wheel"]
@@ -70,7 +78,7 @@ markers = [
 ]
 
 [tool.setuptools.package-data]
-clematis = ["fixtures/**/*"]
+clematis = ["fixtures/**/*", "examples/**/*"]
 
 [project.scripts]
 clematis = "clematis.cli.main:main"

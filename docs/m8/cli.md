@@ -35,6 +35,26 @@ python -m clematis --dir ./.logs rotate-logs -- --dry-run
 ```
 > The *single* leading `--` immediately before delegated args is removed by the wrapper.
 
+## Packaged defaults & post‑install behavior
+Wrappers only inject defaults when a required flag is **omitted**. They first look for a **packaged** example via `importlib.resources`, then fall back deterministically to a local path.
+
+- **rotate-logs** — default `--dir`:
+  1. packaged: `clematis/examples/logs/`
+  2. fallback: `./.logs`
+
+- **inspect-snapshot** — default `--dir`:
+  1. packaged: `clematis/examples/snapshots/`
+  2. fallback: `./snapshots`
+
+  Snapshot discovery (script behavior): prefers `snap_*.json` with the highest numeric suffix; else latest `state_*.json` by mtime; else latest `*.json` by mtime.
+
+> Post‑install smoke:
+> ```bash
+> python -m clematis --version
+> python -m clematis inspect-snapshot -- --format json
+> python -m clematis rotate-logs -- --dry-run
+> ```
+
 ## Environment flags
 - `CLEMATIS_DEBUG=1` — enable stderr breadcrumb:
   ```
@@ -69,11 +89,13 @@ python -m clematis inspect-snapshot -- --dir ./snapshots --format json
 
 **Bench T4 (JSON)**
 ```bash
+# Heavy extras optional; install for local use: pip install "clematis[cli-extras]"
 python -m clematis bench-t4 -- --json --iterations 3 --seed 0
 ```
 
 **Seed Lance demo (idempotent)**
 ```bash
+# Heavy extras optional; install for local use: pip install "clematis[cli-extras]"
 python -m clematis seed-lance-demo -- --dry-run
 # Running twice should not duplicate entries when executed for real.
 ```
@@ -82,7 +104,9 @@ python -m clematis seed-lance-demo -- --dry-run
 - **I passed `--` and it still reached the script.**  
   The wrapper strips **one** sentinel by design. If you need a literal `--` for the script, quote it or provide another `--` where appropriate.
 - **Direct scripts show a hint.**  
-  Calling `scripts/*.py` prints a **single stderr hint** via the shim; behavior is unchanged.
+  Calling `scripts/*.py` prints a **single stderr hint** via the shim; behavior is unchanged. For heavy scripts without optional deps installed, you may see an import error before the hint — use the umbrella wrappers for CI.
+- **“No snapshot found …”**  
+  Ensure the directory contains `*.json` snapshots. A demo file `clematis/examples/snapshots/snap_000001.json` is packaged for quick checks.
 
 ## Guarantees (from PR47)
 - **Zero behavior change** codified: order‑agnostic extras, first‑subcommand anchoring, single‑sentinel strip, wrapper help phrase, stderr‑only breadcrumbs. No stdout or exit code changes.
