@@ -5,14 +5,14 @@ Use `python -m clematis <subcommand> -- [args]`. The umbrella CLI delegates to w
 ## TL;DR (no behavior change)
 - **First‑subcommand anchoring:** the umbrella locates the first subcommand and **prepends any top‑level extras** to the delegated `argv`.
 - **Single leading `--`:** if present immediately before delegated args, the wrapper strips **exactly one** sentinel; nothing else is touched.
-- **Help interception:** wrapper `-h/--help` is intercepted by the wrapper and **always shows wrapper help** (not the delegated script’s) and includes the phrase **“Delegates to scripts/…”**.
+- **Help interception:** wrapper `-h/--help` is intercepted by the wrapper and **always shows wrapper help** (not the delegated script’s) and includes the phrase **"Delegates to scripts/"**.
 - **Debug breadcrumbs:** enabled by umbrella `--debug` **or** `CLEMATIS_DEBUG=1`; they go to **stderr only** and never alter stdout or exit codes.
 - **Top‑level `--version`:** exposed at the umbrella for deterministic help UX.
 
 ## Delegation diagram (ASCII)
 ```
 python -m clematis  ──►  wrapper (e.g., rotate-logs)
-                        ├─ intercepts -h/--help → prints wrapper help ("Delegates to scripts/…")
+                        ├─ intercepts -h/--help → prints wrapper help ("Delegates to scripts/")
                         ├─ strips single leading -- (if present)
                         └─ delegates to clematis.scripts.rotate_logs.main(argv)
                                                 ▲
@@ -63,8 +63,7 @@ Wrappers only inject defaults when a required flag is **omitted**. They first lo
   (No stdout/exit changes.)
 - `CLEMATIS_NETWORK_BAN=1` — recommended in CI to prevent accidental network.
 
-## Help determinism
-- Wrapper help **always** includes the phrase: **“Delegates to scripts/…”**.
+- Wrapper help **always** includes the phrase: **"Delegates to scripts/"**.
 - To view delegated script help directly, call the script/module itself:
   - `python -m clematis.scripts.rotate_logs --help`
   - or `python scripts/rotate_logs.py --help`
