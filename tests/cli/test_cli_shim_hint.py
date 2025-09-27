@@ -1,6 +1,11 @@
 import os, sys, subprocess, re
 from pathlib import Path
+import importlib.util
+
 PY = sys.executable
+
+def _has_mod(name: str) -> bool:
+    return importlib.util.find_spec(name) is not None
 
 def _run_file(path, *args, **env):
     cmd = [PY, str(path), *args]
@@ -21,15 +26,23 @@ def test_rotate_logs_shim_single_hint(tmp_path: Path):
 
 def test_bench_t4_shim_single_hint():
     p = _run_file("scripts/bench_t4.py", "--help")
-    assert p.returncode == 0
+    assert p.returncode in (0, 1, 2, 127)  # tolerate non-zero when deps missing
     _assert_single_hint(p.stderr)
-
-def test_inspect_snapshot_shim_single_hint():
-    p = _run_file("scripts/inspect_snapshot.py", "--help")
-    assert p.returncode == 0
-    _assert_single_hint(p.stderr)
+    if _has_mod("numpy"):
+        assert p.returncode == 0
+    else:
+        assert "ModuleNotFoundError" in p.stderr or "ImportError" in p.stderr
 
 def test_seed_lance_demo_shim_single_hint():
     p = _run_file("scripts/seed_lance_demo.py", "--help")
+    assert p.returncode in (0, 1, 2, 127)  # tolerate non-zero when deps missing
+    _assert_single_hint(p.stderr)
+    if _has_mod("numpy") and _has_mod("lancedb"):
+        assert p.returncode == 0
+    else:
+        assert "ModuleNotFoundError" in p.stderr or "ImportError" in p.stderr
+
+def test_inspect_snapshot_shim_single_hint():
+    p = _run_file("scripts/inspect_snapshot.py", "--help")
     assert p.returncode == 0
     _assert_single_hint(p.stderr)
