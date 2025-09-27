@@ -52,7 +52,10 @@ jobs:
               --sort=name --owner=0 --group=0 --numeric-owner \
               -cf /tmp/sdist1.tar -C "$TMP" .
           gzip -n -c /tmp/sdist1.tar > /tmp/sdist1.tgz
-          sha256sum "$WHEEL" /tmp/sdist1.tgz > /tmp/hashes1.txt
+          WH=$(sha256sum "$WHEEL" | awk '{print $1}')
+          SH1=$(sha256sum /tmp/sdist1.tgz | awk '{print $1}')
+          printf "%s  %s\n" "$WH" "WHEEL" > /tmp/hashes1.txt
+          printf "%s  %s\n" "$SH1" "SDIST" >> /tmp/hashes1.txt
 
       - name: Build #2 (clean)
         run: |
@@ -72,6 +75,9 @@ jobs:
               --sort=name --owner=0 --group=0 --numeric-owner \
               -cf /tmp/sdist2.tar -C "$TMP" .
           gzip -n -c /tmp/sdist2.tar > /tmp/sdist2.tgz
-          sha256sum "$WHEEL" /tmp/sdist2.tgz > /tmp/hashes2.txt
+          WH=$(sha256sum "$WHEEL" | awk '{print $1}')
+          SH2=$(sha256sum /tmp/sdist2.tgz | awk '{print $1}')
+          printf "%s  %s\n" "$WH" "WHEEL" > /tmp/hashes2.txt
+          printf "%s  %s\n" "$SH2" "SDIST" >> /tmp/hashes2.txt
           echo "=== DIFF (should be empty) ==="
           diff -u /tmp/hashes1.txt /tmp/hashes2.txt
