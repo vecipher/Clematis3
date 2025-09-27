@@ -81,3 +81,86 @@ jobs:
           printf "%s  %s\n" "$SH2" "SDIST" >> /tmp/hashes2.txt
           echo "=== DIFF (should be empty) ==="
           diff -u /tmp/hashes1.txt /tmp/hashes2.txt
+
+  pkg-smoke-matrix:
+    name: Pkg smoke (${{ matrix.os }} / py${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ["3.11", "3.12"]
+    env:
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+      PYTHONUTF8: "1"
+      PYTHONHASHSEED: "0"
+      CLEMATIS_NETWORK_BAN: "1"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Setup Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Ensure long paths on Windows
+        if: runner.os == 'Windows'
+        run: git config --global core.longpaths true
+        shell: pwsh
+
+      - name: Install build backend
+        run: python -m pip install --upgrade pip build
+
+      - name: Build wheel (axis-local)
+        run: python -m build --wheel
+
+      - name: Smoke (posix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euxo pipefail
+          WHL="$(ls dist/*.whl | head -n1)"
+          python -m venv .venv
+          . .venv/bin/activate
+          python -m pip install --upgrade pip
+          python -m pip install "$WHL"
+
+          # 1) version
+          python -m clematis --version
+
+          # 2) validate (direct then passthrough)
+          (python -m clematis validate --json) || (python -m clematis validate -- --json)
+
+          # 3) demo minimal (passthrough then direct)
+          (python -m clematis demo -- --steps 1) || (python -m clematis demo --steps 1)
+
+      - name: Smoke (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $whl = (Get-ChildItem dist\*.whl | Select-Object -First 1).FullName
+          python -m venv .venv
+          .\.venv\Scripts\python -m pip install --upgrade pip
+          .\.venv\Scripts\python -m pip install "$whl"
+
+          # 1) version
+          .\.venv\Scripts\python -m clematis --version
+
+          # 2) validate (direct then passthrough)
+          try { .\.venv\Scripts\python -m clematis validate --json }
+          catch { .\.venv\Scripts\python -m clematis validate -- --json }
+
+          # 3) demo minimal (passthrough then direct)
+          try { .\.venv\Scripts\python -m clematis demo -- --steps 1 }
+          catch { .\.venv\Scripts\python -m clematis demo --steps 1 }
+
+      - name: Upload wheel (artifact per axis)
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheel-${{ matrix.os }}-py${{ matrix.python-version }}
+          path: dist/*.whl

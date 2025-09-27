@@ -90,7 +90,27 @@ pip install "clematis3[cli-extras]"
 ---
 
 ## CI: Wheel‑smoke (post‑install acceptance)
+
 CI builds the wheel, installs into a fresh venv, then runs the three quickstart commands above with `CLEMATIS_NETWORK_BAN=1`. No heavy extras are installed. This guards the packaged defaults and CLI invariants without changing runtime behavior.
+
+### Cross‑platform smoke matrix (PR52)
+We build a wheel per axis and run offline CLI smokes in a fresh venv.
+
+**Axes**
+- OS: Linux (`ubuntu-latest`), macOS (`macos-latest`, arm64), Windows (`windows-latest`)
+- Python: 3.11, 3.12
+
+**Commands (runtime offline via `CLEMATIS_NETWORK_BAN=1`):**
+```bash
+python -m clematis --version
+python -m clematis validate --json   # or: python -m clematis validate -- --json
+python -m clematis demo -- --steps 1 # or: python -m clematis demo --steps 1
+```
+
+Notes:
+- No LLM smokes in this job.
+- Install/build may use network; only the **runtime** of the above smokes is network‑banned.
+- Windows enables long paths with `git config --global core.longpaths true` to avoid path length issues.
 
 ---
 

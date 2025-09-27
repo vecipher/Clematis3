@@ -2,6 +2,14 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+
+### Added (PR52 — Cross-platform packaging smoke)
+- **CI:** Cross-platform matrix over Linux (`ubuntu-latest`), macOS (`macos-latest`, arm64), and Windows (`windows-latest`) on Python 3.11 & 3.12. Builds an axis-local wheel, installs into a fresh venv, and runs offline CLI smokes with `CLEMATIS_NETWORK_BAN=1`:
+  - `python -m clematis --version`
+  - `python -m clematis validate --json` (or `--` passthrough)
+  - `python -m clematis demo -- --steps 1` (or direct)
+  Uploads the wheel as an artifact. **No runtime behavior changes.**
+
 ```
 ### M8 — Packaging & CLI (PR46 — pass-through wrappers & merge-order fix)
 
