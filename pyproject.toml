@@ -66,6 +66,7 @@ namespaces = false
 
 [tool.setuptools]
 include-package-data = true
+zip-safe = false
 
 [tool.setuptools.dynamic]
 version = { file = "clematis/VERSION" }

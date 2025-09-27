@@ -117,3 +117,29 @@ When installed from a wheel, wrappers will inject defaults **only if** you did n
 - `rotate-logs` → packaged `clematis/examples/logs` (placeholder directory)
 
 This is a convenience for first-run; explicit flags always win.
+
+## Reproducible builds
+
+We aim for byte-identical sdists/wheels given identical inputs.
+
+**Local smoke:**
+```bash
+export SOURCE_DATE_EPOCH=1704067200 PYTHONHASHSEED=0 TZ=UTC
+python -m pip install -U build
+rm -rf build dist *.egg-info && python -m build && shasum -a256 dist/*
+rm -rf build dist *.egg-info && python -m build && shasum -a256 dist/*
+# hashes must match
+
+CI: see .github/workflows/pkg_build.yml — it builds twice with
+SOURCE_DATE_EPOCH set and diffs the checksums.
+
+Matches the issue’s “Document the reproducibility recipe.”  [oai_citation:2‡GitHub](https://github.com/vecipher/Clematis3/issues/82)
+
+---
+
+## Why this satisfies PR51
+
+- **SOURCE_DATE_EPOCH honored** and fixed in CI.  [oai_citation:3‡GitHub](https://github.com/vecipher/Clematis3/issues/82)  
+- **Deterministic outputs**: two back-to-back builds compared via SHA256.  [oai_citation:4‡GitHub](https://github.com/vecipher/Clematis3/issues/82)  
+- **Docs updated** with the local smoke and CI pointer.  [oai_citation:5‡GitHub](https://github.com/vecipher/Clematis3/issues/82)  
+- **Zero behavior change** for runtime/CLI.

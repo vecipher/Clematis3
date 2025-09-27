@@ -1,0 +1,49 @@
+name: Reproducible Build (sdist & wheel)
+
+on:
+  pull_request:
+    paths:
+      - "pyproject.toml"
+      - "MANIFEST.in"
+      - "clematis/**"
+      - "docs/m8/**"
+      - ".github/workflows/**"
+  push:
+    branches: [ main ]
+
+jobs:
+  reproducible:
+    runs-on: ubuntu-latest
+    env:
+      # Repro knobs
+      SOURCE_DATE_EPOCH: "1704067200"   # 2024-01-01T00:00:00Z (example from issue)
+      PYTHONHASHSEED: "0"
+      TZ: "UTC"
+      LC_ALL: "C.UTF-8"
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+      CLEMATIS_NETWORK_BAN: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install build tooling
+        run: |
+          python -m pip install --upgrade pip build
+
+      - name: Build #1
+        run: |
+          rm -rf build dist *.egg-info
+          python -m build
+          sha256sum dist/* | tee /tmp/hashes1.txt
+          ls -l dist
+
+      - name: Build #2 (clean) and compare
+        run: |
+          rm -rf build dist *.egg-info
+          python -m build
+          sha256sum dist/* | tee /tmp/hashes2.txt
+          echo "=== DIFF (should be empty) ==="
+          diff -u /tmp/hashes1.txt /tmp/hashes2.txt
