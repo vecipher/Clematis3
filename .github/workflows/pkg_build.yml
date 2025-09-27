@@ -128,6 +128,7 @@ jobs:
           . .venv/bin/activate
           python -m pip install --upgrade pip
           python -m pip install "$WHL"
+          python -m pip install numpy
 
           # 1) version
           python -m clematis --version
@@ -147,6 +148,7 @@ jobs:
           python -m venv .venv
           .\.venv\Scripts\python -m pip install --upgrade pip
           .\.venv\Scripts\python -m pip install "$whl"
+          .\.venv\Scripts\python -m pip install numpy
 
           # 1) version
           .\.venv\Scripts\python -m clematis --version
