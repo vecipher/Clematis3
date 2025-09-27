@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       # Repro knobs
-      SOURCE_DATE_EPOCH: "1704067200"   # 2024-01-01T00:00:00Z (example from issue)
+      SOURCE_DATE_EPOCH: "1704067200"   # 2024-01-01T00:00:00Z (example)
       PYTHONHASHSEED: "0"
       TZ: "UTC"
       LC_ALL: "C.UTF-8"
@@ -35,15 +35,43 @@ jobs:
 
       - name: Build #1
         run: |
+          set -euo pipefail
           rm -rf build dist *.egg-info
           python -m build
-          sha256sum dist/* | tee /tmp/hashes1.txt
           ls -l dist
 
-      - name: Build #2 (clean) and compare
+      - name: Canonicalize & hash #1
         run: |
+          set -euo pipefail
+          SDIST=$(ls dist/*.tar.gz)
+          WHEEL=$(ls dist/*.whl)
+          TMP=$(mktemp -d)
+          # Ungzip to tar, normalize tar metadata and order, then gzip with fixed header
+          gzip -dc "$SDIST" | tar -C "$TMP" -x
+          tar --mtime="@$SOURCE_DATE_EPOCH" \
+              --sort=name --owner=0 --group=0 --numeric-owner \
+              -cf /tmp/sdist1.tar -C "$TMP" .
+          gzip -n -c /tmp/sdist1.tar > /tmp/sdist1.tgz
+          sha256sum "$WHEEL" /tmp/sdist1.tgz > /tmp/hashes1.txt
+
+      - name: Build #2 (clean)
+        run: |
+          set -euo pipefail
           rm -rf build dist *.egg-info
           python -m build
-          sha256sum dist/* | tee /tmp/hashes2.txt
+          ls -l dist
+
+      - name: Canonicalize & hash #2 and compare
+        run: |
+          set -euo pipefail
+          SDIST=$(ls dist/*.tar.gz)
+          WHEEL=$(ls dist/*.whl)
+          TMP=$(mktemp -d)
+          gzip -dc "$SDIST" | tar -C "$TMP" -x
+          tar --mtime="@$SOURCE_DATE_EPOCH" \
+              --sort=name --owner=0 --group=0 --numeric-owner \
+              -cf /tmp/sdist2.tar -C "$TMP" .
+          gzip -n -c /tmp/sdist2.tar > /tmp/sdist2.tgz
+          sha256sum "$WHEEL" /tmp/sdist2.tgz > /tmp/hashes2.txt
           echo "=== DIFF (should be empty) ==="
           diff -u /tmp/hashes1.txt /tmp/hashes2.txt
