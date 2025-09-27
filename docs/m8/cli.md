@@ -24,6 +24,8 @@ python -m clematis  ──►  wrapper (e.g., rotate-logs)
 - `inspect-snapshot` → `scripts/inspect_snapshot.py`
 - `bench-t4` → `scripts/bench_t4.py`
 - `seed-lance-demo` → `scripts/seed_lance_demo.py`
+- `validate` → `scripts/validate_config.py`
+- `demo` → `scripts/run_demo.py`
 
 ## Invocation patterns (both orders supported)
 ```bash
@@ -97,6 +99,18 @@ python -m clematis bench-t4 -- --json --iterations 3 --seed 0
 # Heavy extras optional; install for local use: pip install "clematis[cli-extras]"
 python -m clematis seed-lance-demo -- --dry-run
 # Running twice should not duplicate entries when executed for real.
+```
+
+**Validate (JSON report)**
+```bash
+python -m clematis validate --json
+# Optionally verify packaged resources too
+python -m clematis validate -- --check-resource examples/logs/.placeholder --json
+```
+
+**Demo (minimal run)**
+```bash
+python -m clematis demo -- --steps 1
 ```
 
 ## Troubleshooting
