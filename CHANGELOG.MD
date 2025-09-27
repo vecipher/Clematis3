@@ -8,7 +8,22 @@ All notable changes to this project will be documented in this file.
   - `python -m clematis --version`
   - `python -m clematis validate --json` (or `--` passthrough)
   - `python -m clematis demo -- --steps 1` (or direct)
+
   Uploads the wheel as an artifact. **No runtime behavior changes.**
+
+### Added (PR53 — CLI hardening & CI hygiene)
+- **CLI:** Added wrappers `validate` and `demo` (delegates to scripts/, behavior‑neutral). Their `-h/--help` output includes the literal "Delegates to scripts/" for deterministic testing.
+- **Tests:** Expanded help‑matrix to include `validate` and `demo`; assert the literal string.
+- **Docs:** Note in `docs/m8/packaging_cli.md` that CI installs NumPy solely for the demo smoke.
+
+### Packaging (PR53 — optional extras)
+- **Extras:** New optional dependency group `cli-demo = ["numpy>=1.24"]`.
+- **CI usage:** Package smoke installs with extras: `pip install "$WHL[cli-demo]"` (works with wheels and file URLs).
+
+### CI (PR53)
+- **Cache:** Enable `actions/setup-python@v5` pip cache in the package smoke job to reduce latency.
+- **Reproducible build:** Add `twine check` step (metadata sanity) — no upload.
+- **Branch protection:** Recommend marking `pkg-smoke-matrix` as a required status check.
 
 ```
 ### M8 — Packaging & CLI (PR46 — pass-through wrappers & merge-order fix)
