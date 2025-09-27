@@ -110,3 +110,11 @@ python -m clematis seed-lance-demo -- --dry-run
 
 ## Guarantees (from PR47)
 - **Zero behavior change** codified: order‑agnostic extras, first‑subcommand anchoring, single‑sentinel strip, wrapper help phrase, stderr‑only breadcrumbs. No stdout or exit code changes.
+
+### Packaged defaults (post-install)
+
+When installed from a wheel, wrappers will inject defaults **only if** you did not pass an explicit `--dir`:
+- `inspect-snapshot` → packaged `clematis/examples/snapshots` (contains `snap_000001.json`)
+- `rotate-logs` → packaged `clematis/examples/logs` (placeholder directory)
+
+This is a convenience for first-run; explicit flags always win.

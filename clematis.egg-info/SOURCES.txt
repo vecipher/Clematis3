@@ -54,6 +54,7 @@ clematis/engine/util/lru_det.py
 clematis/engine/util/metrics.py
 clematis/engine/util/ring.py
 clematis/engine/util/snapshot_delta.py
+clematis/examples/logs/.placeholder
 clematis/examples/snapshots/snap_000001.json
 clematis/fixtures/llm/qwen_small.jsonl
 clematis/graph/__init__.py

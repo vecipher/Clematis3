@@ -33,6 +33,12 @@ Requires-Dist: lancedb<1,>=0.8; extra == "lancedb"
 Requires-Dist: pyarrow<19,>=15; extra == "lancedb"
 Provides-Extra: zstd
 Requires-Dist: zstandard<0.23,>=0.22; extra == "zstd"
+Provides-Extra: bench
+Requires-Dist: numpy<2,>=1.26; extra == "bench"
+Provides-Extra: cli-extras
+Requires-Dist: numpy<2,>=1.26; extra == "cli-extras"
+Requires-Dist: lancedb<1,>=0.8; extra == "cli-extras"
+Requires-Dist: pyarrow<19,>=15; extra == "cli-extras"
 Dynamic: license-file
 
 # Clematis v3 — deterministic, turn‑based agent engine
@@ -71,6 +77,8 @@ python -m clematis --version
 python -m clematis rotate-logs -- --dir ./.logs --dry-run
 # or
 python -m clematis --dir ./.logs rotate-logs -- --dry-run
+
+# For bench-t4 and seed-lance-demo, install extras: pip install clematis[cli-extras].
 ```
 
 CLI details, delegation rules, and recipes live in **[docs/m8/cli.md](docs/m8/cli.md)**.
