@@ -1,57 +1,23 @@
-graft clematis/fixtures
-
-include README.md
-include LICENSE
-include clematis/VERSION
-
-global-exclude __pycache__ *.py[cod] *.so .DS_Store
 # Core metadata and project config
 include pyproject.toml
 include README.md
 include LICENSE
-include CHANGELOG.md
 include clematis/VERSION
 
-# Package sources and data
-recursive-include clematis *.py *.json *.jsonl *.md
-# Explicitly keep fixtures
-graft clematis/fixtures
-
-recursive-include examples *.yaml
-recursive-include fixtures/llm *.jsonl
-recursive-include clematis/examples *
-
-# Exclude transient / CI / local-only content to stabilize sdist
-prune tests
-prune .github
-prune .logs
-prune .data
-prune .norm
-prune dist
-prune build
-
-# Global ignores
-global-exclude __pycache__ *.py[cod] *.pyo *.so .DS_Store
-# Core metadata and project config
-include pyproject.toml
-include README.md
-include LICENSE
-include CHANGELOG.md
-include clematis/VERSION
-
-# Package sources and data
-recursive-include clematis *.py *.json *.jsonl *.md
-# Keep fixtures in source dist
-graft clematis/fixtures
+# Package sources and data (only real file types present)
+recursive-include clematis *.py *.json *.jsonl
 
 # Packaged examples for post-install defaults
 recursive-include clematis/examples *
 # Dotfiles are not guaranteed by generic globs; include explicitly
 include clematis/examples/logs/.placeholder
 
-# External examples (if present)
-recursive-include examples *.yaml
-recursive-include fixtures/llm *.jsonl
+# Fixtures bundled under package (not repo-level)
+graft clematis/fixtures
+
+# Do not ship repo-level examples/fixtures in sdist
+prune examples
+prune fixtures
 
 # Exclusions to stabilize sdist
 prune tests

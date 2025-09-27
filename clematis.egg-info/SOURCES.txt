@@ -1,4 +1,3 @@
-CHANGELOG.md
 LICENSE
 MANIFEST.in
 README.md
@@ -12,6 +11,7 @@ clematis.egg-info/PKG-INFO
 clematis.egg-info/SOURCES.txt
 clematis.egg-info/dependency_links.txt
 clematis.egg-info/entry_points.txt
+clematis.egg-info/not-zip-safe
 clematis.egg-info/requires.txt
 clematis.egg-info/top_level.txt
 clematis/adapters/__init__.py
@@ -77,15 +77,3 @@ clematis/scripts/seed_lance_demo.py
 clematis/world/__init__.py
 clematis/world/scenario.py
 clematis/world/scheduler.py
-examples/quantum_vs_wall.yaml
-examples/perf/caches.yaml
-examples/perf/caps.yaml
-examples/perf/fp16_reader.yaml
-examples/perf/snapshots.yaml
-examples/quality/aliases.yaml
-examples/quality/lexical_fusion.yaml
-examples/quality/normalizer_aliases.yaml
-examples/quality/reader_parity.yaml
-examples/quality/shadow.yaml
-examples/scheduler/fair_queue_aging.yaml
-examples/scheduler/round_robin_minimal.yaml
