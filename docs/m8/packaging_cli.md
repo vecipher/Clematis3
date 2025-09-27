@@ -134,3 +134,20 @@ Notes:
 ## Pointers
 - Wrapper internals & delegation rules: **`docs/m8/cli.md`**
 - Tests asserting the invariants: `tests/cli/` (help phrase, sentinel strip, default injection, bypass)
+
+## Man pages
+
+We ship minimal man(1) pages generated from argparse `--help` (help2man‑style, offline, deterministic).
+
+Generate locally (deterministic):
+```bash
+SOURCE_DATE_EPOCH=1704067200 python scripts/gen_manpages.py --outdir man
+man -l man/clematis.1
+```
+
+Installed location (POSIX):
+```
+$VENV/share/man/man1/clematis.1
+```
+
+Note: Windows runners don’t have `man(1)`, but pages ship inside the wheel for parity.

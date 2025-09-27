@@ -488,3 +488,9 @@ jobs:
           head -n1 err.txt | grep "direct script is deprecated"
       - name: CLI tests
         run: pytest -q tests/cli
+
+### PR54 — Man pages & packaging
+- Add `scripts/gen_manpages.py` (stdlib-only, deterministic via `SOURCE_DATE_EPOCH`)
+- Package manpages with `tool.setuptools.data-files` → `share/man/man1`
+- Include manpages in sdist via `MANIFEST.in`
+- CI: generate before build, upload artifact, verify presence in sdist/wheel, best-effort render check

@@ -83,3 +83,10 @@ clematis/scripts/validate.py
 clematis/world/__init__.py
 clematis/world/scenario.py
 clematis/world/scheduler.py
+man/clematis-bench-t4.1
+man/clematis-demo.1
+man/clematis-inspect-snapshot.1
+man/clematis-rotate-logs.1
+man/clematis-seed-lance-demo.1
+man/clematis-validate.1
+man/clematis.1

@@ -5,6 +5,7 @@ numpy<2,>=1.26
 
 [cli-demo]
 numpy>=1.24
+PyYAML>=6.0
 
 [cli-extras]
 numpy<2,>=1.26

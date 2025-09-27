@@ -34,6 +34,10 @@ jobs:
         run: |
           python -m pip install --upgrade pip build
 
+      - name: Generate manpages (deterministic)
+        run: |
+          python scripts/gen_manpages.py --outdir man --module clematis --section 1
+
       - name: Build #1
         run: |
           set -euo pipefail
@@ -45,6 +49,26 @@ jobs:
         run: |
           python -m pip install --upgrade twine
           python -m twine check dist/*
+
+      - name: Upload manpages artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: manpages
+          path: man/*.1
+
+      - name: Verify manpages in sdist & wheel (Build #1)
+        run: |
+          python -c "import tarfile,zipfile,glob; s=sorted(glob.glob('dist/*.tar.gz'))[-1]; w=sorted(glob.glob('dist/*.whl'))[-1]; import tarfile as _t, zipfile as _z; names=[m.name for m in _t.open(s,'r:gz').getmembers()]; assert any(n.endswith('/man/clematis.1') for n in names), 'sdist missing man/clematis.1'; names=_z.ZipFile(w).namelist(); assert any(n.endswith('/share/man/man1/clematis.1') for n in names), 'wheel missing share/man/man1/clematis.1'; print('OK: manpages present in both sdist & wheel.')"
+
+      - name: Render check (best effort)
+        continue-on-error: true
+        run: |
+          if command -v man >/dev/null 2>&1; then
+            man -l man/clematis.1 | col -b | head -n 20
+          else
+            echo "man(1) not available on runner"
+          fi
 
       - name: Canonicalize & hash #1
         run: |
@@ -150,6 +174,13 @@ jobs:
 
           # 5) inspect-snapshot (json)
           python -m clematis inspect-snapshot -- --format json
+
+      - name: Verify installed manpage (Linux only)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          .venv/bin/python -c "import sysconfig, pathlib; d=sysconfig.get_paths()['data']; p=pathlib.Path(d)/'share'/'man'/'man1'/'clematis.1'; print('Expect manpage at:', p); assert p.exists(), f'installed manpage missing: {p}'; print('OK: installed man page present')"
 
       - name: Smoke (windows)
         if: runner.os == 'Windows'
