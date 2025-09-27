@@ -1,3 +1,4 @@
+pyyaml>=6.0.1
 
 [dev]
 build<2,>=1.2.1
@@ -6,6 +7,7 @@ pytest<9,>=8
 hypothesis<7,>=6
 ruff<1,>=0.6
 pyright<2,>=1.1
+numpy<2,>=1.26
 
 [lancedb]
 lancedb<1,>=0.8
@@ -14,6 +16,7 @@ pyarrow<19,>=15
 [test]
 pytest<9,>=8
 hypothesis<7,>=6
+numpy<2,>=1.26
 zstandard<0.23,>=0.22
 
 [zstd]

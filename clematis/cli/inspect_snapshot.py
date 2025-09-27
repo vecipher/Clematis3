@@ -1,5 +1,5 @@
 import argparse, importlib, importlib.util, inspect, sys
-from ._wrapper_common import maybe_debug
+from ._wrapper_common import maybe_debug, inject_default_from_packaged_or_cwd
 from pathlib import Path
 
 _CANDIDATES = ("clematis.scripts.inspect_snapshot", "scripts.inspect_snapshot")
@@ -46,6 +46,13 @@ def _entrypoint(ns: argparse.Namespace) -> int:
         if parser is not None:
             parser.print_help()
             return 0
+    # If user did not supply --dir, inject packaged examples/snapshots or CWD fallback.
+    argv = inject_default_from_packaged_or_cwd(
+        argv,
+        flag_names=("--dir",),
+        packaged_parts=("examples", "snapshots"),
+        cwd_rel="snapshots",
+    )
     maybe_debug(ns, resolved="scripts.inspect_snapshot", argv=argv)
     return int(_delegate(argv) or 0)
 

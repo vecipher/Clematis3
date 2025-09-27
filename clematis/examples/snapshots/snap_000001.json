@@ -1,0 +1,29 @@
+{
+  "schema_version": "v1",
+  "graph_schema_version": "v1.1",
+  "version_etag": "demo0",
+  "gel": {
+    "nodes": {},
+    "edges": {},
+    "meta": {
+      "schema": "v1.1",
+      "edges_count": 0,
+      "merges": [],
+      "splits": [],
+      "promotions": [],
+      "concept_nodes_count": 0
+    }
+  },
+  "graph": {
+    "nodes_count": 0,
+    "edges_count": 0,
+    "meta": { "last_update": null }
+  },
+  "t4_caps": {
+    "delta_norm_cap_l2": 0.0,
+    "novelty_cap_per_node": 0.0,
+    "churn_cap_edges": 0,
+    "weight_min": -1.0,
+    "weight_max": 1.0
+  }
+}

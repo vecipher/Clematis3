@@ -17,6 +17,10 @@ recursive-include clematis *.py *.json *.jsonl *.md
 # Explicitly keep fixtures
 graft clematis/fixtures
 
+recursive-include examples *.yaml
+recursive-include fixtures/llm *.jsonl
+recursive-include clematis/examples *
+
 # Exclude transient / CI / local-only content to stabilize sdist
 prune tests
 prune .github

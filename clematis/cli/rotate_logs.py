@@ -1,6 +1,6 @@
 import argparse, importlib, importlib.util, inspect, sys
 from pathlib import Path
-from ._wrapper_common import maybe_debug
+from ._wrapper_common import maybe_debug, inject_default_from_packaged_or_cwd
 
 _CANDIDATES = ("clematis.scripts.rotate_logs", "scripts.rotate_logs")
 
@@ -46,6 +46,13 @@ def _entrypoint(ns):
         if parser is not None:
             parser.print_help()
             return 0
+    # If user did not supply --dir, inject packaged examples/logs or CWD fallback.
+    argv = inject_default_from_packaged_or_cwd(
+        argv,
+        flag_names=("--dir",),
+        packaged_parts=("examples", "logs"),
+        cwd_rel=".logs",
+    )
     maybe_debug(ns, resolved="scripts.rotate_logs", argv=argv)
     return int(_delegate(argv) or 0)
 
