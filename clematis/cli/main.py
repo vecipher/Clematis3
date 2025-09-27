@@ -2,7 +2,7 @@
 import argparse
 import sys
 from typing import List
-from . import rotate_logs, inspect_snapshot, bench_t4, seed_lance_demo
+from . import rotate_logs, inspect_snapshot, bench_t4, seed_lance_demo, validate, demo
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -34,6 +34,8 @@ def build_parser() -> argparse.ArgumentParser:
     inspect_snapshot.register(subparsers)
     bench_t4.register(subparsers)
     seed_lance_demo.register(subparsers)
+    validate.register(subparsers)
+    demo.register(subparsers)
 
     return parser
 

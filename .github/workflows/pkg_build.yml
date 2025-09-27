@@ -132,11 +132,11 @@ jobs:
           # 1) version
           python -m clematis --version
 
-          # 2) validate (direct then passthrough)
-          (python -m clematis validate --json) || (python -m clematis validate -- --json)
+          # 2) validate
+          python -m clematis validate --json
 
-          # 3) demo minimal (passthrough then direct)
-          (python -m clematis demo -- --steps 1) || (python -m clematis demo --steps 1)
+          # 3) demo minimal
+          python -m clematis demo -- --steps 1
 
       - name: Smoke (windows)
         if: runner.os == 'Windows'
@@ -151,13 +151,11 @@ jobs:
           # 1) version
           .\.venv\Scripts\python -m clematis --version
 
-          # 2) validate (direct then passthrough)
-          try { .\.venv\Scripts\python -m clematis validate --json }
-          catch { .\.venv\Scripts\python -m clematis validate -- --json }
+          # 2) validate
+          .\.venv\Scripts\python -m clematis validate --json
 
-          # 3) demo minimal (passthrough then direct)
-          try { .\.venv\Scripts\python -m clematis demo -- --steps 1 }
-          catch { .\.venv\Scripts\python -m clematis demo --steps 1 }
+          # 3) demo minimal
+          .\.venv\Scripts\python -m clematis demo -- --steps 1
 
       - name: Upload wheel (artifact per axis)
         uses: actions/upload-artifact@v4
