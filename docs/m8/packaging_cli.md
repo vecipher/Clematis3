@@ -11,8 +11,16 @@ These work after installing the wheel (no repo checkout):
 
 ```bash
 python -m clematis --version
+python -m clematis validate --json
+python -m clematis demo -- --steps 1
 python -m clematis inspect-snapshot -- --format json
 python -m clematis rotate-logs -- --dry-run
+```
+
+**Note:** If `demo` or `validate` complain about missing NumPy/PyYAML on a base install, add the minimal extra:
+
+```bash
+pip install "clematis[cli-demo]"
 ```
 
 **Rules:**
@@ -74,16 +82,17 @@ python -m clematis rotate-logs     -- --dir ./my_logs  --dry-run
 ---
 
 ## Optional extras (pip groups)
-These are **metadata only**; the core CLI smokes don’t require them.
+These are **metadata-only** groups. For offline `demo`/`validate`, the minimal `cli-demo` extra is recommended.
 
-| Extra name     | Purpose / typical libs                                  |
-|----------------|----------------------------------------------------------|
-| `bench`        | lightweight benchmarking helpers (e.g., `numpy`)         |
+| Extra name     | Purpose / typical libs                                           |
+|----------------|------------------------------------------------------------------|
+| `cli-demo`     | Minimal deps for offline demo/validate (e.g., `numpy`, `PyYAML`) |
+| `bench`        | Lightweight benchmarking helpers (e.g., `numpy`)                 |
 | `cli-extras`   | CLI demos for snapshots/IO (e.g., `numpy`, `pyarrow`, `lancedb`) |
 
 Install with e.g.:
 ```bash
-pip install "clematis3[cli-extras]"
+pip install "clematis[cli-demo]"
 ```
 (Adjust name to your published package.)
 
@@ -109,7 +118,8 @@ python -m clematis demo -- --steps 1 # or: python -m clematis demo --steps 1
 
 Notes:
 - No LLM smokes in this job.
-- Install/build may use network; only the **runtime** of the above smokes is network‑banned.
+- The job installs the minimal extra via: `pip install "$WHL[cli-demo]"` to satisfy demo/validate imports.
+- Install/build may use network; only the **runtime** of the smokes is network‑banned (`CLEMATIS_NETWORK_BAN=1`).
 - Windows enables long paths with `git config --global core.longpaths true` to avoid path length issues.
 
 ---
