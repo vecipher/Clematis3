@@ -24,6 +24,8 @@ jobs:
     env:
       LC_ALL: C
       PYTHONUTF8: "1"
+      COLUMNS: "80"
+      PYTHONHASHSEED: "0"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -47,7 +49,10 @@ jobs:
           set -euxo pipefail
           python -m pip install -U pip
           if [ -f pyproject.toml ] || [ -f setup.cfg ] || [ -f setup.py ]; then
-            python -m pip install -e ".[dev,test]" || python -m pip install -e .
+            # Ensure test extras (shtab) are installed; dev extra may not exist, so try in order.
+            python -m pip install -e ".[dev,test]" || \
+            python -m pip install -e ".[test]" || \
+            python -m pip install -e .
           elif [ -f requirements-dev.txt ]; then
             python -m pip install -r requirements-dev.txt
           else

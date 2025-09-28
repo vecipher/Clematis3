@@ -17,6 +17,8 @@ jobs:
       PYTHONDONTWRITEBYTECODE: "1"
       PYTHONUTF8: "1"
       PYTHONHASHSEED: "0"
+      LC_ALL: C
+      COLUMNS: "80"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -24,7 +26,11 @@ jobs:
           python-version: "3.11"
       - name: Install
         run: |
+          set -euxo pipefail
           python -m pip install -U pip
+          # Ensure test extras (shtab) available; fall back gracefully.
+          python -m pip install -e ".[dev,test]" || \
+          python -m pip install -e ".[test]" || \
           python -m pip install -e .
           python -m pip install pytest
       - name: Pre-check (version)

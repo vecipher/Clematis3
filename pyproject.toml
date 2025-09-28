@@ -35,6 +35,7 @@ dev = [
   "ruff>=0.6,<1",
   "pyright>=1.1,<2",
   "numpy>=1.26,<2",
+  "shtab==1.7.1",
   "pyyaml>=6.0"
 ]
 test = [
@@ -42,6 +43,7 @@ test = [
   "hypothesis>=6,<7",
   "numpy>=1.26,<2",
   "zstandard>=0.22,<0.23",
+  "shtab==1.7.1",
 ]
 lancedb = [
   "lancedb>=0.8,<1",
