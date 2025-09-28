@@ -1,5 +1,6 @@
 # Virtual envs
 .venv/
+.venv_*/
 venv/
 env/
 .clean/
@@ -9,18 +10,21 @@ env/
 # Python cache/compiled
 __pycache__/
 *.py[cod]
+*.pyo
 *.so
 
 # Build & packaging
 build/
 dist/
-*.egg-info/
-.eggs/
 pip-wheel-metadata/
+.eggs/
+*.egg-info/
+clematis.egg-info/
 
 # Test/coverage
 .pytest_cache/
 .coverage*
+coverage.xml
 htmlcov/
 .tox/
 .nox/
@@ -37,34 +41,5 @@ htmlcov/
 .idea/
 *.swp
 
-# OS junk
+# OS files
 .DS_Store
-
-# Python build artifacts
-dist/
-build/
-*.egg-info/
-
-# Virtual environments
-.venv/
-.venv_*/
-venv/
-env/
-
-# Bytecode / caches
-__pycache__/
-*.py[cod]
-*.pyo
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
-
-# Coverage / test outputs
-.coverage
-coverage.xml
-htmlcov/
-
-# OS/editor
-.DS_Store
-.idea/
-.vscode/
