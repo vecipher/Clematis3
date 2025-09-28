@@ -42,12 +42,11 @@ test = [
   "pytest>=8,<9",
   "hypothesis>=6,<7",
   "numpy>=1.26,<2",
-  "zstandard>=0.22,<0.23",
   "shtab==1.7.1",
 ]
 lancedb = [
-  "lancedb>=0.8,<1",
-  "pyarrow>=15,<19",
+  "lancedb>=0.14,<1",
+  "pyarrow>=15",
 ]
 zstd = [
   "zstandard>=0.22,<0.23",
@@ -57,8 +56,8 @@ bench = [
 ]
 cli-extras = [
   "numpy>=1.26,<2",
-  "lancedb>=0.8,<1",
-  "pyarrow>=15,<19",
+  "lancedb>=0.14,<1",
+  "pyarrow>=15",
 ]
 cli-demo = ["numpy>=1.24", "pyyaml>=6.0"]
 

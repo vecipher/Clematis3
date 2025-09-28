@@ -3,15 +3,39 @@ Name: clematis
 Version: 0.8.0a4
 Summary: Clematis — deterministic mind-like simulation engine (M1–M8 baseline)
 Author: vecipher
-License-Expression: MIT
+License: MIT License
+        
+        Copyright (c) 2025 vecipher
+        
+        Permission is hereby granted, free of charge, to any person obtaining a copy
+        of this software and associated documentation files (the "Software"), to deal
+        in the Software without restriction, including without limitation the rights
+        to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+        copies of the Software, and to permit persons to whom the Software is
+        furnished to do so, subject to the following conditions:
+        
+        The above copyright notice and this permission notice shall be included in all
+        copies or substantial portions of the Software.
+        
+        THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+        IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+        FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+        AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+        LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+        OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+        SOFTWARE.
+        
 Project-URL: Homepage, https://github.com/vecipher/Clematis3
 Project-URL: Repository, https://github.com/vecipher/Clematis3.git
 Project-URL: Issues, https://github.com/vecipher/Clematis3/issues
+Project-URL: Documentation, https://github.com/vecipher/Clematis3/blob/main/docs/m8/packaging_cli.md
+Project-URL: Changelog, https://github.com/vecipher/Clematis3/blob/main/CHANGELOG.MD
 Classifier: Programming Language :: Python :: 3 :: Only
 Classifier: Programming Language :: Python :: 3.11
 Classifier: Programming Language :: Python :: 3.12
 Classifier: Programming Language :: Python :: 3.13
 Classifier: Operating System :: OS Independent
+Classifier: License :: OSI Approved :: MIT License
 Requires-Python: <3.14,>=3.11
 Description-Content-Type: text/markdown
 License-File: LICENSE
@@ -23,27 +47,28 @@ Requires-Dist: pytest<9,>=8; extra == "dev"
 Requires-Dist: hypothesis<7,>=6; extra == "dev"
 Requires-Dist: ruff<1,>=0.6; extra == "dev"
 Requires-Dist: pyright<2,>=1.1; extra == "dev"
-Requires-Dist: numpy>=1.24; extra == "dev"
-Requires-Dist: PyYAML>=6.0; extra == "dev"
+Requires-Dist: numpy<2,>=1.26; extra == "dev"
+Requires-Dist: shtab==1.7.1; extra == "dev"
+Requires-Dist: pyyaml>=6.0; extra == "dev"
 Provides-Extra: test
 Requires-Dist: pytest<9,>=8; extra == "test"
 Requires-Dist: hypothesis<7,>=6; extra == "test"
 Requires-Dist: numpy<2,>=1.26; extra == "test"
-Requires-Dist: zstandard<0.23,>=0.22; extra == "test"
+Requires-Dist: shtab==1.7.1; extra == "test"
 Provides-Extra: lancedb
-Requires-Dist: lancedb<1,>=0.8; extra == "lancedb"
-Requires-Dist: pyarrow<19,>=15; extra == "lancedb"
+Requires-Dist: lancedb<1,>=0.14; extra == "lancedb"
+Requires-Dist: pyarrow>=15; extra == "lancedb"
 Provides-Extra: zstd
 Requires-Dist: zstandard<0.23,>=0.22; extra == "zstd"
 Provides-Extra: bench
 Requires-Dist: numpy<2,>=1.26; extra == "bench"
 Provides-Extra: cli-extras
 Requires-Dist: numpy<2,>=1.26; extra == "cli-extras"
-Requires-Dist: lancedb<1,>=0.8; extra == "cli-extras"
-Requires-Dist: pyarrow<19,>=15; extra == "cli-extras"
+Requires-Dist: lancedb<1,>=0.14; extra == "cli-extras"
+Requires-Dist: pyarrow>=15; extra == "cli-extras"
 Provides-Extra: cli-demo
 Requires-Dist: numpy>=1.24; extra == "cli-demo"
-Requires-Dist: PyYAML>=6.0; extra == "cli-demo"
+Requires-Dist: pyyaml>=6.0; extra == "cli-demo"
 Dynamic: license-file
 
 # Clematis v3 — deterministic, turn‑based agent engine

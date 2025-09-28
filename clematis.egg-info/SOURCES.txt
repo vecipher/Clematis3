@@ -18,6 +18,7 @@ clematis/adapters/__init__.py
 clematis/adapters/embeddings.py
 clematis/adapters/llm.py
 clematis/cli/__init__.py
+clematis/cli/_config.py
 clematis/cli/_exit.py
 clematis/cli/_io.py
 clematis/cli/_resources.py
@@ -74,6 +75,10 @@ clematis/memory/__init__.py
 clematis/memory/index.py
 clematis/memory/lance_index.py
 clematis/memory/models.py
+clematis/optional/__init__.py
+clematis/optional/_require.py
+clematis/optional/lancedb_support.py
+clematis/optional/zstd_support.py
 clematis/resources/__init__.py
 clematis/scripts/__init__.py
 clematis/scripts/bench_t4.py

@@ -276,3 +276,20 @@ jq -e . dist/sbom.cdx.json >/dev/null
 - CycloneDX Python v4 uses the `cyclonedx_py` module entrypoint. We invoke it with `python -m cyclonedx_py` to avoid PATH issues across runners.
 - The SBOM job runs only on tags/releases; regular PR/branch jobs remain unchanged (disabled‑path identity preserved).
 - SBOM generation installs the built wheel into a temporary venv to resolve dependencies for an **environment SBOM** (more useful than manifest-only).
+
+## Optional extras (PR61)
+
+Some features are optional and installed via extras:
+
+| Extra     | Installs     | Enables                                  |
+|-----------|--------------|------------------------------------------|
+| `zstd`    | zstandard    | .zst helpers/tests                       |
+| `lancedb` | lancedb      | LanceDB import smoke                      |
+| `dev`     | test+linters | Local dev setup (`.[dev]`)               |
+
+Install examples:
+python -m pip install 'clematis[zstd]'
+python -m pip install 'clematis[lancedb]'
+python -m pip install 'clematis[dev]'
+
+Tests are skip-aware: if an extra isn’t installed, its tests are skipped.
