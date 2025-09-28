@@ -30,6 +30,12 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help=argparse.SUPPRESS,
     )
+    # Hidden explicit config override; consumed at umbrella, not forwarded
+    parser.add_argument(
+        "-c", "--config",
+        dest="config",
+        help=argparse.SUPPRESS,
+    )
     subparsers = parser.add_subparsers(dest="command")
 
     # Register wrappers (pass-through pattern)
@@ -61,7 +67,23 @@ def main(argv: List[str] | None = None) -> int:
 
     idx = next((i for i, tok in enumerate(argv) if tok in choices), -1)
     if idx >= 0:
-        pre = [t for t in argv[:idx] if t != "--debug"]  # extras before subcommand
+        # extras before subcommand, but strip umbrella-only flags (--debug, --config/-c)
+        pre = []
+        it = iter(argv[:idx])
+        for tok in it:
+            if tok == "--debug":
+                continue
+            if tok in ("--config", "-c"):
+                # skip its argument if present
+                try:
+                    nxt = next(it)
+                    # only skip if it isn't another option (defensive)
+                    if nxt.startswith("-"):
+                        pre.append(nxt)  # treat as a separate flag; user error
+                except StopIteration:
+                    pass
+                continue
+            pre.append(tok)
         # Parse only the subcommand token to bind the correct subparser/func
         ns, _ = parser.parse_known_args([argv[idx]])
         if not hasattr(ns, "func"):
