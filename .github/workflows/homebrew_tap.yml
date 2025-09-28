@@ -1,0 +1,86 @@
+name: Homebrew Tap Update
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  update-tap:
+    name: Update Homebrew Formula on release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set vars
+        id: vars
+        env:
+          INPUT_TAG: ${{ github.event.release.tag_name }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${INPUT_TAG}"
+          # If manually dispatched, pick the latest release tag.
+          if [ -z "$TAG" ]; then
+            TAG="$(gh release list --limit 1 --json tagName --jq '.[0].tagName')"
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "ver=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for sdist asset (poll)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${{ steps.vars.outputs.tag }}"
+          VER="${{ steps.vars.outputs.ver }}"
+          for i in {1..30}; do
+            names="$(gh release view "$TAG" --json assets --jq '.assets[].name' || true)"
+            echo "Assets: $names"
+            echo "$names" | grep -q "clematis-${VER}\.tar\.gz" && exit 0
+            echo "Waiting for clematis-${VER}.tar.gz to appear... ($i/30)"
+            sleep 5
+          done
+          echo "Timed out waiting for sdist asset." >&2
+          exit 1
+
+      - name: Download sdist from Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VER="${{ steps.vars.outputs.ver }}"
+          gh release download "v${VER}" -p "clematis-${VER}.tar.gz"
+
+      - name: Compute SHA256
+        id: sha
+        run: |
+          VER="${{ steps.vars.outputs.ver }}"
+          echo "sha=$(sha256sum clematis-${VER}.tar.gz | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+
+      - name: Update Formula file
+        run: |
+          TAG="${{ steps.vars.outputs.tag }}"
+          VER="${{ steps.vars.outputs.ver }}"
+          SHA="${{ steps.sha.outputs.sha }}"
+          F="Formula/clematis.rb"
+          echo "Updating $F → tag=$TAG ver=$VER sha=$SHA"
+          sed -i -E "s|^  url \".*\"|  url \"https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/clematis-${VER}.tar.gz\"|g" "$F"
+          sed -i -E "s|^  sha256 \".*\"|  sha256 \"${SHA}\"|g" "$F"
+          sed -i -E "s|^  version \".*\"|  version \"${VER}\"|g" "$F"
+          echo "---"
+          grep -E "^  (url|sha256|version)" -n "$F"
+
+      - name: Create PR with updated formula
+        uses: peter-evans/create-pull-request@v6
+        with:
+          commit-message: "brew(tap): update Formula for ${{ steps.vars.outputs.tag }}"
+          title: "brew(tap): update clematis.rb for ${{ steps.vars.outputs.tag }}"
+          body: |
+            Automated update of Homebrew Formula to tag `${{ steps.vars.outputs.tag }}`.
+            - url/sha256/version refreshed from Release sdist.
+          branch: "bot/brew-tap-${{ steps.vars.outputs.tag }}"
+          base: "main"
+          labels: "automation, packaging, homebrew"
