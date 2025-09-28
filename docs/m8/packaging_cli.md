@@ -211,21 +211,37 @@ On tag builds (`push` tags matching `v*` or when a Release is published), CI pro
     --outfile dist/sbom.cdx.json
   ```
 
-- **SLSA provenance attestations** for `dist/*.whl` and `dist/*.tar.gz` via GitHub `actions/attest-build-provenance`.
-- **SBOM publication**: uploaded as a workflow artifact; when triggered by a Release, attached to the Release page.
+- **SLSA provenance attestations** for `dist/*.whl`, `dist/*.tar.gz`, and `dist/sbom.cdx.json` via GitHub `actions/attest-build-provenance`.
+- **Release assets**: SBOM is uploaded as a workflow artifact; on Release, **SBOM + wheel + sdist** are attached to the Release page.
 
 ### Verify provenance
 
 With GitHub CLI (online):
 
-```bash
+```
 gh attestation verify dist/clematis-<ver>-py3-none-any.whl -R <OWNER>/<REPO>
+gh attestation verify dist/clematis-<ver>.tar.gz -R <OWNER>/<REPO>
+# Optional: attest SBOM itself (if present)
+gh attestation verify dist/sbom.cdx.json -R <OWNER>/<REPO>
 ```
 
 Offline flow:
 
+*(Requires `gh ≥ 2.47` for `attestation download`)*
+
 ```bash
 gh attestation download dist/clematis-<ver>-py3-none-any.whl -R <OWNER>/<REPO> > attestation.intoto.jsonl
+gh attestation verify dist/clematis-<ver>-py3-none-any.whl -R <OWNER>/<REPO> --bundle attestation.intoto.jsonl
+```
+
+Alternate bundle retrieval (works across `gh` versions):
+
+```
+# Compute digest of the artifact you want to verify (example: wheel)
+DIG=$(shasum -a 256 dist/clematis-<ver>-py3-none-any.whl | awk '{print $1}')
+# Fetch attestation bundle JSONL via GitHub API and save locally
+gh api "repos/<OWNER>/<REPO>/attestations/sha256:$DIG" --jq '.attestations[].bundle' > attestation.intoto.jsonl
+# Verify using the saved bundle
 gh attestation verify dist/clematis-<ver>-py3-none-any.whl -R <OWNER>/<REPO> --bundle attestation.intoto.jsonl
 ```
 
@@ -237,8 +253,7 @@ Quick sanity:
 jq -e . dist/sbom.cdx.json >/dev/null
 ```
 
-### Notes
-
-- CycloneDX Python v4 uses the `cyclonedx_py` module entrypoint. We invoke it with `python -m cyclonedx_py` to avoid PATH issues across runners.
-- The SBOM job runs only on tags/releases; regular PR/branch jobs remain unchanged (disabled‑path identity preserved).
-- SBOM generation installs the built wheel into a temporary venv to resolve dependencies for an **environment SBOM** (more useful than manifest-only).
+### Requirements / Tips
+- Use GitHub CLI **2.47+** for `gh attestation download`; older versions may produce non‑JSONL bundle output.
+- When verifying locally, download the **CI-built artifacts** (wheel/sdist) from the tag run to avoid digest mismatches, especially for sdists.
+- CI self‑verifies provenance for wheel/sdist; a failed fetch or mismatch will fail the tag job.
