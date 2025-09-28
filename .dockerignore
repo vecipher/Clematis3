@@ -1,0 +1,69 @@
+
+
+# -----------------------------
+# VCS / CI metadata (not needed for image build)
+# -----------------------------
+.git
+.git/
+.github/
+
+# -----------------------------
+# OS / Editor junk
+# -----------------------------
+.DS_Store
+*.swp
+*.swo
+.idea/
+.vscode/
+
+# -----------------------------
+# Python caches & virtualenvs
+# -----------------------------
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*.pyo
+.mypy_cache/
+.pytest_cache/
+.tox/
+.venv/
+venv/
+env/
+.env
+.env.*
+
+# -----------------------------
+# Build artifacts
+# -----------------------------
+build/
+dist/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+htmlcov/
+.coverage*
+
+# -----------------------------
+# Project directories not used by the Dockerfile build
+# (kept out of context to speed up builds)
+# -----------------------------
+docs/
+tests/
+examples/
+man/
+
+# -----------------------------
+# Local logs / temp data
+# -----------------------------
+logs/
+*.log
+tmp/
+temp/
+
+# -----------------------------
+# Docker-compose or local infra files
+# -----------------------------
+docker-compose*.yml
+docker-compose*.yaml
+
+# NOTE: do NOT ignore `configs/` — it's needed at runtime for `validate`.

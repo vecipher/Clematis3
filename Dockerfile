@@ -1,5 +1,3 @@
-
-
 # syntax=docker/dockerfile:1.7
 
 ############################
@@ -33,6 +31,9 @@ LABEL org.opencontainers.image.source="https://github.com/${GITHUB_REPOSITORY:-v
 # Run as non-root
 RUN useradd -m -u 10001 appuser
 WORKDIR /app
+# Provide repo-local configs for validate script and expose on PYTHONPATH
+COPY configs ./configs
+ENV PYTHONPATH=/app:$PYTHONPATH
 
 # Offline-by-default behavior
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
