@@ -1,9 +1,9 @@
 [project]
 name = "clematis"
-version = "0.8.0a1"
+version = "0.8.0a4"
 description = "Clematis — deterministic mind-like simulation engine (M1–M8 baseline)"
 readme = "README.md"
-requires-python = ">=3.11,<3.13"
+requires-python = ">=3.11,<3.14"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "vecipher" }]
@@ -14,6 +14,7 @@ classifiers = [
   "Programming Language :: Python :: 3 :: Only",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
   "Operating System :: OS Independent",
 ]
 
