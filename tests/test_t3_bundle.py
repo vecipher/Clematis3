@@ -28,10 +28,17 @@ def _mk_t1(num=5):
     deltas = []
     for i in range(num):
         deltas.append({"id": f"n{i:02d}", "label": f"L{i}", "delta": float(i)})
-    return Obj(graph_deltas=deltas, metrics={
-        "pops": 10, "iters": 3, "propagations": 7,
-        "radius_cap_hits": 0, "layer_cap_hits": 1, "node_budget_hits": 0,
-    })
+    return Obj(
+        graph_deltas=deltas,
+        metrics={
+            "pops": 10,
+            "iters": 3,
+            "propagations": 7,
+            "radius_cap_hits": 0,
+            "layer_cap_hits": 1,
+            "node_budget_hits": 0,
+        },
+    )
 
 
 def _mk_t2():
@@ -87,15 +94,19 @@ def test_t1_touched_nodes_sorted_and_capped():
     assert len(nodes) == 32, "Touched nodes must be capped at 32"
 
     ids = [n["id"] for n in nodes]
-    assert ids[0] == "n08" and ids[-1] == "n39", f"Unexpected ID range/order: {ids[:5]}...{ids[-5:]}"
+    assert (
+        ids[0] == "n08" and ids[-1] == "n39"
+    ), f"Unexpected ID range/order: {ids[:5]}...{ids[-5:]}"
 
 
 def test_t2_retrieved_sorted_and_trimmed():
     # Set k_retrieval=2 and ensure we keep top 2 by score, tie-break by id
-    ctx = Ctx(cfg={
-        "t3": {"tokens": 256, "max_ops_per_turn": 3, "max_rag_loops": 1, "temp": 0.7},
-        "t2": {"owner_scope": "any", "k_retrieval": 2, "sim_threshold": 0.3},
-    })
+    ctx = Ctx(
+        cfg={
+            "t3": {"tokens": 256, "max_ops_per_turn": 3, "max_rag_loops": 1, "temp": 0.7},
+            "t2": {"owner_scope": "any", "k_retrieval": 2, "sim_threshold": 0.3},
+        }
+    )
     state = {}
     t1 = _mk_t1(3)
     t2 = _mk_t2()
@@ -108,10 +119,12 @@ def test_t2_retrieved_sorted_and_trimmed():
 
 
 def test_config_snapshot_reflects_ctx_cfg():
-    ctx = Ctx(cfg={
-        "t3": {"tokens": 123, "max_ops_per_turn": 9, "max_rag_loops": 1, "temp": 0.1},
-        "t2": {"owner_scope": "world", "k_retrieval": 7, "sim_threshold": 0.01},
-    })
+    ctx = Ctx(
+        cfg={
+            "t3": {"tokens": 123, "max_ops_per_turn": 9, "max_rag_loops": 1, "temp": 0.1},
+            "t2": {"owner_scope": "world", "k_retrieval": 7, "sim_threshold": 0.01},
+        }
+    )
     b = make_plan_bundle(ctx, {}, _mk_t1(2), _mk_t2())
     assert b["cfg"]["t3"]["tokens"] == 123
     assert b["cfg"]["t2"]["k_retrieval"] == 7
@@ -126,10 +139,12 @@ def test_missing_fields_defaults_in_retrieved():
         assert r["owner"] == "any"
         assert r["quarter"] == ""
 
+
 # --- PR4 placeholder ---
 # The orchestrator imports `make_dialog_bundle` as a forward stub.
 # Provide a deterministic, pure placeholder that can be replaced in PR7.
 DIALOG_BUNDLE_VERSION = "t3-dialog-bundle-v1"
+
 
 def make_dialog_bundle(ctx, state, t1, t2, plan=None) -> dict:
     """Minimal deterministic dialogue bundle placeholder.

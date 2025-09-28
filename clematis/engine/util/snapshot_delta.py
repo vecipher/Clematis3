@@ -1,6 +1,5 @@
-
-
 from __future__ import annotations
+
 """
 Deterministic delta codec for snapshot JSON blobs.
 
@@ -29,9 +28,9 @@ def _is_mapping(x: Any) -> bool:
     return isinstance(x, dict)
 
 
-def _walk_diff(base: Dict[str, Any] | None,
-               curr: Dict[str, Any] | None,
-               prefix: Tuple[str, ...] = ()) -> Tuple[Dict[str, Any], Dict[str, Any], Iterable[str]]:
+def _walk_diff(
+    base: Dict[str, Any] | None, curr: Dict[str, Any] | None, prefix: Tuple[str, ...] = ()
+) -> Tuple[Dict[str, Any], Dict[str, Any], Iterable[str]]:
     """Return (adds, mods, dels) for the subtree at prefix."""
     b = base or {}
     c = curr or {}

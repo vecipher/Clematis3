@@ -1,5 +1,3 @@
-
-
 from __future__ import annotations
 
 from typing import Optional
@@ -32,6 +30,7 @@ def compress_bytes(data: bytes, level: int = 3) -> bytes:
     c = zstd.ZstdCompressor(level=level)
     return c.compress(data)
 
+
 def decompress_bytes(data: bytes, max_output_size: int | None = None) -> bytes:
     zstd = _zstd()
     d = zstd.ZstdDecompressor()
@@ -39,6 +38,7 @@ def decompress_bytes(data: bytes, max_output_size: int | None = None) -> bytes:
         # zstandard API expects an int; omit the arg when unlimited
         return d.decompress(data)
     return d.decompress(data, max_output_size=max_output_size)
+
 
 __all__ = [
     "has_zstd",

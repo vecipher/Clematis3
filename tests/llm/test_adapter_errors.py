@@ -1,5 +1,3 @@
-
-
 import json
 import pytest
 from clematis.adapters.llm import FixtureLLMAdapter, LLMAdapterError, _prompt_hash

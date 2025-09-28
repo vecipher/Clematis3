@@ -73,6 +73,8 @@ def test_mmr_works_with_text_only_and_reports_diversity_head():
     head_items = [MMRItem(id=h["id"], rel=0.0, toks=toks(h.get("text", ""))) for h in head]
     div = avg_pairwise_distance(head_items)
     assert 0.0 <= div <= 1.0
+
+
 def test_mmr_emits_selected_metric_when_gated():
     """Check that PR38 emits t2q.mmr.selected when quality+MMR are enabled and perf triple gate is on.
     If the pipeline hook isn't exposed (e.g., function not available), skip gracefully.

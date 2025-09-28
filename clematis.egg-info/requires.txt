@@ -18,7 +18,9 @@ wheel<1,>=0.43
 pytest<9,>=8
 hypothesis<7,>=6
 ruff<1,>=0.6
-pyright<2,>=1.1
+mypy<2,>=1.11
+types-PyYAML<7,>=6.0.12.20240808
+pre-commit<4,>=3.8
 numpy<2,>=1.26
 shtab==1.7.1
 pyyaml>=6.0

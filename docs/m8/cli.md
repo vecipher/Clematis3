@@ -114,11 +114,11 @@ python -m clematis demo -- --steps 1
 ```
 
 ## Troubleshooting
-- **I passed `--` and it still reached the script.**  
+- **I passed `--` and it still reached the script.**
   The wrapper strips **one** sentinel by design. If you need a literal `--` for the script, quote it or provide another `--` where appropriate.
-- **Direct scripts show a hint.**  
+- **Direct scripts show a hint.**
   Calling `scripts/*.py` prints a **single stderr hint** via the shim; behavior is unchanged. For heavy scripts without optional deps installed, you may see an import error before the hint — use the umbrella wrappers for CI.
-- **“No snapshot found …”**  
+- **“No snapshot found …”**
   Ensure the directory contains `*.json` snapshots. A demo file `clematis/examples/snapshots/snap_000001.json` is packaged for quick checks.
 
 ## Guarantees (from PR47)
@@ -153,7 +153,7 @@ Matches the issue’s “Document the reproducibility recipe.”  [oai_citation:
 
 ## Why this satisfies PR51
 
-- **SOURCE_DATE_EPOCH honored** and fixed in CI.  [oai_citation:3‡GitHub](https://github.com/vecipher/Clematis3/issues/82)  
-- **Deterministic outputs**: two back-to-back builds compared via SHA256.  [oai_citation:4‡GitHub](https://github.com/vecipher/Clematis3/issues/82)  
-- **Docs updated** with the local smoke and CI pointer.  [oai_citation:5‡GitHub](https://github.com/vecipher/Clematis3/issues/82)  
+- **SOURCE_DATE_EPOCH honored** and fixed in CI.  [oai_citation:3‡GitHub](https://github.com/vecipher/Clematis3/issues/82)
+- **Deterministic outputs**: two back-to-back builds compared via SHA256.  [oai_citation:4‡GitHub](https://github.com/vecipher/Clematis3/issues/82)
+- **Docs updated** with the local smoke and CI pointer.  [oai_citation:5‡GitHub](https://github.com/vecipher/Clematis3/issues/82)
 - **Zero behavior change** for runtime/CLI.

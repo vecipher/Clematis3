@@ -1,4 +1,3 @@
-
 # Clematis3 — M5 Scheduler Core tests (PR25)
 # Focus: deterministic selection & bookkeeping, no orchestrator wiring.
 
@@ -13,6 +12,7 @@ from clematis.scheduler import (
 
 class FixedCtx:
     """Tiny fixed clock for deterministic tests."""
+
     def __init__(self, t=0):
         self._t = int(t)
 
@@ -30,13 +30,17 @@ def test_round_robin_determinism_and_bookkeeping():
     assert state["queue"] == ["Ambrose", "Kafka", "Ringer"]
 
     ctx = FixedCtx(0)
-    agent, budgets, reason = next_turn(ctx, state, policy="round_robin", fairness_cfg={"aging_ms": 200})
+    agent, budgets, reason = next_turn(
+        ctx, state, policy="round_robin", fairness_cfg={"aging_ms": 200}
+    )
     assert agent == "Ambrose"
     assert reason == "ROUND_ROBIN"
     assert budgets == {}
 
     # Bookkeeping on yield: last_ran updated, consec incremented; queue unchanged.
-    on_yield(ctx, state, agent, consumed={}, reason="EXPLICIT_YIELD", fairness_cfg={"aging_ms": 200})
+    on_yield(
+        ctx, state, agent, consumed={}, reason="EXPLICIT_YIELD", fairness_cfg={"aging_ms": 200}
+    )
     assert state["last_ran_ms"]["Ambrose"] == 0
     assert state["consec_turns"]["Ambrose"] == 1
     assert state["queue"] == ["Ambrose", "Kafka", "Ringer"]
@@ -52,7 +56,9 @@ def test_fair_queue_aging_tiers_and_tie_break():
     assert reason == "AGING_BOOST"
 
     # Yield updates last_ran for Ambrose only.
-    on_yield(ctx, state, agent, consumed={}, reason="EXPLICIT_YIELD", fairness_cfg={"aging_ms": 200})
+    on_yield(
+        ctx, state, agent, consumed={}, reason="EXPLICIT_YIELD", fairness_cfg={"aging_ms": 200}
+    )
     assert state["last_ran_ms"]["Ambrose"] == 500
 
     # Advance time: A idle=200 (tier=1), K/R idle=700 (tier=3) => pick Kafka (lex among K/R).

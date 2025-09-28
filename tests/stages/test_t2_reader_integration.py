@@ -8,28 +8,35 @@ from clematis.engine.util.embed_store import write_shard
 
 HAVE_T2 = hasattr(t2mod, "t2_semantic")
 
+
 class _Ctx(SimpleNamespace):
     pass
+
 
 class _State(SimpleNamespace):
     pass
 
+
 class _Index(SimpleNamespace):
     pass
+
 
 class _DummyEnc:
     def __init__(self, dim: int):
         self.dim = int(dim)
+
     def encode(self, texts):
         # Deterministic unit-norm vector so cosine math is stable.
         v = np.ones((len(texts), self.dim), dtype=np.float32)
         v /= np.linalg.norm(v, ord=2, axis=1, keepdims=True)
         return v
 
+
 def _ns(d):
     if isinstance(d, dict):
         return SimpleNamespace(**{k: _ns(v) for k, v in d.items()})
     return d
+
 
 @pytest.mark.skipif(not HAVE_T2, reason="t2_semantic not available")
 def test_reader_flip_matches_direct_cosine(tmp_path: Path):

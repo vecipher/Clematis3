@@ -1,5 +1,3 @@
-
-
 # PR26 — Scheduler budget reason tests
 # We validate that each budget cap (t1_iters, t1_pops, t2_k, t3_ops) triggers
 # the correct yield reason at a stage boundary, and that budgets take precedence
@@ -21,9 +19,9 @@ def _mk_slice_ctx(budgets):
     "budget_key,consumed_key,reason_name,value",
     [
         ("t1_iters", "t1_iters", "BUDGET_T1_ITERS", 3),
-        ("t1_pops",  "t1_pops",  "BUDGET_T1_POPS",  10),
-        ("t2_k",     "t2_k",     "BUDGET_T2_K",     5),
-        ("t3_ops",   "t3_ops",   "BUDGET_T3_OPS",   2),
+        ("t1_pops", "t1_pops", "BUDGET_T1_POPS", 10),
+        ("t2_k", "t2_k", "BUDGET_T2_K", 5),
+        ("t3_ops", "t3_ops", "BUDGET_T3_OPS", 2),
     ],
 )
 def test_each_budget_triggers_reason(budget_key, consumed_key, reason_name, value):
@@ -33,7 +31,7 @@ def test_each_budget_triggers_reason(budget_key, consumed_key, reason_name, valu
     budgets = {
         budget_key: value,
         "quantum_ms": 999999,  # ensure quantum won't fire
-        "wall_ms": 9999999,    # ensure wall won't fire
+        "wall_ms": 9999999,  # ensure wall won't fire
     }
     sc = _mk_slice_ctx(budgets)
     # Keep elapsed small to avoid quantum; exactly hit the budget.
@@ -61,9 +59,9 @@ def test_no_yield_when_under_all_thresholds():
 
     budgets = {
         "t1_iters": 10,
-        "t1_pops":  10,
-        "t2_k":     10,
-        "t3_ops":   10,
+        "t1_pops": 10,
+        "t2_k": 10,
+        "t3_ops": 10,
         "quantum_ms": 50,
         "wall_ms": 200,
     }

@@ -170,7 +170,7 @@ All notable changes to this project will be documented in this file.
 - **Stage wiring:** `clematis/engine/stages/t2.py` emits a **write-only** shadow trace **behind a triple gate**: `perf.enabled && perf.metrics.report_memory && t2.quality.shadow && !t2.quality.enabled`. Ordering and scores are unchanged.
 - **Configs (validator):** `configs/validate.py` adds `t2.quality.{enabled,shadow,trace_dir,redact}` with defaults (`enabled=false`, `shadow=false`, `trace_dir="logs/quality"`, `redact=true`). **PR36 guard:** `t2.quality.enabled=true` is rejected until PR37 lands. Verbose warning when the triple gate is incomplete.
 - **Examples:** `examples/quality/shadow.yaml` — runnable example exercising the triple gate (ON) with redaction.
-- **CLIs:** 
+- **CLIs:**
   - `scripts/rq_trace_dump.py` — tail/inspect recent trace entries.
   - `scripts/validate_noop_shadow.py` — Gate D comparator; asserts **no diffs** between baseline vs shadow runs **except** for `rq_traces.jsonl`.
 - **Configs (defaults):** `configs/config.yaml` now includes a minimal `t2.quality` block (defaults OFF) so the identity path is explicit.
@@ -268,10 +268,10 @@ All notable changes to this project will be documented in this file.
   - `caps.visited` — bounds the visited set using a FIFO-on-first-visit structure.
   - `dedupe_window` — short-horizon push deduplication to reduce thrash.
   - All features are gated; **disabled-path identity** is preserved when `perf.enabled=false` or keys are absent.
-- **Utilities:** 
+- **Utilities:**
   - `engine/util/ring.py` — `DedupeRing` (O(1) membership via refcounts) for push dedupe.
   - `engine/util/lru_det.py` — `DeterministicLRUSet` (visited bound) and `DeterministicLRU` (map cache for future PRs).
-- **Validator:** Support for `perf.t1.caps.{frontier,visited}` and `perf.t1.dedupe_window` (values must be ≥1). 
+- **Validator:** Support for `perf.t1.caps.{frontier,visited}` and `perf.t1.dedupe_window` (values must be ≥1).
   - Legacy `perf.t1.queue_cap` is accepted and mapped to `caps.frontier` if not provided.
   - Emits a warning when caps/dedupe are configured while `perf.enabled=false` (identity path).
 - **Docs:** README section “M6 — Perf & Compaction (PR31: T1 caps + dedupe; OFF by default)” with enablement example and metrics.
@@ -337,7 +337,7 @@ All notable changes to this project will be documented in this file.
   python3 scripts/validate_config.py .ci/validator_strict_quiet.yaml --strict
   python3 scripts/run_demo.py --config .ci/disabled_path_config.yaml
   ```
-  
+
 ![disabled-path-identity](https://github.com/vecipher/Clematis3/actions/workflows/disabled_identity.yml/badge.svg)
 
 ### Added (PR33.5 — Gate C: T2 reader parity & runtime‑flip invariants; defaults OFF)

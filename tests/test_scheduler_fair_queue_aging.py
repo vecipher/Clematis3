@@ -1,5 +1,3 @@
-
-
 # PR27 — Fairness: fair_queue aging tests (core scheduler only)
 # We validate deterministic aging tiers and lexicographic tie-breaks.
 
@@ -14,6 +12,7 @@ from clematis.scheduler import (
 
 class FixedCtx:
     """Tiny fixed clock for deterministic tests."""
+
     def __init__(self, t=0):
         self._t = int(t)
 
@@ -76,7 +75,7 @@ def test_future_last_ran_is_clamped_to_zero_idle():
     # If an agent's last_ran is in the future, its idle must not go negative.
     state = init_scheduler_state(["Ambrose", "Kafka"], now_ms=0)
     state["last_ran_ms"]["Ambrose"] = 2000  # future
-    state["last_ran_ms"]["Kafka"] = 500     # past
+    state["last_ran_ms"]["Kafka"] = 500  # past
     ctx = FixedCtx(1500)
     fairness = {"aging_ms": 200, "max_consecutive_turns": 10}
 

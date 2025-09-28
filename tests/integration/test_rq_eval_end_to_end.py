@@ -1,5 +1,3 @@
-
-
 import json
 import os
 import subprocess
@@ -44,20 +42,30 @@ def test_rq_eval_end_to_end_runs_and_writes_outputs(tmp_path):
     cmd = [
         sys.executable,
         str(script),
-        "--corpus", str(corpus),
-        "--queries", str(queries),
-        "--truth", str(truth),
-        "--configA", str(configA),
-        "--configB", str(configB),
-        "--k", "5",
-        "--out", str(out_json),
-        "--csv", str(out_csv),
+        "--corpus",
+        str(corpus),
+        "--queries",
+        str(queries),
+        "--truth",
+        str(truth),
+        "--configA",
+        str(configA),
+        "--configB",
+        str(configB),
+        "--k",
+        "5",
+        "--out",
+        str(out_json),
+        "--csv",
+        str(out_csv),
         "--emit-traces",
     ]
 
     proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     if proc.returncode != 0:
-        pytest.fail(f"rq_eval.py failed with code {proc.returncode}:\nSTDOUT:\n{proc.stdout}\nSTDERR:\n{proc.stderr}")
+        pytest.fail(
+            f"rq_eval.py failed with code {proc.returncode}:\nSTDOUT:\n{proc.stdout}\nSTDERR:\n{proc.stderr}"
+        )
 
     # JSON exists and has expected structure
     assert out_json.exists(), "JSON output not written"
@@ -74,7 +82,9 @@ def test_rq_eval_end_to_end_runs_and_writes_outputs(tmp_path):
     # Optional trace sanity: if a trace file exists, it should be non-empty JSONL
     logs_dir = root / "logs" / "quality"
     if logs_dir.exists():
-        candidates = list(logs_dir.glob("**/rq_traces.jsonl")) + list(logs_dir.glob("rq_traces.jsonl"))
+        candidates = list(logs_dir.glob("**/rq_traces.jsonl")) + list(
+            logs_dir.glob("rq_traces.jsonl")
+        )
         for path in candidates:
             try:
                 lines = path.read_text(encoding="utf-8").splitlines()

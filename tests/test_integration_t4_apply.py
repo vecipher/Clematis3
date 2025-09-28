@@ -1,5 +1,3 @@
-
-
 from types import SimpleNamespace
 import json
 import os
@@ -14,6 +12,7 @@ import clematis.engine.orchestrator as orch
 
 # ---- minimal store used for integration ----
 
+
 class MiniStore:
     """
     Tiny apply target for integration:
@@ -21,6 +20,7 @@ class MiniStore:
     - Supports apply_deltas(graph_id, deltas) with additive semantics
     - Reports edits/clamps like a real store would
     """
+
     def __init__(self, wmin=-1.0, wmax=1.0):
         self.w = {}
         self.wmin = float(wmin)
@@ -47,15 +47,16 @@ class MiniStore:
 
 # ---- helpers ----
 
+
 def mk_ctx(turn, agent, t4_overrides=None, snapshot_dir=None):
     t4_cfg = {
         "enabled": True,
-        "delta_norm_cap_l2": 1e6,       # disable L2 scaling for this integration
-        "novelty_cap_per_node": 1e6,    # disable novelty clamp
-        "churn_cap_edges": 64,          # no trimming
+        "delta_norm_cap_l2": 1e6,  # disable L2 scaling for this integration
+        "novelty_cap_per_node": 1e6,  # disable novelty clamp
+        "churn_cap_edges": 64,  # no trimming
         "weight_min": -1.0,
         "weight_max": 1.0,
-        "snapshot_every_n_turns": 1,    # force snapshot
+        "snapshot_every_n_turns": 1,  # force snapshot
         "snapshot_dir": snapshot_dir or "./.data/snapshots",
         "cache_bust_mode": "on-apply",
         "cooldowns": {},
@@ -88,6 +89,7 @@ def mk_plan(ops=None, deltas=None):
 
 
 # ---- test ----
+
 
 def test_t4_to_apply_end_to_end(tmp_path):
     # Arrange: temp snapshot dir and a mini in-memory store
@@ -130,6 +132,7 @@ def test_t4_to_apply_end_to_end(tmp_path):
     assert store.w[("node", "n:x", "weight")] == pytest.approx(0.2)
     assert store.w[("edge", "e:s|rel|d", "weight")] == pytest.approx(-0.1)
 
+
 def test_kill_switch_bypasses_t4_and_apply(monkeypatch):
     calls = []
 
@@ -139,8 +142,18 @@ def test_kill_switch_bypasses_t4_and_apply(monkeypatch):
 
     # Fake T1/T2 stages (return minimal objects)
     monkeypatch.setattr(orch, "append_jsonl", fake_append_jsonl, raising=True)
-    monkeypatch.setattr(orch, "t1_propagate", lambda ctx, state, text: SimpleNamespace(metrics={"t1": True}), raising=True)
-    monkeypatch.setattr(orch, "t2_semantic", lambda ctx, state, text, t1: SimpleNamespace(metrics={"t2": True}), raising=True)
+    monkeypatch.setattr(
+        orch,
+        "t1_propagate",
+        lambda ctx, state, text: SimpleNamespace(metrics={"t1": True}),
+        raising=True,
+    )
+    monkeypatch.setattr(
+        orch,
+        "t2_semantic",
+        lambda ctx, state, text, t1: SimpleNamespace(metrics={"t2": True}),
+        raising=True,
+    )
 
     # Fake T3 deliberate/dialogue to provide plan + utter
     def fake_t3_deliberate(ctx, state, bundle):

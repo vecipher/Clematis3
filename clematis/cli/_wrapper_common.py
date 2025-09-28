@@ -1,9 +1,10 @@
-
-
 from __future__ import annotations
-import os, sys
+
+import os
+import sys
 from pathlib import Path
-from typing import List, Tuple, Optional
+from typing import List, Optional, Tuple
+
 from ._resources import packaged_path
 
 
@@ -16,7 +17,9 @@ def _enabled(ns) -> bool:
     return os.getenv("CLEMATIS_DEBUG") == "1"
 
 
-def maybe_debug(ns, *args, resolved: Optional[str] = None, argv: Optional[List[str]] = None) -> None:
+def maybe_debug(
+    ns, *args, resolved: Optional[str] = None, argv: Optional[List[str]] = None
+) -> None:
     """
     Emit a single-line, deterministic breadcrumb to stderr (never logs).
 
@@ -28,7 +31,7 @@ def maybe_debug(ns, *args, resolved: Optional[str] = None, argv: Optional[List[s
     """
     # Accept both positional and keyword styles.
     if resolved is None and argv is None and len(args) == 2:
-        resolved, argv = args  # type: ignore[assignment]
+        resolved, argv = args
     if argv is None:
         argv = []
     if _enabled(ns):

@@ -35,14 +35,34 @@ def test_disabled_perf_and_quality_identity_to_base():
                 "enabled": False,
                 # arbitrary subfields should be inert in M6
                 "fusion": {"enabled": True, "alpha_semantic": 0.7, "score_norm": "zscore"},
-                "mmr": {"enabled": True, "lambda_relevance": 0.75, "diversity_by_owner": True, "diversity_by_token": True, "k_final": 64},
+                "mmr": {
+                    "enabled": True,
+                    "lambda_relevance": 0.75,
+                    "diversity_by_owner": True,
+                    "diversity_by_token": True,
+                    "k_final": 64,
+                },
             },
         },
         "perf": {
             "enabled": False,
-            "t1": {"queue_cap": 10000, "dedupe_window": 8192, "cache": {"max_entries": 512, "max_bytes": 64_000_000}},
-            "t2": {"embed_dtype": "fp32", "embed_store_dtype": "fp32", "precompute_norms": True, "cache": {"max_entries": 512, "max_bytes": 128_000_000}},
-            "snapshots": {"compression": "zstd", "level": 3, "delta_mode": False, "every_n_turns": 1},
+            "t1": {
+                "queue_cap": 10000,
+                "dedupe_window": 8192,
+                "cache": {"max_entries": 512, "max_bytes": 64_000_000},
+            },
+            "t2": {
+                "embed_dtype": "fp32",
+                "embed_store_dtype": "fp32",
+                "precompute_norms": True,
+                "cache": {"max_entries": 512, "max_bytes": 128_000_000},
+            },
+            "snapshots": {
+                "compression": "zstd",
+                "level": 3,
+                "delta_mode": False,
+                "every_n_turns": 1,
+            },
             "metrics": {"report_memory": True},
         },
     }

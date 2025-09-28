@@ -98,6 +98,7 @@ def test_unknown_key_suggestion():
     assert "t2.backnd" in msg
     assert "did you mean 'backend'" in msg
 
+
 def test_t1_t2_cache_ttl_alias_and_priority():
     # t1: ttl_sec alias should normalize into ttl_s
     out1 = validate_config({"t1": {"cache": {"ttl_sec": "600"}}})
@@ -109,6 +110,7 @@ def test_t1_t2_cache_ttl_alias_and_priority():
     out3 = validate_config({"t1": {"cache": {"ttl_s": 111}}})
     assert out3["t1"]["cache"]["ttl_s"] == 111
 
+
 def test_duplicate_cache_namespace_warns_in_verbose():
     cfg = {
         "t2": {"cache": {"enabled": True}},
@@ -116,6 +118,7 @@ def test_duplicate_cache_namespace_warns_in_verbose():
     }
     _, warnings = validate_config_verbose(cfg)
     assert any("duplicate-cache-namespace" in w for w in warnings)
+
 
 def test_t4_cache_namespace_membership():
     # Invalid namespace should error with allowed set indicated
@@ -126,12 +129,14 @@ def test_t4_cache_namespace_membership():
     assert "t4.cache.namespaces[t2:semantics]" in msg
     assert "allowed: ['t2:semantic']" in msg
 
+
 @pytest.mark.parametrize("bad", [1.2, -1.2])
 def test_t2_sim_threshold_bounds(bad):
     cfg = {"t2": {"sim_threshold": bad}}
     with pytest.raises(ValueError) as ei:
         validate_config(cfg)
     assert "t2.sim_threshold" in str(ei.value)
+
 
 def test_snapshot_every_n_turns_must_be_positive():
     cfg = {"t4": {"snapshot_every_n_turns": 0, "cache": {"namespaces": ["t2:semantic"]}}}
@@ -143,6 +148,7 @@ def test_snapshot_every_n_turns_must_be_positive():
 # ------------------------------
 # PR24: graph.merge/split/promotion validation
 # ------------------------------
+
 
 def test_graph_merge_defaults_and_bounds():
     cfg = {"graph": {"enabled": True}}

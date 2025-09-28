@@ -1,5 +1,3 @@
-
-
 import copy
 import json
 import subprocess
@@ -34,7 +32,9 @@ def test_perf_defaults_off_identity():
         "t2": {"k_retrieval": 16},
     }
     norm = validate_config(base)
-    assert "perf" not in norm, "validator must not inject a perf section when user did not provide one"
+    assert (
+        "perf" not in norm
+    ), "validator must not inject a perf section when user did not provide one"
     # quality block also absent unless explicitly provided
     assert "quality" not in norm.get("t2", {})
 
@@ -59,10 +59,20 @@ def test_quality_prep_inert_variations():
             "quality": {
                 "enabled": False,
                 "normalizer": {"stopwords": "builtin", "stemmer": "none", "min_token_len": 3},
-                "aliasing": {"enabled": False, "map_path": "examples/quality/aliases.yaml", "max_expansions_per_token": 2},
+                "aliasing": {
+                    "enabled": False,
+                    "map_path": "examples/quality/aliases.yaml",
+                    "max_expansions_per_token": 2,
+                },
                 "lexical": {"enabled": True, "bm25": {"k1": 1.2, "b": 0.75, "doclen_floor": 10}},
                 "fusion": {"enabled": True, "alpha_semantic": 0.7, "score_norm": "zscore"},
-                "mmr": {"enabled": True, "lambda_relevance": 0.75, "diversity_by_owner": True, "diversity_by_token": True, "k_final": 64},
+                "mmr": {
+                    "enabled": True,
+                    "lambda_relevance": 0.75,
+                    "diversity_by_owner": True,
+                    "diversity_by_token": True,
+                    "k_final": 64,
+                },
                 "cache": {"salt": ""},
             },
         }
@@ -118,10 +128,19 @@ def test_quality_value_bounds_and_types_errors():
     (Bounds/type checks are independent of wiring.)
     """
     bads = [
-        ({"t2": {"quality": {"normalizer": {"stemmer": "snowball"}}}}, "t2.quality.normalizer.stemmer"),
-        ({"t2": {"quality": {"normalizer": {"min_token_len": 0}}}}, "t2.quality.normalizer.min_token_len"),
+        (
+            {"t2": {"quality": {"normalizer": {"stemmer": "snowball"}}}},
+            "t2.quality.normalizer.stemmer",
+        ),
+        (
+            {"t2": {"quality": {"normalizer": {"min_token_len": 0}}}},
+            "t2.quality.normalizer.min_token_len",
+        ),
         ({"t2": {"quality": {"aliasing": {"map_path": ""}}}}, "t2.quality.aliasing.map_path"),
-        ({"t2": {"quality": {"lexical": {"bm25": {"doclen_floor": -5}}}}}, "t2.quality.lexical.bm25.doclen_floor"),
+        (
+            {"t2": {"quality": {"lexical": {"bm25": {"doclen_floor": -5}}}}},
+            "t2.quality.lexical.bm25.doclen_floor",
+        ),
         ({"t2": {"quality": {"fusion": {"score_norm": "l2"}}}}, "t2.quality.fusion.score_norm"),
         ({"t2": {"quality": {"mmr": {"k_final": 0}}}}, "t2.quality.mmr.k_final"),
     ]
@@ -142,18 +161,14 @@ def test_cli_validator_smoke(tmp_path: Path, monkeypatch):
         pytest.skip("validate_config.py script not found")
     # Minimal valid config via STDIN
     cfg = {
-        "t2": {
-            "k_retrieval": 16,
-            "quality": {"enabled": False},
-            "cache": {"enabled": False}
-        },
-        "t4": {
-            "cache": {"namespaces": []}
-        },
-        "perf": {"enabled": False}
+        "t2": {"k_retrieval": 16, "quality": {"enabled": False}, "cache": {"enabled": False}},
+        "t4": {"cache": {"namespaces": []}},
+        "perf": {"enabled": False},
     }
     # Use echo -> python script - to pass via stdin
     cmd = f'python3 {script} - --strict'
-    proc = subprocess.run(cmd, input=json.dumps(cfg).encode("utf-8"), shell=True, capture_output=True)
+    proc = subprocess.run(
+        cmd, input=json.dumps(cfg).encode("utf-8"), shell=True, capture_output=True
+    )
     assert proc.returncode == 0, proc.stderr.decode() or proc.stdout.decode()
     assert "OK" in proc.stdout.decode()

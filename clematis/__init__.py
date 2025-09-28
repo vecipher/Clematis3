@@ -14,6 +14,7 @@ except Exception:  # pragma: no cover
 
 __all__ = ["__version__"]
 
+
 def _version_from_metadata() -> str | None:
     try:
         return _pkg_version("clematis")
@@ -22,20 +23,25 @@ def _version_from_metadata() -> str | None:
     except Exception:
         return None
 
+
 def _version_from_resource() -> str | None:
     try:
         from importlib.resources import files
+
         p = files(__package__).joinpath("VERSION")
         return p.read_text(encoding="utf-8").strip()
     except Exception:
         return None
 
+
 def _version_from_fallback_module() -> str | None:
     try:
         from ._version import __version__ as v  # type: ignore
+
         return v
     except Exception:
         return None
+
 
 __version__ = (
     _version_from_metadata()

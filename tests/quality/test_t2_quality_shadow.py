@@ -4,6 +4,7 @@ from clematis.engine.stages.t2_quality_trace import emit_trace
 import pytest
 from configs.validate import validate_config_verbose
 
+
 def run_t2_for_test(query: str, cfg: dict):
     # Minimal deterministic items for comparison
     items = [{"id": "A", "score": 0.9}, {"id": "B", "score": 0.8}]
@@ -11,21 +12,38 @@ def run_t2_for_test(query: str, cfg: dict):
     perf = cfg.get("perf", {})
     metrics = perf.get("metrics", {})
     q = cfg.get("t2", {}).get("quality", {})
-    if perf.get("enabled") and metrics.get("report_memory") and q.get("shadow") and not q.get("enabled", False):
-        emit_trace(cfg, query, items, {"k": len(items), "reason": "shadow", "note": "test stub shadow"})
+    if (
+        perf.get("enabled")
+        and metrics.get("report_memory")
+        and q.get("shadow")
+        and not q.get("enabled", False)
+    ):
+        emit_trace(
+            cfg, query, items, {"k": len(items), "reason": "shadow", "note": "test stub shadow"}
+        )
     return items
+
 
 def _shadow_cfg():
     return {
         "perf": {"enabled": True, "metrics": {"report_memory": True}},
-        "t2": {"quality": {"enabled": False, "shadow": True, "trace_dir": "logs/quality", "redact": True}},
+        "t2": {
+            "quality": {
+                "enabled": False,
+                "shadow": True,
+                "trace_dir": "logs/quality",
+                "redact": True,
+            }
+        },
     }
+
 
 def _disabled_cfg():
     return {
         "perf": {"enabled": False, "metrics": {"report_memory": False}},
         "t2": {"quality": {"enabled": False, "shadow": False}},
     }
+
 
 def test_shadow_no_rank_diff(tmp_path, monkeypatch):
     # Baseline
@@ -48,6 +66,7 @@ def test_shadow_no_rank_diff(tmp_path, monkeypatch):
     assert rec["trace_schema_version"] >= 1
     assert "config_digest" in rec and "query_id" in rec
 
+
 def test_triple_gate_required(tmp_path):
     # Any gate missing -> no trace file
     cases = [
@@ -57,8 +76,17 @@ def test_triple_gate_required(tmp_path):
     ]
     for c in cases:
         cfg = {
-            "perf": {"enabled": c["perf"]["enabled"], "metrics": {"report_memory": c["metrics"]["report_memory"]}},
-            "t2": {"quality": {"enabled": False, "shadow": c.get("shadow", False), "trace_dir": str(tmp_path / "logs")}},
+            "perf": {
+                "enabled": c["perf"]["enabled"],
+                "metrics": {"report_memory": c["metrics"]["report_memory"]},
+            },
+            "t2": {
+                "quality": {
+                    "enabled": False,
+                    "shadow": c.get("shadow", False),
+                    "trace_dir": str(tmp_path / "logs"),
+                }
+            },
         }
         _ = run_t2_for_test("q", cfg)
         p = Path(cfg["t2"]["quality"]["trace_dir"]) / "rq_traces.jsonl"
@@ -67,13 +95,23 @@ def test_triple_gate_required(tmp_path):
 
 # Validator tests
 def test_quality_defaults_off_accepts():
-    raw = {"t2": {"quality": {"enabled": False, "shadow": False, "trace_dir": "logs/quality", "redact": True}}}
+    raw = {
+        "t2": {
+            "quality": {
+                "enabled": False,
+                "shadow": False,
+                "trace_dir": "logs/quality",
+                "redact": True,
+            }
+        }
+    }
     norm, warnings = validate_config_verbose(raw)
     q = norm["t2"]["quality"]
     assert q["enabled"] is False and q["shadow"] is False
     assert isinstance(q["trace_dir"], str) and q["trace_dir"]
     assert q["redact"] is True
     # Should not error; warnings are allowed but not required here.
+
 
 def test_quality_enabled_accepted_in_pr37_with_warnings():
     raw = {"t2": {"quality": {"enabled": True}}}

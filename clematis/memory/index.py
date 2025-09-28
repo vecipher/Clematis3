@@ -6,6 +6,7 @@ from ..engine.types import EpisodeRef
 import datetime as dt
 import hashlib
 
+
 class InMemoryIndex:
     def __init__(self) -> None:
         self._eps: List[Dict[str, Any]] = []
@@ -19,14 +20,27 @@ class InMemoryIndex:
         """Monotonic version that increments on each mutation (add)."""
         return self._ver
 
-    def search_tiered(self, owner: Optional[str], q_vec: NDArray[np.float32], k: int, tier: str, hints: Dict[str, Any]) -> List[EpisodeRef]:
+    def search_tiered(
+        self,
+        owner: Optional[str],
+        q_vec: NDArray[np.float32],
+        k: int,
+        tier: str,
+        hints: Dict[str, Any],
+    ) -> List[EpisodeRef]:
         # Placeholder: returns empty list
         return []
-    def _filter_owner(self, eps: List[Dict[str, Any]], owner: Optional[str]) -> List[Dict[str, Any]]:
+
+    def _filter_owner(
+        self, eps: List[Dict[str, Any]], owner: Optional[str]
+    ) -> List[Dict[str, Any]]:
         if owner is None:
             return eps
         return [e for e in eps if e.get("owner") == owner]
-    def _filter_recent(self, eps: List[Dict[str, Any]], recent_days: int, now_utc: dt.datetime) -> List[Dict[str, Any]]:
+
+    def _filter_recent(
+        self, eps: List[Dict[str, Any]], recent_days: int, now_utc: dt.datetime
+    ) -> List[Dict[str, Any]]:
         if not recent_days or recent_days <= 0:
             return eps
         cutoff = now_utc - dt.timedelta(days=int(recent_days))
@@ -37,12 +51,18 @@ class InMemoryIndex:
             if te >= cutoff:
                 out.append(e)
         return out
-    def _filter_quarters(self, eps: List[Dict[str, Any]], quarters: Optional[List[str]]) -> List[Dict[str, Any]]:
+
+    def _filter_quarters(
+        self, eps: List[Dict[str, Any]], quarters: Optional[List[str]]
+    ) -> List[Dict[str, Any]]:
         if not quarters:
             return eps
         qset = set(quarters)
         return [e for e in eps if _to_quarter(e.get("ts", "")) in qset]
-    def _rank_by_cosine(self, eps: List[Dict[str, Any]], q_vec: NDArray[np.float32], k: int, sim_threshold: float) -> List[Tuple[Dict[str, Any], float]]:
+
+    def _rank_by_cosine(
+        self, eps: List[Dict[str, Any]], q_vec: NDArray[np.float32], k: int, sim_threshold: float
+    ) -> List[Tuple[Dict[str, Any], float]]:
         scored: List[Tuple[Dict[str, Any], float]] = []
         for e in eps:
             v = e.get("vec_full")
@@ -54,6 +74,7 @@ class InMemoryIndex:
         # Deterministic: sort by (-score, id)
         scored.sort(key=lambda t: (-t[1], str(t[0].get("id"))))
         return scored[:k]
+
     def search_tiered(
         self,
         owner: Optional[str],
@@ -120,8 +141,17 @@ class InMemoryIndex:
             # Unknown tier: return empty deterministic list
             results = []
 
-        return [EpisodeRef(id=str(e["id"]), owner=str(e.get("owner", "")), score=float(s), text=str(e.get("text", ""))) for e, s in results]                  
-    
+        return [
+            EpisodeRef(
+                id=str(e["id"]),
+                owner=str(e.get("owner", "")),
+                score=float(s),
+                text=str(e.get("text", "")),
+            )
+            for e, s in results
+        ]
+
+
 def _cosine(a: NDArray[np.float32], b: NDArray[np.float32]) -> float:
     a = a.astype(np.float32, copy=False)
     b = b.astype(np.float32, copy=False)
@@ -129,17 +159,20 @@ def _cosine(a: NDArray[np.float32], b: NDArray[np.float32]) -> float:
     nb = float(np.linalg.norm(b)) or 1.0
     return float(np.dot(a, b) / (na * nb))
 
+
 def _parse_iso(ts: str) -> dt.datetime:
     # Accepts ISO8601; fall back to utcnow on error
     try:
         return dt.datetime.fromisoformat(ts.replace("Z", "+00:00")).astimezone(dt.timezone.utc)
     except Exception:
         return dt.datetime.now(dt.timezone.utc)
-    
+
+
 def _to_quarter(ts: str) -> str:
     t = _parse_iso(ts)
     q = (t.month - 1) // 3 + 1
     return f"{t.year}Q{q}"
+
 
 def _stable_cluster_id(ep: Dict[str, Any]) -> str:
     # Prefer explicit cluster_id if provided

@@ -1,10 +1,20 @@
-import argparse, importlib, importlib.util, inspect, sys, json, io, contextlib, os
-from ._io import set_verbosity, eprint_once, print_table
-from ._exit import OK, USER_ERR, IO_ERR, INTERNAL
-from ._wrapper_common import maybe_debug, inject_default_from_packaged_or_cwd
+import argparse
+import contextlib
+import importlib
+import importlib.util
+import inspect
+import io
+import json
+import os
+import sys
 from pathlib import Path
 
+from ._exit import INTERNAL, IO_ERR, OK, USER_ERR
+from ._io import eprint_once, print_table, set_verbosity
+from ._wrapper_common import inject_default_from_packaged_or_cwd, maybe_debug
+
 _CANDIDATES = ("clematis.scripts.inspect_snapshot", "scripts.inspect_snapshot")
+
 
 def _import_script():
     last = None
@@ -17,12 +27,16 @@ def _import_script():
     path = root / "scripts" / "inspect_snapshot.py"
     if path.exists():
         spec = importlib.util.spec_from_file_location("scripts.inspect_snapshot", path)
-        mod = importlib.util.module_from_spec(spec)  # type: ignore[arg-type]
+        mod = importlib.util.module_from_spec(spec)
         assert spec and spec.loader
-        spec.loader.exec_module(mod)  # type: ignore[union-attr]
+        spec.loader.exec_module(mod)
         return mod
-    print(f"[clematis] inspect-snapshot: cannot locate {path.name}. Last error: {last}", file=sys.stderr)
+    print(
+        f"[clematis] inspect-snapshot: cannot locate {path.name}. Last error: {last}",
+        file=sys.stderr,
+    )
     return None
+
 
 def _delegate(argv):
     mod = _import_script()
@@ -38,6 +52,7 @@ def _delegate(argv):
     except SystemExit as e:
         return int(getattr(e, "code", 0) or 0)
 
+
 def _entrypoint(ns: argparse.Namespace) -> int:
     argv = list(getattr(ns, "args", []) or [])
 
@@ -52,7 +67,13 @@ def _entrypoint(ns: argparse.Namespace) -> int:
             return OK
 
     # Test-only hook: allow CI/tests to force an INTERNAL error code without relying on fragile inputs.
-    if os.environ.get("CLEMATIS_TEST_INTERNAL_CRASH") in ("1", "true", "TRUE", "yes", "YES"):  # pragma: no cover
+    if os.environ.get("CLEMATIS_TEST_INTERNAL_CRASH") in (
+        "1",
+        "true",
+        "TRUE",
+        "yes",
+        "YES",
+    ):  # pragma: no cover
         return INTERNAL
 
     # Configure verbosity (stderr only); stdout remains reserved for command output
@@ -97,7 +118,9 @@ def _entrypoint(ns: argparse.Namespace) -> int:
                 fmt = None
             if fmt and fmt.lower() != "json":
                 if not quiet:
-                    eprint_once("`inspect-snapshot`: --table requires --format json if --format is supplied.")
+                    eprint_once(
+                        "`inspect-snapshot`: --table requires --format json if --format is supplied."
+                    )
                 return USER_ERR
 
         # If user did not supply --dir, inject packaged examples/snapshots or CWD fallback.
@@ -156,7 +179,9 @@ def _entrypoint(ns: argparse.Namespace) -> int:
                 fmt = None
             if fmt and fmt.lower() != "json":
                 if not quiet:
-                    eprint_once("`inspect-snapshot`: --json requires --format json if --format is supplied.")
+                    eprint_once(
+                        "`inspect-snapshot`: --json requires --format json if --format is supplied."
+                    )
                 return USER_ERR
 
     # If user did not supply --dir, inject packaged examples/snapshots or CWD fallback.
@@ -168,6 +193,7 @@ def _entrypoint(ns: argparse.Namespace) -> int:
     )
     maybe_debug(ns, resolved="scripts.inspect_snapshot", argv=argv)
     return int(_delegate(argv) or 0)
+
 
 def register(subparsers: argparse._SubParsersAction) -> None:
     p = subparsers.add_parser(
@@ -181,5 +207,9 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     fmt.add_argument("--table", action="store_true", help="Plain table output (no color)")
     p.add_argument("--quiet", action="store_true", help="suppress non-essential stderr")
     p.add_argument("--verbose", action="store_true", help="increase stderr verbosity")
-    p.add_argument("args", nargs=argparse.REMAINDER, help="Pass-through arguments for scripts/inspect_snapshot.py.")
+    p.add_argument(
+        "args",
+        nargs=argparse.REMAINDER,
+        help="Pass-through arguments for scripts/inspect_snapshot.py.",
+    )
     p.set_defaults(func=_entrypoint, _parser=p)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 import sys
+
 # Tolerant import so direct execution (`python scripts/rotate_logs.py`) works
 try:
     from ._shim_hint import hint_once  # package-style

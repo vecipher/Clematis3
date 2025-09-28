@@ -1,10 +1,16 @@
-import argparse, importlib, importlib.util, inspect, sys
-from ._io import set_verbosity, eprint_once, print_json, print_table
-from ._exit import OK, USER_ERR, IO_ERR
+import argparse
+import importlib
+import importlib.util
+import inspect
+import sys
 from pathlib import Path
-from ._wrapper_common import maybe_debug, inject_default_from_packaged_or_cwd
+
+from ._exit import IO_ERR, OK, USER_ERR
+from ._io import eprint_once, print_json, print_table, set_verbosity
+from ._wrapper_common import inject_default_from_packaged_or_cwd, maybe_debug
 
 _CANDIDATES = ("clematis.scripts.rotate_logs", "scripts.rotate_logs")
+
 
 def _import_script():
     last = None
@@ -17,12 +23,13 @@ def _import_script():
     path = root / "scripts" / "rotate_logs.py"
     if path.exists():
         spec = importlib.util.spec_from_file_location("scripts.rotate_logs", path)
-        mod = importlib.util.module_from_spec(spec)  # type: ignore[arg-type]
+        mod = importlib.util.module_from_spec(spec)
         assert spec and spec.loader
-        spec.loader.exec_module(mod)  # type: ignore[union-attr]
+        spec.loader.exec_module(mod)
         return mod
     print(f"[clematis] rotate-logs: cannot locate {path.name}. Last error: {last}", file=sys.stderr)
     return None
+
 
 def _delegate(argv):
     mod = _import_script()
@@ -37,6 +44,7 @@ def _delegate(argv):
         return main(argv) if len(sig.parameters) >= 1 else main()
     except SystemExit as e:
         return int(getattr(e, "code", 0) or 0)
+
 
 def _entrypoint(ns):
     argv = list(ns.args or [])
@@ -111,6 +119,7 @@ def _entrypoint(ns):
     # No structured flags: delegate as before
     maybe_debug(ns, resolved="scripts.rotate_logs", argv=resolved_argv)
     return int(_delegate(resolved_argv) or 0)
+
 
 def register(subparsers: argparse._SubParsersAction) -> None:
     p = subparsers.add_parser(

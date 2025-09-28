@@ -1,6 +1,7 @@
 from __future__ import annotations
 import sys
- # Tolerant import so direct execution (`python scripts/bench_t4.py`) works
+
+# Tolerant import so direct execution (`python scripts/bench_t4.py`) works
 try:
     from ._shim_hint import hint_once  # package-style
 except Exception:  # pragma: no cover — fallback when not executed as package

@@ -1,10 +1,16 @@
-import argparse, importlib, importlib.util, inspect, sys
-from ._wrapper_common import maybe_debug
-from ._io import set_verbosity, eprint_once
-from ._exit import OK, USER_ERR, IO_ERR
+import argparse
+import importlib
+import importlib.util
+import inspect
+import sys
 from pathlib import Path
 
+from ._exit import IO_ERR, OK, USER_ERR
+from ._io import eprint_once, set_verbosity
+from ._wrapper_common import maybe_debug
+
 _CANDIDATES = ("clematis.scripts.bench_t4", "scripts.bench_t4")
+
 
 def _import_script():
     last = None
@@ -17,12 +23,13 @@ def _import_script():
     path = root / "scripts" / "bench_t4.py"
     if path.exists():
         spec = importlib.util.spec_from_file_location("scripts.bench_t4", path)
-        mod = importlib.module_from_spec(spec)  # type: ignore[attr-defined]
+        mod = importlib.module_from_spec(spec)
         assert spec and spec.loader
-        spec.loader.exec_module(mod)  # type: ignore[union-attr]
+        spec.loader.exec_module(mod)
         return mod
     print(f"[clematis] bench-t4: cannot locate {path.name}. Last error: {last}", file=sys.stderr)
     return None
+
 
 def _delegate(argv):
     mod = _import_script()
@@ -37,6 +44,7 @@ def _delegate(argv):
         return main(argv) if len(sig.parameters) >= 1 else main()
     except SystemExit as e:
         return int(getattr(e, "code", 0) or 0)
+
 
 def _entrypoint(ns: argparse.Namespace) -> int:
     argv = list(getattr(ns, "args", []) or [])
@@ -86,6 +94,7 @@ def _entrypoint(ns: argparse.Namespace) -> int:
     maybe_debug(ns, resolved="scripts.bench_t4", argv=argv)
     return int(_delegate(argv) or 0)
 
+
 def register(subparsers: argparse._SubParsersAction) -> None:
     p = subparsers.add_parser(
         "bench-t4",
@@ -98,5 +107,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     fmt.add_argument("--table", action="store_true", help="Plain table output (no color)")
     p.add_argument("--quiet", action="store_true", help="suppress non-essential stderr")
     p.add_argument("--verbose", action="store_true", help="increase stderr verbosity")
-    p.add_argument("args", nargs=argparse.REMAINDER, help="Pass-through arguments for scripts/bench_t4.py.")
+    p.add_argument(
+        "args", nargs=argparse.REMAINDER, help="Pass-through arguments for scripts/bench_t4.py."
+    )
     p.set_defaults(func=_entrypoint, _parser=p)

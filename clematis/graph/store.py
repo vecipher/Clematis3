@@ -5,6 +5,7 @@ import numpy as np
 from numpy.typing import NDArray
 from ..engine.types import ConceptGraph, Node, Edge
 
+
 class InMemoryGraphStore:
     def __init__(self) -> None:
         self._graphs: Dict[str, ConceptGraph] = {}
@@ -36,7 +37,13 @@ class InMemoryGraphStore:
         for d in deltas:
             if d.get("op") == "upsert_edge":
                 eid = d.get("id") or f"e:{d['src']}->{d['dst']}"
-                g.edges[eid] = Edge(id=eid, src=d["src"], dst=d["dst"], weight=float(d["weight"]), rel=d.get("rel","associates"))
+                g.edges[eid] = Edge(
+                    id=eid,
+                    src=d["src"],
+                    dst=d["dst"],
+                    weight=float(d["weight"]),
+                    rel=d.get("rel", "associates"),
+                )
                 edits += 1
             elif d.get("op") == "upsert_node":
                 nid = d["id"]
@@ -46,7 +53,9 @@ class InMemoryGraphStore:
             self._bump_etag(g)
         return {"edits": edits}
 
-    def surface_view(self, gid: str, node_ids: List[str], k: int, method: Literal["PCA","TopK"]) -> Dict[str, NDArray[np.float32]]:
+    def surface_view(
+        self, gid: str, node_ids: List[str], k: int, method: Literal["PCA", "TopK"]
+    ) -> Dict[str, NDArray[np.float32]]:
         # Placeholder: returns zero vectors of size k
         return {nid: np.zeros((k,), dtype=np.float32) for nid in node_ids}
 

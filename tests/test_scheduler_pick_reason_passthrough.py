@@ -1,6 +1,7 @@
 import json
 import pytest
 
+
 def _set(cfg, path, value):
     """Best-effort nested setter supporting object or dict configs."""
     cur = cfg
@@ -19,30 +20,38 @@ def _set(cfg, path, value):
     else:
         setattr(cur, last, value)
 
+
 def test_pick_reason_passthrough(monkeypatch, tmp_path):
     # Route logs_dir() to temp
     import clematis.io.paths as paths_module
+
     monkeypatch.setattr(paths_module, "logs_dir", lambda: str(tmp_path), raising=True)
 
     # Load config and force a boundary yield with tiny budgets
     from clematis.io.config import load_config
+
     cfg = load_config("configs/config.yaml")
 
     _set(cfg, ["scheduler"], {})
     _set(cfg, ["scheduler", "enabled"], True)
     _set(cfg, ["scheduler", "policy"], "round_robin")
     _set(cfg, ["scheduler", "quantum_ms"], 20)
-    _set(cfg, ["scheduler", "budgets"], {
-        "t1_iters": 0,     # force immediate boundary hit at T1
-        "t1_pops": 0,
-        "t2_k": 0,
-        "t3_ops": 0,
-        "wall_ms": 200,
-    })
+    _set(
+        cfg,
+        ["scheduler", "budgets"],
+        {
+            "t1_iters": 0,  # force immediate boundary hit at T1
+            "t1_pops": 0,
+            "t2_k": 0,
+            "t3_ops": 0,
+            "wall_ms": 200,
+        },
+    )
     _set(cfg, ["scheduler", "fairness"], {"max_consecutive_turns": 1, "aging_ms": 200})
 
     # Force a boundary yield irrespective of timing/budget by monkeypatching orchestrator logic
     import clematis.engine.orchestrator as orch
+
     monkeypatch.setattr(orch, "_should_yield", lambda *a, **k: "QUANTUM_EXCEEDED", raising=True)
 
     # Ensure orchestrator sees scheduler enabled with deterministic tiny budgets
@@ -69,6 +78,7 @@ def test_pick_reason_passthrough(monkeypatch, tmp_path):
 
     # Run a single turn with a pick_reason
     from clematis.world.scenario import run_one_turn
+
     state = {}
     run_one_turn("AgentA", state, "hello world", cfg, pick_reason="ROUND_ROBIN")
 

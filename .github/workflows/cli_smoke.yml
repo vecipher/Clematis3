@@ -29,12 +29,12 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      
+
       - name: Cache pip
         uses: actions/cache@v4
         with:
@@ -42,7 +42,7 @@ jobs:
           key: "${{ runner.os }}-pip-${{ hashFiles('**/pyproject.toml', '**/setup.cfg', '**/requirements*.txt') }}"
           restore-keys: |
             ${{ runner.os }}-pip-
-      
+
       - name: Install dependencies (editable if available)
         shell: bash
         run: |
@@ -58,7 +58,7 @@ jobs:
           else
             python -m pip install pytest hypothesis
           fi
-      
+
       - name: Run CLI tests (offline)
         env:
           CLEMATIS_NETWORK_BAN: "1"
@@ -71,7 +71,7 @@ jobs:
           else
             echo "No CLI tests found (tests/cli) — skipping" && exit 0
           fi
-      
+
       - name: Upload diagnostics on failure
         if: failure()
         uses: actions/upload-artifact@v4

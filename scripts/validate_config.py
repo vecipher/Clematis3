@@ -12,6 +12,7 @@ Exit codes:
   1 = Validation errors (or warnings when --strict)
   2 = Load/parse errors or bad usage
 """
+
 from __future__ import annotations
 import sys
 import os
@@ -37,10 +38,12 @@ except ModuleNotFoundError:
     except ImportError:
         # Older versions may not have the verbose API
         from configs.validate import validate_config  # type: ignore
+
         validate_config_verbose = None  # type: ignore
 except ImportError:
     # Older versions may not have the verbose API
     from configs.validate import validate_config  # type: ignore
+
     validate_config_verbose = None  # type: ignore
 
 
@@ -75,7 +78,9 @@ def _load_config(path: str) -> Dict[str, Any]:
         # Fallback to JSON
         return json.loads(text)
     except json.JSONDecodeError as je:
-        _eprint("error: failed to parse config as JSON; install PyYAML for YAML support (pip install pyyaml)")
+        _eprint(
+            "error: failed to parse config as JSON; install PyYAML for YAML support (pip install pyyaml)"
+        )
         raise je
     except Exception:
         raise
@@ -86,12 +91,22 @@ def main(argv: list[str]) -> int:
         prog="validate_config.py",
         description="Validate Clematis3 configuration",
     )
-    ap.add_argument("path", nargs="?", default=os.path.join("configs", "config.yaml"),
-                    help="Path to config file (YAML preferred). Use '-' for STDIN.")
-    ap.add_argument("--strict", action="store_true",
-                    help="Treat warnings as errors (non-zero exit if warnings present).")
-    ap.add_argument("--json", action="store_true",
-                    help="Print normalized config and warnings as JSON (suppresses summary lines).")
+    ap.add_argument(
+        "path",
+        nargs="?",
+        default=os.path.join("configs", "config.yaml"),
+        help="Path to config file (YAML preferred). Use '-' for STDIN.",
+    )
+    ap.add_argument(
+        "--strict",
+        action="store_true",
+        help="Treat warnings as errors (non-zero exit if warnings present).",
+    )
+    ap.add_argument(
+        "--json",
+        action="store_true",
+        help="Print normalized config and warnings as JSON (suppresses summary lines).",
+    )
     args = ap.parse_args(argv[1:])
 
     path = args.path
@@ -124,7 +139,9 @@ def main(argv: list[str]) -> int:
         return 1
 
     if args.json:
-        print(json.dumps({"normalized": normalized, "warnings": sorted(warnings)}, ensure_ascii=False))
+        print(
+            json.dumps({"normalized": normalized, "warnings": sorted(warnings)}, ensure_ascii=False)
+        )
         return 0
 
     # Success summary (non-verbose)

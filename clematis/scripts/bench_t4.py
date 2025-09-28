@@ -14,6 +14,7 @@ Exit codes:
   0 = success
   2 = import/config error
 """
+
 from __future__ import annotations
 
 import argparse
@@ -44,14 +45,24 @@ class _Ctx:
         self.config = cfg
         self.cfg = cfg
 
+
 class _State:
     pass
 
+
 class _Op:
     __slots__ = ("target_kind", "target_id", "attr", "delta", "kind", "op_idx", "idx")
-    def __init__(self, target_id: str, delta: float, kind: str = "EditGraph",
-                 target_kind: str = "Node", attr: str = "weight",
-                 op_idx: Optional[int] = None, idx: Optional[int] = None):
+
+    def __init__(
+        self,
+        target_id: str,
+        delta: float,
+        kind: str = "EditGraph",
+        target_kind: str = "Node",
+        attr: str = "weight",
+        op_idx: Optional[int] = None,
+        idx: Optional[int] = None,
+    ):
         self.target_kind = target_kind
         self.target_id = target_id
         self.attr = attr
@@ -71,7 +82,12 @@ def _mk_cfg(l2: float, novelty: float, churn: int) -> Dict[str, Any]:
             "cooldowns": {"EditGraph": 2, "CreateGraph": 10},
             "weight_min": -1.0,
             "weight_max": 1.0,
-            "cache": {"enabled": True, "namespaces": ["t2:semantic"], "max_entries": 512, "ttl_sec": 600},
+            "cache": {
+                "enabled": True,
+                "namespaces": ["t2:semantic"],
+                "max_entries": 512,
+                "ttl_sec": 600,
+            },
         }
     }
 
@@ -91,7 +107,7 @@ def _percentile(xs: List[float], p: float) -> float:
     if not xs:
         return float("nan")
     xs = sorted(xs)
-    k = (len(xs)-1) * (p/100.0)
+    k = (len(xs) - 1) * (p / 100.0)
     f = math.floor(k)
     c = math.ceil(k)
     if f == c:
@@ -107,7 +123,7 @@ def _agg_reasons(res) -> Dict[str, int]:
         metrics = getattr(res, "metrics", {}) or {}
         reasons = metrics.get("reasons", [])
     out: Dict[str, int] = {}
-    for r in (reasons or []):
+    for r in reasons or []:
         key = str(r)
         out[key] = out.get(key, 0) + 1
     return out
@@ -127,7 +143,9 @@ class RunStat:
     reasons: Dict[str, int]
 
 
-def run_bench(num: int, runs: int, seed: int, l2: float, novelty: float, churn: int) -> Dict[str, Any]:
+def run_bench(
+    num: int, runs: int, seed: int, l2: float, novelty: float, churn: int
+) -> Dict[str, Any]:
     ctx = _Ctx(_mk_cfg(l2=l2, novelty=novelty, churn=churn))
     state = _State()
 
@@ -157,7 +175,9 @@ def run_bench(num: int, runs: int, seed: int, l2: float, novelty: float, churn: 
         "p95_ms": _percentile(times_ms, 95.0),
         "min_ms": min(times_ms) if times_ms else float("nan"),
         "max_ms": max(times_ms) if times_ms else float("nan"),
-        "throughput_ops_per_s": (num / (stats.median(times_ms)/1000.0)) if times_ms and stats.median(times_ms) > 0 else float("nan"),
+        "throughput_ops_per_s": (num / (stats.median(times_ms) / 1000.0))
+        if times_ms and stats.median(times_ms) > 0
+        else float("nan"),
         "approved_median": stats.median(approved_counts) if approved_counts else 0,
         "approved_min": min(approved_counts) if approved_counts else 0,
         "approved_max": max(approved_counts) if approved_counts else 0,
@@ -180,8 +200,14 @@ def main(argv: Optional[List[str]] = None) -> int:
     args = ap.parse_args(argv)
 
     try:
-        summary = run_bench(num=args.num, runs=args.runs, seed=args.seed,
-                            l2=args.l2, novelty=args.novelty, churn=args.churn)
+        summary = run_bench(
+            num=args.num,
+            runs=args.runs,
+            seed=args.seed,
+            l2=args.l2,
+            novelty=args.novelty,
+            churn=args.churn,
+        )
     except Exception as ex:
         print(f"error: {ex}", file=sys.stderr)
         return 2
@@ -191,7 +217,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 0
 
     # Pretty
-    print(f"N={summary['num']} runs={summary['runs']} seed={summary['seed']}  l2={summary['l2']} novelty={summary['novelty']} churn={summary['churn']}")
+    print(
+        f"N={summary['num']} runs={summary['runs']} seed={summary['seed']}  l2={summary['l2']} novelty={summary['novelty']} churn={summary['churn']}"
+    )
     print(
         f"median={summary['median_ms']:.1f}ms  p95={summary['p95_ms']:.1f}ms  min={summary['min_ms']:.1f}ms  max={summary['max_ms']:.1f}ms  "
         f"thr≈{summary['throughput_ops_per_s']:.1f} ops/s"

@@ -7,8 +7,10 @@ import pytest
 # Integration-style test: exercise the PR36 shadow path using the real t2 stage if available.
 # Falls back to emitter-only if the stage signature is incompatible.
 
+
 def _repo_root() -> Path:
     return Path(__file__).resolve().parents[2]
+
 
 def _load_example_shadow_cfg(trace_dir: Path) -> dict:
     p = _repo_root() / "examples" / "quality" / "shadow.yaml"
@@ -17,18 +19,29 @@ def _load_example_shadow_cfg(trace_dir: Path) -> dict:
     raw.setdefault("t2", {}).setdefault("quality", {})["trace_dir"] = str(trace_dir)
     return raw
 
+
 def _baseline_cfg(trace_dir: Path) -> dict:
     return {
         "perf": {"enabled": False, "metrics": {"report_memory": False}},
-        "t2": {"quality": {"enabled": False, "shadow": False, "trace_dir": str(trace_dir), "redact": True}},
+        "t2": {
+            "quality": {
+                "enabled": False,
+                "shadow": False,
+                "trace_dir": str(trace_dir),
+                "redact": True,
+            }
+        },
     }
+
 
 def _try_import_t2():
     try:
         from clematis.engine.stages import t2 as t2mod  # type: ignore
+
         return t2mod
     except Exception:
         return None
+
 
 def _call_t2_semantic(t2mod, query: str, cfg: dict):
     """
@@ -67,6 +80,7 @@ def _call_t2_semantic(t2mod, query: str, cfg: dict):
     # None of the signatures worked
     return None, False
 
+
 def _extract_items(result):
     """
     Normalize various possible return types to a list of dicts with 'id' and 'score' keys.
@@ -100,23 +114,34 @@ def _extract_items(result):
         return items
     return None
 
+
 def _emit_trace_fallback(query: str, cfg: dict):
     # Fallback: use the emitter directly with deterministic items; but only under triple gate
     from clematis.engine.stages.t2_quality_trace import emit_trace
+
     items = [{"id": "A", "score": 0.9}, {"id": "B", "score": 0.8}]
     perf = cfg.get("perf", {})
     metrics = perf.get("metrics", {})
     q = cfg.get("t2", {}).get("quality", {})
-    triple_gate = perf.get("enabled") and metrics.get("report_memory") and q.get("shadow") and not q.get("enabled", False)
+    triple_gate = (
+        perf.get("enabled")
+        and metrics.get("report_memory")
+        and q.get("shadow")
+        and not q.get("enabled", False)
+    )
     if triple_gate:
-        emit_trace(cfg, query, items, {"k": len(items), "reason": "shadow", "note": "integration fallback"})
+        emit_trace(
+            cfg, query, items, {"k": len(items), "reason": "shadow", "note": "integration fallback"}
+        )
     return items
+
 
 def _read_trace_last(trace_dir: Path):
     p = Path(trace_dir) / "rq_traces.jsonl"
     if not p.exists():
         return None
     return json.loads(p.read_text(encoding="utf-8").splitlines()[-1])
+
 
 @pytest.mark.integration
 def test_shadow_noop_integration(tmp_path, monkeypatch):
@@ -130,7 +155,9 @@ def test_shadow_noop_integration(tmp_path, monkeypatch):
     t2mod = _try_import_t2()
     base_items, used_real = _call_t2_semantic(t2mod, query, base_cfg)
     if base_items is None:
-        base_items = _emit_trace_fallback(query, base_cfg)  # no-op (gates off) — will not write trace
+        base_items = _emit_trace_fallback(
+            query, base_cfg
+        )  # no-op (gates off) — will not write trace
 
     # Shadow run (triple gate ON)
     shadow_items, used_real2 = _call_t2_semantic(t2mod, query, shadow_cfg)
@@ -145,5 +172,6 @@ def test_shadow_noop_integration(tmp_path, monkeypatch):
     assert _read_trace_last(trace_dir_shadow) is not None, "shadow should produce rq_traces.jsonl"
 
     # And baseline did not produce a trace in its own directory
-    assert not (trace_dir_base / "rq_traces.jsonl").exists(), \
-        "baseline must not produce rq_traces.jsonl when gates are off"
+    assert not (
+        trace_dir_base / "rq_traces.jsonl"
+    ).exists(), "baseline must not produce rq_traces.jsonl when gates are off"

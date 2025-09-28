@@ -7,6 +7,7 @@ from typing import Any, Dict
 # modes: OFF, ON_NO_REPORT
 MODES = {"OFF", "ON_NO_REPORT"}
 
+
 def _last_jsonl(path: Path) -> Dict[str, Any]:
     if not path.exists():
         return {}
@@ -25,6 +26,7 @@ def _last_jsonl(path: Path) -> Dict[str, Any]:
         return {}
     return last or {}
 
+
 def _any_file_contains(root: Path, needle: str) -> bool:
     # Simple substring scan; robust to schema changes
     for p in root.rglob("*.jsonl"):
@@ -36,6 +38,7 @@ def _any_file_contains(root: Path, needle: str) -> bool:
             pass
     return False
 
+
 def _has_metrics(obj: Dict[str, Any]) -> bool:
     # Treat presence of a non-empty "metrics" object as metrics emission
     if not isinstance(obj, dict):
@@ -44,6 +47,7 @@ def _has_metrics(obj: Dict[str, Any]) -> bool:
     if isinstance(m, dict) and len(m) > 0:
         return True
     return False
+
 
 def main(mode: str) -> int:
     mode = mode.strip().upper()
@@ -63,13 +67,13 @@ def main(mode: str) -> int:
 
     # In both OFF and ON_NO_REPORT, disallow only **new M6** markers.
     DISALLOWED_M6_MARKERS = [
-        '"reader"',                  # nested reader meta block in metrics
+        '"reader"',  # nested reader meta block in metrics
         '"t2.embed_dtype"',
         '"t2.embed_store_dtype"',
         '"t2.precompute_norms"',
         '"t2.reader_shards"',
         '"t2.partition_layout"',
-        '"snap."',                  # any snapshot counters/fields
+        '"snap."',  # any snapshot counters/fields
     ]
 
     leaks = []
@@ -83,6 +87,7 @@ def main(mode: str) -> int:
 
     print(f"GateB OK [{mode}]: no disallowed metrics or markers detected")
     return 0
+
 
 if __name__ == "__main__":
     sys.exit(main(sys.argv[1] if len(sys.argv) > 1 else "OFF"))

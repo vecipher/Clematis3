@@ -9,34 +9,55 @@ def _bootstrap_graph(state=None, gid="g:surface"):
     store = InMemoryGraphStore()
     store.ensure(gid)
     # Minimal labels for residual matching
-    store.upsert_nodes(gid, [
-        Node(id="n:apple", label="apple"),
-        Node(id="n:banana", label="banana"),
-        Node(id="n:fruit", label="fruit"),
-    ])
-    store.upsert_edges(gid, [
-        Edge(id="e:a->b", src="n:apple", dst="n:banana", weight=1.0, rel="supports"),
-    ])
+    store.upsert_nodes(
+        gid,
+        [
+            Node(id="n:apple", label="apple"),
+            Node(id="n:banana", label="banana"),
+            Node(id="n:fruit", label="fruit"),
+        ],
+    )
+    store.upsert_edges(
+        gid,
+        [
+            Edge(id="e:a->b", src="n:apple", dst="n:banana", weight=1.0, rel="supports"),
+        ],
+    )
     st = {"store": store, "active_graphs": [gid]}
     return st
 
 
-def _add_ep(idx: InMemoryIndex, *, eid: str, text: str, ts: str, owner: str = "A", importance: float = 0.5, cluster_id: str | None = None):
+def _add_ep(
+    idx: InMemoryIndex,
+    *,
+    eid: str,
+    text: str,
+    ts: str,
+    owner: str = "A",
+    importance: float = 0.5,
+    cluster_id: str | None = None,
+):
     # InMemoryIndex expects a vec_full; use deterministic adapter via t2 (BGEAdapter) indirectly.
     # For the index itself we can just re-use the adapter in the stage by letting t2 embed queries;
     # episodes carry precomputed vecs here for ranking.
     from clematis.adapters.embeddings import BGEAdapter
+
     enc = BGEAdapter(dim=32)
     vec = enc.encode([text])[0]
-    idx.add({
-        "id": eid,
-        "owner": owner,
-        "text": text,
-        "tags": [],
-        "ts": ts,
-        "vec_full": vec.astype(np.float32),
-        "aux": {"importance": float(importance), **({"cluster_id": cluster_id} if cluster_id else {})},
-    })
+    idx.add(
+        {
+            "id": eid,
+            "owner": owner,
+            "text": text,
+            "tags": [],
+            "ts": ts,
+            "vec_full": vec.astype(np.float32),
+            "aux": {
+                "importance": float(importance),
+                **({"cluster_id": cluster_id} if cluster_id else {}),
+            },
+        }
+    )
 
 
 def test_t2_exact_semantic_recent_and_threshold():
@@ -44,7 +65,9 @@ def test_t2_exact_semantic_recent_and_threshold():
     # Make tiers only exact for this test
     cfg.t2["tiers"] = ["exact_semantic"]
     cfg.t2["k_retrieval"] = 10
-    cfg.t2["sim_threshold"] = -1.0  # include all similarities; make test deterministic with the hash-based embeddings
+    cfg.t2[
+        "sim_threshold"
+    ] = -1.0  # include all similarities; make test deterministic with the hash-based embeddings
     cfg.t2["exact_recent_days"] = 30
 
     state = _bootstrap_graph()
@@ -52,12 +75,12 @@ def test_t2_exact_semantic_recent_and_threshold():
     state["mem_index"] = idx
 
     # One old apple (beyond 30d relative to current date), one recent apple, one recent banana
-    _add_ep(idx, eid="ep_old",   text="about apple and trees", ts="2025-07-01T00:00:00Z")
-    _add_ep(idx, eid="ep_apple", text="fresh apple pie story",  ts="2025-08-25T00:00:00Z")
-    _add_ep(idx, eid="ep_banana",text="banana split tale",      ts="2025-08-26T00:00:00Z")
+    _add_ep(idx, eid="ep_old", text="about apple and trees", ts="2025-07-01T00:00:00Z")
+    _add_ep(idx, eid="ep_apple", text="fresh apple pie story", ts="2025-08-25T00:00:00Z")
+    _add_ep(idx, eid="ep_banana", text="banana split tale", ts="2025-08-26T00:00:00Z")
 
     # Seed T1 touching the apple node to include label in query
-    t1 = T1Result(graph_deltas=[{"op":"upsert_node","id":"n:apple"}], metrics={})
+    t1 = T1Result(graph_deltas=[{"op": "upsert_node", "id": "n:apple"}], metrics={})
 
     # Freeze 'now' so the 30d recency window includes 2025-08-25 and 2025-08-26
     Ctx = type("Ctx", (), {})
@@ -91,11 +114,13 @@ def test_t2_cluster_semantic_top_m():
     # Two clusters: c1 (fruit domain), c2 (vehicles)
     _add_ep(idx, eid="c1_1", text="fruit apple orchard", ts="2025-08-10T00:00:00Z", cluster_id="c1")
     _add_ep(idx, eid="c1_2", text="fruit pear harvest", ts="2025-08-11T00:00:00Z", cluster_id="c1")
-    _add_ep(idx, eid="c2_1", text="vehicle fast car",  ts="2025-08-12T00:00:00Z", cluster_id="c2")
-    _add_ep(idx, eid="c2_2", text="vehicle mountain bike", ts="2025-08-13T00:00:00Z", cluster_id="c2")
+    _add_ep(idx, eid="c2_1", text="vehicle fast car", ts="2025-08-12T00:00:00Z", cluster_id="c2")
+    _add_ep(
+        idx, eid="c2_2", text="vehicle mountain bike", ts="2025-08-13T00:00:00Z", cluster_id="c2"
+    )
 
     # T1 touches 'fruit' node so it appears in query
-    t1 = T1Result(graph_deltas=[{"op":"upsert_node","id":"n:fruit"}], metrics={})
+    t1 = T1Result(graph_deltas=[{"op": "upsert_node", "id": "n:fruit"}], metrics={})
 
     r = t2_semantic(type("Ctx", (), {"cfg": cfg})(), state, "discuss", t1)
 
@@ -114,11 +139,14 @@ def test_t2_residual_cap_and_determinism():
     state = _bootstrap_graph()
     # Add more labels to exceed residual cap if naive
     store = state["store"]
-    store.upsert_nodes("g:surface", [
-        Node(id="n:cherry", label="cherry"),
-        Node(id="n:grape", label="grape"),
-        Node(id="n:mango", label="mango"),
-    ])
+    store.upsert_nodes(
+        "g:surface",
+        [
+            Node(id="n:cherry", label="cherry"),
+            Node(id="n:grape", label="grape"),
+            Node(id="n:mango", label="mango"),
+        ],
+    )
 
     idx = InMemoryIndex()
     state["mem_index"] = idx
@@ -126,7 +154,7 @@ def test_t2_residual_cap_and_determinism():
     text = "this story mentions apple banana cherry grape mango and fruit"
     _add_ep(idx, eid="ep_all", text=text, ts="2025-08-28T00:00:00Z")
 
-    t1 = T1Result(graph_deltas=[{"op":"upsert_node","id":"n:apple"}], metrics={})
+    t1 = T1Result(graph_deltas=[{"op": "upsert_node", "id": "n:apple"}], metrics={})
 
     r1 = t2_semantic(type("Ctx", (), {"cfg": cfg})(), state, "tell me", t1)
     r2 = t2_semantic(type("Ctx", (), {"cfg": cfg})(), state, "tell me", t1)
@@ -157,8 +185,10 @@ def test_t2_scoring_orders_by_recency_and_importance():
 
     # Two episodes with identical text (equal cosine to the query)
     # Make one very recent but low importance, the other 1 year old but high importance.
-    _add_ep(idx, eid="ep_recent_lowimp", text="same text", ts="2025-08-31T00:00:00Z", importance=0.0)
-    _add_ep(idx, eid="ep_old_highimp",  text="same text", ts="2024-09-01T00:00:00Z", importance=1.0)
+    _add_ep(
+        idx, eid="ep_recent_lowimp", text="same text", ts="2025-08-31T00:00:00Z", importance=0.0
+    )
+    _add_ep(idx, eid="ep_old_highimp", text="same text", ts="2024-09-01T00:00:00Z", importance=1.0)
 
     # No need to bias query via T1 labels; keep neutral
     t1 = T1Result(graph_deltas=[], metrics={})
@@ -172,7 +202,10 @@ def test_t2_scoring_orders_by_recency_and_importance():
 
     ids = [h.id for h in r.retrieved[:2]]
     assert ids == ["ep_recent_lowimp", "ep_old_highimp"], f"unexpected order: {ids}"
-    assert "score_stats" in r.metrics and r.metrics["score_stats"]["max"] >= r.metrics["score_stats"]["mean"]
+    assert (
+        "score_stats" in r.metrics
+        and r.metrics["score_stats"]["max"] >= r.metrics["score_stats"]["mean"]
+    )
 
 
 def test_t2_owner_scope_agent_filters_other_owners():
@@ -195,7 +228,7 @@ def test_t2_owner_scope_agent_filters_other_owners():
     _add_ep(idx, eid="b1", text="apple topic", ts="2025-08-25T00:00:00Z", owner="B")
 
     # Touch apple in T1 to bias query minimally (not strictly needed here)
-    t1 = T1Result(graph_deltas=[{"op":"upsert_node","id":"n:apple"}], metrics={})
+    t1 = T1Result(graph_deltas=[{"op": "upsert_node", "id": "n:apple"}], metrics={})
 
     Ctx = type("Ctx", (), {})
     ctx = Ctx()
@@ -205,7 +238,9 @@ def test_t2_owner_scope_agent_filters_other_owners():
 
     r = t2_semantic(ctx, state, "apple", t1)
     assert r.retrieved, "expected some hits for owner A"
-    assert all(h.owner == "A" for h in r.retrieved), f"unexpected owners in hits: {[h.owner for h in r.retrieved]}"
+    assert all(
+        h.owner == "A" for h in r.retrieved
+    ), f"unexpected owners in hits: {[h.owner for h in r.retrieved]}"
     assert r.metrics.get("owner_scope") == "agent"
 
 
@@ -226,7 +261,7 @@ def test_t2_cache_hit_then_miss_on_index_version_bump():
     _add_ep(idx, eid="ep1", text="apple pie", ts="2025-08-25T00:00:00Z")
     _add_ep(idx, eid="ep2", text="banana split", ts="2025-08-26T00:00:00Z")
 
-    t1 = T1Result(graph_deltas=[{"op":"upsert_node","id":"n:apple"}], metrics={})
+    t1 = T1Result(graph_deltas=[{"op": "upsert_node", "id": "n:apple"}], metrics={})
 
     Ctx = type("Ctx", (), {})
     ctx = Ctx()

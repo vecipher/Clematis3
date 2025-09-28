@@ -1,5 +1,3 @@
-
-
 import math
 import pytest
 
@@ -30,6 +28,7 @@ def _ids(items):
 
 # --- tests -------------------------------------------------------------------
 
+
 def test_disabled_no_change():
     ctx = _Ctx({"enabled": False})
     s = _State({"a→b": _mk_edge("a", "b", 0.9)})
@@ -52,12 +51,14 @@ def test_no_edges_no_change_when_enabled():
 
 def test_rank_shift_with_edges():
     # Base sims: a (0.90) > c (0.86) > b (0.85). With strong a—b edge, b should outrank c.
-    ctx = _Ctx({
-        "enabled": True,
-        "lambda_graph": 0.5,
-        "edge_threshold": 0.1,
-        "anchor_top_m": 2,  # anchors: a, c
-    })
+    ctx = _Ctx(
+        {
+            "enabled": True,
+            "lambda_graph": 0.5,
+            "edge_threshold": 0.1,
+            "anchor_top_m": 2,  # anchors: a, c
+        }
+    )
     edges = {
         "a→b": _mk_edge("a", "b", 0.6),
         # c has no help for b
@@ -81,25 +82,29 @@ def test_two_hop_bonus_changes_order():
     s = _State(edges)
 
     # hops=1: order unchanged
-    ctx1 = _Ctx({
-        "enabled": True,
-        "walk_hops": 1,
-        "lambda_graph": 0.6,
-        "edge_threshold": 0.1,
-        "anchor_top_m": 1,  # only 'a' as anchor
-    })
+    ctx1 = _Ctx(
+        {
+            "enabled": True,
+            "walk_hops": 1,
+            "lambda_graph": 0.6,
+            "edge_threshold": 0.1,
+            "anchor_top_m": 1,  # only 'a' as anchor
+        }
+    )
     out1, m1 = rerank_with_gel(ctx1, s, items)
     assert _ids(out1) == ["a", "v", "w"]
 
     # hops=2: v should gain via a→w→v best path
-    ctx2 = _Ctx({
-        "enabled": True,
-        "walk_hops": 2,
-        "damping": 0.5,
-        "lambda_graph": 0.6,
-        "edge_threshold": 0.1,
-        "anchor_top_m": 1,
-    })
+    ctx2 = _Ctx(
+        {
+            "enabled": True,
+            "walk_hops": 2,
+            "damping": 0.5,
+            "lambda_graph": 0.6,
+            "edge_threshold": 0.1,
+            "anchor_top_m": 1,
+        }
+    )
     out2, m2 = rerank_with_gel(ctx2, s, items)
     assert _ids(out2) == ["a", "v", "w"]  # v stays ahead of w (reinforced)
     assert m2.get("hybrid_used") is True
@@ -124,13 +129,15 @@ def test_bonus_clamped_by_max_bonus():
     items = [("a", 0.90), ("b", 0.89), ("c", 0.88)]
     edges = {"a→b": _mk_edge("a", "b", 10.0)}
     s = _State(edges)
-    ctx = _Ctx({
-        "enabled": True,
-        "lambda_graph": 1.0,
-        "edge_threshold": 0.0,
-        "max_bonus": 0.05,  # clamp
-        "anchor_top_m": 1,
-    })
+    ctx = _Ctx(
+        {
+            "enabled": True,
+            "lambda_graph": 1.0,
+            "edge_threshold": 0.0,
+            "max_bonus": 0.05,  # clamp
+            "anchor_top_m": 1,
+        }
+    )
     out, m = rerank_with_gel(ctx, s, items)
     # b cannot surpass a because bonus is clamped small
     assert _ids(out)[0] == "a"
@@ -148,23 +155,27 @@ def test_degree_norm_invdeg_reduces_boost_for_hubs():
     s = _State(edges)
 
     # No degree normalization
-    ctx_none = _Ctx({
-        "enabled": True,
-        "degree_norm": "none",
-        "lambda_graph": 0.5,
-        "edge_threshold": 0.1,
-        "anchor_top_m": 2,  # anchors: a,b
-    })
+    ctx_none = _Ctx(
+        {
+            "enabled": True,
+            "degree_norm": "none",
+            "lambda_graph": 0.5,
+            "edge_threshold": 0.1,
+            "anchor_top_m": 2,  # anchors: a,b
+        }
+    )
     out_none, m_none = rerank_with_gel(ctx_none, s, items)
 
     # With invdeg, v's bonus should shrink; ideally order stays the same or v moves less
-    ctx_inv = _Ctx({
-        "enabled": True,
-        "degree_norm": "invdeg",
-        "lambda_graph": 0.5,
-        "edge_threshold": 0.1,
-        "anchor_top_m": 2,
-    })
+    ctx_inv = _Ctx(
+        {
+            "enabled": True,
+            "degree_norm": "invdeg",
+            "lambda_graph": 0.5,
+            "edge_threshold": 0.1,
+            "anchor_top_m": 2,
+        }
+    )
     out_inv, m_inv = rerank_with_gel(ctx_inv, s, items)
 
     # We don't assert absolute scores (not exposed); we assert that the id order is stable

@@ -8,8 +8,10 @@ def _repo_root() -> Path:
     # tests/scripts/test_validate_noop_shadow.py -> tests/scripts -> tests -> repo root
     return Path(__file__).resolve().parents[2]
 
+
 def _script_path() -> Path:
     return _repo_root() / "scripts" / "validate_noop_shadow.py"
+
 
 def _run_validator(base_dir: Path, shadow_dir: Path):
     env = os.environ.copy()
@@ -78,6 +80,7 @@ def test_shadow_fails_when_base_has_extra_file(tmp_path):
     code, out = _run_validator(base, shadow)
     assert code != 0, f"Comparator must fail when base has extra non-trace files. Output:\n{out}"
     assert "DIFF:" in out
+
 
 def test_shadow_fails_on_trace_in_wrong_location(tmp_path):
     """Gate D: placing rq_traces.jsonl outside logs/quality should fail."""

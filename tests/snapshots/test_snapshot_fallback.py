@@ -1,5 +1,3 @@
-
-
 import json
 import logging
 from pathlib import Path
@@ -51,27 +49,31 @@ def test_fallback_when_baseline_missing(tmp_path, caplog):
 
     # Write delta header + payload (two-line JSON file)
     (tmp_path / f"snapshot-{etag_to}.delta.json").write_text(
-        json.dumps({
-            "schema": 1,
-            "mode": "delta",
-            "etag_to": etag_to,
-            "delta_of": delta_of,
-            "codec": "none",
-            "level": 0,
-        })
+        json.dumps(
+            {
+                "schema": 1,
+                "mode": "delta",
+                "etag_to": etag_to,
+                "delta_of": delta_of,
+                "codec": "none",
+                "level": 0,
+            }
+        )
         + "\n"
         + json.dumps({"_adds": {}, "_mods": {}, "_dels": []})
     )
 
     # Also provide a full snapshot for etag_to to exercise the fallback-to-full path
     (tmp_path / f"snapshot-{etag_to}.full.json").write_text(
-        json.dumps({
-            "schema": 1,
-            "mode": "full",
-            "etag_to": etag_to,
-            "codec": "none",
-            "level": 0,
-        })
+        json.dumps(
+            {
+                "schema": 1,
+                "mode": "full",
+                "etag_to": etag_to,
+                "codec": "none",
+                "level": 0,
+            }
+        )
         + "\n"
         + json.dumps({"ok": True})
     )

@@ -1,5 +1,3 @@
-
-
 import copy
 from clematis.engine.util.snapshot_delta import compute_delta, apply_delta
 
@@ -23,8 +21,8 @@ def test_delta_roundtrip_identity_nested_and_deletes():
     curr = {
         "root": {
             "alpha": {"x": 100},  # y deleted, x modified
-            "gamma": {"w": 9},     # new subtree
-            "keep": 42,             # unchanged
+            "gamma": {"w": 9},  # new subtree
+            "keep": 42,  # unchanged
         }
     }
     delta = compute_delta(base, curr)

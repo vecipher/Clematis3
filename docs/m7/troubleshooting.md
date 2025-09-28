@@ -143,7 +143,7 @@ t2:
 - **FP16 store without norms** (perf): enable precomputed norms for score parity.
 - **MMR head vs retrieval k**: `t2.quality.mmr.k` greater than the candidate pool will effectively truncate; adjust or accept.
 - **Alias map missing**: path unreadable → aliasing is a no‑op; fix the path.
-- **Reader mode while perf.disabled**: `partition/auto` set but `perf.enabled=false` → no effect (falls back to flat). 
+- **Reader mode while perf.disabled**: `partition/auto` set but `perf.enabled=false` → no effect (falls back to flat).
 
 Use `validate_config_verbose(cfg)` in your code/tests to surface these early.
 

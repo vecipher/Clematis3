@@ -3,8 +3,10 @@ from typing import Any, Dict, List
 
 from clematis.engine.stages.t2_quality import maybe_apply_mmr
 
+
 def _mk(i: str, fused: float, text: str = "", toks=None) -> Dict[str, Any]:
     return {"id": i, "score_fused": fused, "text": text, "tokens": toks}
+
 
 @pytest.mark.parametrize("lam", [0.0, 1.0])
 def test_mmr_k1_returns_top_item_regardless_of_lambda(lam: float):
@@ -22,6 +24,7 @@ def test_mmr_k1_returns_top_item_regardless_of_lambda(lam: float):
     }
     out = maybe_apply_mmr(fused, qcfg)
     assert [x["id"] for x in out[:1]] == ["A"]
+
 
 def test_mmr_lambda_extremes_tie_break_and_diversity():
     # Two near-duplicates (A,B) and one dissimilar (C)

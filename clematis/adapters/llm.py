@@ -22,6 +22,7 @@ def _canon_prompt(s: str) -> str:
     s = s or ""
     return s.replace("\r\n", "\n").replace("\r", "\n")
 
+
 def _prompt_hash(s: str) -> str:
     return hashlib.sha256(_canon_prompt(s).encode("utf-8")).hexdigest()
 
@@ -40,7 +41,9 @@ class LLMResult:
 class LLMAdapter(Protocol):
     """Minimal adapter protocol. Implementations must be deterministic for the same inputs in tests."""
 
-    def generate(self, prompt: str, max_tokens: int, temperature: float) -> LLMResult:  # pragma: no cover - interface only
+    def generate(
+        self, prompt: str, max_tokens: int, temperature: float
+    ) -> LLMResult:  # pragma: no cover - interface only
         ...
 
 
@@ -75,6 +78,7 @@ class FixtureLLMAdapter:
     - Deterministic and CI-safe; no I/O after construction.
     - Completion is token-clipped to max_tokens on generate().
     """
+
     name = "FixtureLLMAdapter"
 
     def __init__(self, path: str):
@@ -127,9 +131,17 @@ class QwenLLMAdapter:
 
     name = "QwenLLMAdapter"
 
-    def __init__(self, call_fn, model: str = "qwen3-4b-instruct", temperature: float = 0.2, timeout_s: int = 30):
+    def __init__(
+        self,
+        call_fn,
+        model: str = "qwen3-4b-instruct",
+        temperature: float = 0.2,
+        timeout_s: int = 30,
+    ):
         if not callable(call_fn):
-            raise TypeError("QwenLLMAdapter requires a callable 'call_fn'(prompt, *, model, max_tokens, temperature, timeout_s) -> str")
+            raise TypeError(
+                "QwenLLMAdapter requires a callable 'call_fn'(prompt, *, model, max_tokens, temperature, timeout_s) -> str"
+            )
         self.call_fn = call_fn
         self.model = str(model)
         self.default_temperature = float(temperature)
@@ -138,7 +150,13 @@ class QwenLLMAdapter:
     def generate(self, prompt: str, max_tokens: int, temperature: float) -> LLMResult:
         t = float(temperature if temperature is not None else self.default_temperature)
         try:
-            raw = self.call_fn(prompt, model=self.model, max_tokens=int(max_tokens), temperature=t, timeout_s=self.timeout_s)
+            raw = self.call_fn(
+                prompt,
+                model=self.model,
+                max_tokens=int(max_tokens),
+                temperature=t,
+                timeout_s=self.timeout_s,
+            )
         except Exception as e:
             # Fail closed: return a minimal deterministic message instead of raising, to keep the pipeline robust.
             raw = f"[qwen:error:{type(e).__name__}]"

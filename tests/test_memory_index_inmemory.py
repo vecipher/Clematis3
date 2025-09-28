@@ -1,24 +1,36 @@
-
-
 import numpy as np
 import pytest
 from clematis.memory.index import InMemoryIndex
 from clematis.adapters.embeddings import BGEAdapter
 
 
-def _add_ep(idx: InMemoryIndex, *, eid: str, owner: str, text: str, ts: str,
-            tags=None, importance: float = 0.5, cluster_id: str | None = None):
+def _add_ep(
+    idx: InMemoryIndex,
+    *,
+    eid: str,
+    owner: str,
+    text: str,
+    ts: str,
+    tags=None,
+    importance: float = 0.5,
+    cluster_id: str | None = None,
+):
     enc = BGEAdapter(dim=32)
     vec = enc.encode([text])[0]
-    idx.add({
-        "id": eid,
-        "owner": owner,
-        "text": text,
-        "tags": tags or [],
-        "ts": ts,
-        "vec_full": vec.astype(np.float32),
-        "aux": {"importance": float(importance), **({"cluster_id": cluster_id} if cluster_id else {})},
-    })
+    idx.add(
+        {
+            "id": eid,
+            "owner": owner,
+            "text": text,
+            "tags": tags or [],
+            "ts": ts,
+            "vec_full": vec.astype(np.float32),
+            "aux": {
+                "importance": float(importance),
+                **({"cluster_id": cluster_id} if cluster_id else {}),
+            },
+        }
+    )
 
 
 def test_exact_semantic_recent_window_and_threshold():
@@ -33,8 +45,13 @@ def test_exact_semantic_recent_window_and_threshold():
     enc = BGEAdapter(dim=32)
     q_vec = enc.encode(["topic apple"])[0]
 
-    hits = idx.search_tiered(owner, q_vec, k=5, tier="exact_semantic",
-                             hints={"recent_days": 30, "sim_threshold": 0.1, "now": "2025-09-01T00:00:00Z"})
+    hits = idx.search_tiered(
+        owner,
+        q_vec,
+        k=5,
+        tier="exact_semantic",
+        hints={"recent_days": 30, "sim_threshold": 0.1, "now": "2025-09-01T00:00:00Z"},
+    )
 
     ids = [h.id for h in hits]
     # Old one is outside recent window
@@ -45,24 +62,42 @@ def test_exact_semantic_recent_window_and_threshold():
 
     # Ensure scores are non-increasing
     scores = [h.score for h in hits]
-    assert all(scores[i] >= scores[i+1] for i in range(len(scores)-1))
+    assert all(scores[i] >= scores[i + 1] for i in range(len(scores) - 1))
 
 
 def test_cluster_semantic_routes_to_top_m_clusters():
     idx = InMemoryIndex()
     owner = "A"
     # Build two clusters c1 and c2
-    _add_ep(idx, eid="c1_1", owner=owner, text="fruit apple", ts="2025-08-10T00:00:00Z", cluster_id="c1")
-    _add_ep(idx, eid="c1_2", owner=owner, text="fruit pear", ts="2025-08-11T00:00:00Z", cluster_id="c1")
-    _add_ep(idx, eid="c2_1", owner=owner, text="vehicle car", ts="2025-08-12T00:00:00Z", cluster_id="c2")
-    _add_ep(idx, eid="c2_2", owner=owner, text="vehicle bike", ts="2025-08-13T00:00:00Z", cluster_id="c2")
+    _add_ep(
+        idx, eid="c1_1", owner=owner, text="fruit apple", ts="2025-08-10T00:00:00Z", cluster_id="c1"
+    )
+    _add_ep(
+        idx, eid="c1_2", owner=owner, text="fruit pear", ts="2025-08-11T00:00:00Z", cluster_id="c1"
+    )
+    _add_ep(
+        idx, eid="c2_1", owner=owner, text="vehicle car", ts="2025-08-12T00:00:00Z", cluster_id="c2"
+    )
+    _add_ep(
+        idx,
+        eid="c2_2",
+        owner=owner,
+        text="vehicle bike",
+        ts="2025-08-13T00:00:00Z",
+        cluster_id="c2",
+    )
 
     # Query is close to cluster c1 (fruit domain)
     enc = BGEAdapter(dim=32)
     q_vec = enc.encode(["fruit apple"])[0]
 
-    hits = idx.search_tiered(owner, q_vec, k=10, tier="cluster_semantic",
-                             hints={"clusters_top_m": 1, "sim_threshold": 0.0, "now": "2025-09-01T00:00:00Z"})
+    hits = idx.search_tiered(
+        owner,
+        q_vec,
+        k=10,
+        tier="cluster_semantic",
+        hints={"clusters_top_m": 1, "sim_threshold": 0.0, "now": "2025-09-01T00:00:00Z"},
+    )
 
     ids = [h.id for h in hits]
     # All returned hits should belong to cluster c1 only when top_m=1
@@ -81,8 +116,13 @@ def test_archive_tier_filters_by_quarter():
     enc = BGEAdapter(dim=32)
     q_vec = enc.encode(["alpha"])[0]
 
-    hits = idx.search_tiered(owner, q_vec, k=10, tier="archive",
-                             hints={"archive_quarters": ["2025Q2"], "sim_threshold": 0.0})
+    hits = idx.search_tiered(
+        owner,
+        q_vec,
+        k=10,
+        tier="archive",
+        hints={"archive_quarters": ["2025Q2"], "sim_threshold": 0.0},
+    )
 
     ids = [h.id for h in hits]
     assert set(ids).issubset({"q2_a", "q2_b"})
@@ -99,8 +139,13 @@ def test_deterministic_ranking_tiebreak_by_id():
     enc = BGEAdapter(dim=32)
     q_vec = enc.encode(["same text"])[0]
 
-    hits = idx.search_tiered(owner, q_vec, k=5, tier="exact_semantic",
-                             hints={"recent_days": 365, "sim_threshold": 0.0, "now": "2025-09-01T00:00:00Z"})
+    hits = idx.search_tiered(
+        owner,
+        q_vec,
+        k=5,
+        tier="exact_semantic",
+        hints={"recent_days": 365, "sim_threshold": 0.0, "now": "2025-09-01T00:00:00Z"},
+    )
 
     ids = [h.id for h in hits]
     # With equal scores, tie-breaker is id ascending

@@ -1,5 +1,3 @@
-
-
 # PR27 — Fairness: max_consecutive_turns tests (core scheduler only)
 # We exercise next_turn/on_yield with mct=1 to ensure deterministic alternation
 # and correct RESET_CONSEC behavior when all agents are saturated.
@@ -15,6 +13,7 @@ from clematis.scheduler import (
 
 class FixedCtx:
     """Tiny fixed clock for deterministic tests."""
+
     def __init__(self, t=0):
         self._t = int(t)
 

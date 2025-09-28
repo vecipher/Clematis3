@@ -13,10 +13,12 @@ _READS_STRING = False
 
 try:
     from clematis.engine.snapshot import _read_header_body as _read_helper  # type: ignore
+
     _READS_STRING = True
 except Exception:
     try:
         from clematis.engine.snapshot import _read_header_payload as _read_helper  # type: ignore
+
         _READS_STRING = False
     except Exception as e:  # pragma: no cover
         pytest.skip(f"snapshot read helper not importable: {e}", allow_module_level=True)

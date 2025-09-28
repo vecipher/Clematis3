@@ -4,6 +4,7 @@ import numpy as np
 from numpy.typing import NDArray
 import hashlib
 
+
 class DummyEmbeddingAdapter:
     def encode(self, texts: List[str]) -> List[NDArray[np.float32]]:
         # Deterministic dummy vectors
@@ -21,6 +22,7 @@ class DeterministicEmbeddingAdapter:
     - Distinct per input string
     - Unit-normalized vectors (optional)
     """
+
     def __init__(self, dim: int = 32, normalize: bool = True) -> None:
         self.dim = int(dim)
         self.normalize = bool(normalize)
@@ -38,6 +40,7 @@ class DeterministicEmbeddingAdapter:
                 arr = (arr / n).astype(np.float32)
             vecs.append(arr.astype(np.float32))
         return vecs
+
 
 # Alias for clarity with planned BGE usage in T2
 BGEAdapter = DeterministicEmbeddingAdapter

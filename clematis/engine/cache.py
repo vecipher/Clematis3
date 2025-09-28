@@ -14,6 +14,7 @@ class _Entry:
 
 class _NamespaceCache:
     """Per-namespace LRU cache with TTL, stable eviction order."""
+
     def __init__(self, max_entries: int, ttl_sec: int, time_fn=time.time) -> None:
         self._max = int(max_entries)
         self._ttl = int(ttl_sec)
@@ -72,6 +73,7 @@ class LRUCache:
     Accepts legacy and new constructor params: max_entries/capacity, ttl_s/ttl_sec/ttl.
     TTL and LRU semantics match the new implementation.
     """
+
     def __init__(
         self,
         max_entries: int = 1024,
@@ -85,7 +87,8 @@ class LRUCache:
         # Accept both legacy and new names; prefer explicit over defaults.
         effective_max = int(capacity if capacity is not None else max_entries)
         effective_ttl = (
-            ttl if ttl is not None
+            ttl
+            if ttl is not None
             else (ttl_sec if ttl_sec is not None else (ttl_s if ttl_s is not None else 600))
         )
         self._ns = _NamespaceCache(effective_max, effective_ttl, time_fn)

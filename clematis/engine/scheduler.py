@@ -27,8 +27,9 @@ class SchedulerState(TypedDict):
     Pure scheduler state. The orchestrator owns lifecycle; this state is
     created once and updated via `on_yield()`. No rotations happen here.
     """
-    queue: List[str]              # canonical lex order at init; no mutation here
-    last_ran_ms: Dict[str, int]   # last slice-end time per agent (for aging)
+
+    queue: List[str]  # canonical lex order at init; no mutation here
+    last_ran_ms: Dict[str, int]  # last slice-end time per agent (for aging)
     consec_turns: Dict[str, int]  # tracked only; enforcement deferred to PR27
 
 
@@ -36,6 +37,7 @@ class FairnessCfg(TypedDict, total=False):
     """
     Fairness-related parameters. Only 'aging_ms' is used in PR25.
     """
+
     aging_ms: int  # integer bucket size for fair-queue priority tiers
 
 
@@ -54,6 +56,7 @@ _MAX_INT = 10**9
 
 
 # ------------------------------- Helpers ------------------------------------
+
 
 def _now_ms(ctx) -> int:
     """
@@ -121,6 +124,7 @@ def _pick_fair_queue(sched: SchedulerState, now_ms: int, aging_ms: int) -> str:
 
 
 # ------------------------------- Core API -----------------------------------
+
 
 def next_turn(
     ctx,

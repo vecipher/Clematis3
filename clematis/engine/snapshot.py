@@ -7,6 +7,7 @@ import math
 import hashlib
 import logging
 import sys
+
 try:
     import zstandard as _zstd  # optional; used for .zst snapshots
 except Exception:
@@ -19,6 +20,7 @@ except Exception:
 
 SCHEMA_VERSION = "v1"  # snapshots written going forward should include this
 
+
 def _safe_read_json(path: str) -> Optional[Dict[str, Any]]:
     """Read JSON file; return None on any error."""
     try:
@@ -26,6 +28,7 @@ def _safe_read_json(path: str) -> Optional[Dict[str, Any]]:
             return json.load(f)
     except Exception:
         return None
+
 
 def _pick_latest_snapshot_path(directory: str) -> Optional[str]:
     """
@@ -77,6 +80,7 @@ def _pick_latest_snapshot_path(directory: str) -> Optional[str]:
         any_json.sort()
     return any_json[0]
 
+
 def get_latest_snapshot_info(directory: str = "./.data/snapshots") -> Optional[Dict[str, Any]]:
     """
     Pure metadata probe for the latest snapshot file in `directory`.
@@ -108,10 +112,10 @@ def get_latest_snapshot_info(directory: str = "./.data/snapshots") -> Optional[D
 
     schema = data.get("schema_version", "unknown")
     graph_schema = data.get("graph_schema_version", None)
-    gel = (data.get("gel") or {})
-    graph = (data.get("graph") or {})
-    caps = (data.get("t4_caps") or {})
-    meta = (graph.get("meta") or {})
+    gel = data.get("gel") or {}
+    graph = data.get("graph") or {}
+    caps = data.get("t4_caps") or {}
+    meta = graph.get("meta") or {}
 
     # --- Prefer GEL counts if present, else fall back to legacy 'graph' or top-level ---
     nodes = None
@@ -178,6 +182,7 @@ def get_latest_snapshot_info(directory: str = "./.data/snapshots") -> Optional[D
 # Config & path helpers
 # -------------------------
 
+
 def _get_cfg(ctx) -> Dict[str, Any]:
     """
     Normalize config access across ctx.cfg / ctx.config and return a T4 dict
@@ -234,6 +239,7 @@ def _snapshot_path(cfg: Dict[str, Any], ctx) -> str:
 # Store export/import
 # -------------------------
 
+
 def _export_store_for_snapshot(store: Any) -> Optional[Dict[str, Any]]:
     """
     Try to export the store in a structured way, falling back to a weight map.
@@ -254,12 +260,14 @@ def _export_store_for_snapshot(store: Any) -> Optional[Dict[str, Any]]:
                 target_kind, target_id, attr = k
             except Exception:
                 continue
-            weights.append({
-                "target_kind": str(target_kind),
-                "target_id": str(target_id),
-                "attr": str(attr),
-                "value": float(v),
-            })
+            weights.append(
+                {
+                    "target_kind": str(target_kind),
+                    "target_id": str(target_id),
+                    "attr": str(attr),
+                    "value": float(v),
+                }
+            )
         return {"weights": weights}
     return None
 
@@ -302,34 +310,39 @@ def _import_store_from_snapshot(store: Any, snap_store: Dict[str, Any]) -> bool:
 # Serialization helpers
 # -------------------------
 
+
 def _serialize_deltas(deltas: Any) -> List[Dict[str, Any]]:
     out: List[Dict[str, Any]] = []
     if not deltas:
         return out
     for d in deltas:
         try:
-            out.append({
-                "target_kind": d.target_kind,
-                "target_id": d.target_id,
-                "attr": d.attr,
-                "delta": float(d.delta),
-                "op_idx": getattr(d, "op_idx", None),
-                "idx": getattr(d, "idx", None),
-            })
+            out.append(
+                {
+                    "target_kind": d.target_kind,
+                    "target_id": d.target_id,
+                    "attr": d.attr,
+                    "delta": float(d.delta),
+                    "op_idx": getattr(d, "op_idx", None),
+                    "idx": getattr(d, "idx", None),
+                }
+            )
         except Exception:
             try:
                 out.append(asdict(d))
             except Exception:
                 # Best-effort: attempt dict-like access
                 try:
-                    out.append({
-                        "target_kind": str(d.get("target_kind")),
-                        "target_id": str(d.get("target_id")),
-                        "attr": str(d.get("attr")),
-                        "delta": float(d.get("delta", 0.0)),
-                        "op_idx": d.get("op_idx"),
-                        "idx": d.get("idx"),
-                    })
+                    out.append(
+                        {
+                            "target_kind": str(d.get("target_kind")),
+                            "target_id": str(d.get("target_id")),
+                            "attr": str(d.get("attr")),
+                            "delta": float(d.get("delta", 0.0)),
+                            "op_idx": d.get("op_idx"),
+                            "idx": d.get("idx"),
+                        }
+                    )
                 except Exception:
                     continue
     return out
@@ -338,6 +351,7 @@ def _serialize_deltas(deltas: Any) -> List[Dict[str, Any]]:
 # -------------------------
 # GEL (Graph Evolution Layer) helpers
 # -------------------------
+
 
 def _extract_full_cfg(ctx) -> Dict[str, Any]:
     def _as_dict(obj):
@@ -349,6 +363,7 @@ def _extract_full_cfg(ctx) -> Dict[str, Any]:
             return dict(obj.__dict__)
         except Exception:
             return {}
+
     full = {}
     full.update(_as_dict(getattr(ctx, "cfg", None)))
     full.update(_as_dict(getattr(ctx, "config", None)))
@@ -358,11 +373,11 @@ def _extract_full_cfg(ctx) -> Dict[str, Any]:
 def _graph_bounds_from_cfg(ctx) -> Dict[str, float]:
     """Get clamp/epsilon from graph.* if present, else fall back to t4.*."""
     full = _extract_full_cfg(ctx)
-    g = (full.get("graph") or {})
-    t4 = (full.get("t4") or {})
+    g = full.get("graph") or {}
+    t4 = full.get("t4") or {}
     wmin = float(g.get("weight_min", t4.get("weight_min", -1.0)))
     wmax = float(g.get("weight_max", t4.get("weight_max", 1.0)))
-    decay = (g.get("decay") or {})
+    decay = g.get("decay") or {}
     eps = float(decay.get("epsilon_prune", 0.0))
     if not (wmin < wmax):
         # fallback safety
@@ -516,6 +531,7 @@ def _set_state_field(state, key: str, val: Any) -> None:
 # Public API
 # -------------------------
 
+
 def write_snapshot(ctx, state, version_etag: str, applied: int = 0, deltas=None) -> str:
     """
     Write a JSON snapshot for this agent. Returns the absolute file path.
@@ -599,8 +615,24 @@ def write_snapshot(ctx, state, version_etag: str, applied: int = 0, deltas=None)
     except Exception:
         # Ensure keys exist even if sanitization fails
         payload.setdefault("graph_schema_version", "v1.1")
-        payload.setdefault("gel", {"nodes": {}, "edges": {}, "meta": {"schema": "v1.1", "merges": [], "splits": [], "promotions": [], "concept_nodes_count": 0, "edges_count": 0}})
-        payload.setdefault("graph", {"nodes_count": None, "edges_count": None, "meta": {"last_update": None}})
+        payload.setdefault(
+            "gel",
+            {
+                "nodes": {},
+                "edges": {},
+                "meta": {
+                    "schema": "v1.1",
+                    "merges": [],
+                    "splits": [],
+                    "promotions": [],
+                    "concept_nodes_count": 0,
+                    "edges_count": 0,
+                },
+            },
+        )
+        payload.setdefault(
+            "graph", {"nodes_count": None, "edges_count": None, "meta": {"last_update": None}}
+        )
 
     with open(path, "w", encoding="utf-8") as f:
         json.dump(payload, f)
@@ -619,7 +651,14 @@ def load_latest_snapshot(ctx, state) -> Dict[str, Any]:
     path = _pick_latest_snapshot_path(dir_)
 
     # Ensure graph containers exist on state even if nothing loads
-    empty_meta = {"schema": "v1.1", "merges": [], "splits": [], "promotions": [], "concept_nodes_count": 0, "edges_count": 0}
+    empty_meta = {
+        "schema": "v1.1",
+        "merges": [],
+        "splits": [],
+        "promotions": [],
+        "concept_nodes_count": 0,
+        "edges_count": 0,
+    }
     _set_state_field(state, "graph", {"nodes": {}, "edges": {}, "meta": dict(empty_meta)})
     _set_state_field(state, "gel", {"nodes": {}, "edges": {}, "meta": dict(empty_meta)})
 
@@ -692,8 +731,10 @@ def _canonical_json(obj) -> str:
         # best-effort fallback
         return json.dumps(obj)
 
+
 def _sha256_of(obj) -> str:
     return hashlib.sha256(_canonical_json(obj).encode("utf-8")).hexdigest()
+
 
 def _read_text(path) -> str:
     """Read a snapshot file as text. Accepts str or Path-like.
@@ -709,6 +750,7 @@ def _read_text(path) -> str:
         dctx = _zstd.ZstdDecompressor()
         data = dctx.decompress(data)
     return data.decode("utf-8")
+
 
 def _read_header_payload(path):
     """
@@ -733,6 +775,7 @@ def _read_header_payload(path):
     except Exception:
         raise
 
+
 def _find_snapshot_file(root: str, stem: str):
     """
     Return a path for either uncompressed .json or compressed .json.zst if it exists.
@@ -745,8 +788,11 @@ def _find_snapshot_file(root: str, stem: str):
         return p_zst
     return None
 
+
 # Public reader used by tests (compatible signature)
-def read_snapshot(root: str = None, etag_to: str = None, baseline_dir: str = None, path: str = None, **kwargs):
+def read_snapshot(
+    root: str = None, etag_to: str = None, baseline_dir: str = None, path: str = None, **kwargs
+):
     """
     Minimal PR34 reader with safe fallback:
       * If 'path' points to a snapshot, read that (supports .full/.delta, .json/.json.zst).
@@ -765,7 +811,10 @@ def read_snapshot(root: str = None, etag_to: str = None, baseline_dir: str = Non
             base = _find_snapshot_file(bdir, f"snapshot-{delta_of}.full")
             if base:
                 _, base_payload = _read_header_payload(base)
-                from clematis.engine.util.snapshot_delta import apply_delta  # local import avoids hard dep in old paths
+                from clematis.engine.util.snapshot_delta import (
+                    apply_delta,
+                )  # local import avoids hard dep in old paths
+
                 return apply_delta(base_payload or {}, payload or {})
             # No baseline -> warn and return payload if it's actually full-like or empty dict
             logging.warning("SNAPSHOT_BASELINE_MISSING: delta_of=%s etag_to=%s", delta_of, etag_to)
@@ -790,6 +839,7 @@ def read_snapshot(root: str = None, etag_to: str = None, baseline_dir: str = Non
         if base:
             _, base_payload = _read_header_payload(base)
             from clematis.engine.util.snapshot_delta import apply_delta
+
             return apply_delta(base_payload or {}, payload or {})
         # Baseline missing -> warn and try full fallback
         logging.warning("SNAPSHOT_BASELINE_MISSING: delta_of=%s etag_to=%s", delta_of, etag_to)
@@ -807,6 +857,7 @@ def read_snapshot(root: str = None, etag_to: str = None, baseline_dir: str = Non
     # Nothing found
     return {}
 
+
 # Writer helpers reuse _canonical_json, _find_snapshot_file, and _read_header_payload above.
 def _write_lines(p: str, header: Dict[str, Any], body_json: str, *, codec: str, level: int) -> None:
     # If zstd requested but not installed, degrade deterministically to none (warn once per call site).
@@ -823,13 +874,14 @@ def _write_lines(p: str, header: Dict[str, Any], body_json: str, *, codec: str, 
         with open(p, "w", encoding="utf-8") as f:
             f.write(payload)
 
+
 def write_snapshot_auto(
     dir_path: str,
     *,
     etag_from: Optional[str],
     etag_to: str,
     payload: Dict[str, Any],
-    compression: str = "none",    # "none" | "zstd"
+    compression: str = "none",  # "none" | "zstd"
     level: int = 3,
     delta_mode: bool = False,
 ) -> tuple[str, bool]:
@@ -863,16 +915,23 @@ def write_snapshot_auto(
                     "schema": "snapshot:v1",
                     "mode": "delta",
                     "etag_from": etag_from,
-                    "delta_of": etag_from,   # kept for tool compatibility
+                    "delta_of": etag_from,  # kept for tool compatibility
                     "etag_to": etag_to,
                     "codec": codec,
                     "level": int(level if codec == "zstd" else 0),
                 }
-                out_path = os.path.join(dir_path, f"snapshot-{etag_to}.delta.json" + (".zst" if codec == "zstd" else ""))
-                _write_lines(out_path, header, _canonical_json(delta_blob), codec=codec, level=level)
+                out_path = os.path.join(
+                    dir_path, f"snapshot-{etag_to}.delta.json" + (".zst" if codec == "zstd" else "")
+                )
+                _write_lines(
+                    out_path, header, _canonical_json(delta_blob), codec=codec, level=level
+                )
                 return out_path, True
         # Baseline unavailable or codec missing; fall back to full with deterministic warning
-        print("W[SNAPSHOT_BASELINE_MISSING]: delta requested but baseline full not found; writing full", file=sys.stderr)
+        print(
+            "W[SNAPSHOT_BASELINE_MISSING]: delta requested but baseline full not found; writing full",
+            file=sys.stderr,
+        )
 
     # Fall back to full
     header = {
@@ -882,6 +941,8 @@ def write_snapshot_auto(
         "codec": codec,
         "level": int(level if codec == "zstd" else 0),
     }
-    out_path = os.path.join(dir_path, f"snapshot-{etag_to}.full.json" + (".zst" if codec == "zstd" else ""))
+    out_path = os.path.join(
+        dir_path, f"snapshot-{etag_to}.full.json" + (".zst" if codec == "zstd" else "")
+    )
     _write_lines(out_path, header, body_json, codec=codec, level=level)
     return out_path, False

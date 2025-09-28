@@ -1,5 +1,7 @@
 import os, sys, subprocess
+
 PY = sys.executable
+
 
 def test_inspect_snapshot_default_dir_injection():
     p = subprocess.run(

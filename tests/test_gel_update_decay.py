@@ -5,13 +5,16 @@ _gel = pytest.importorskip("clematis.engine.gel")
 observe_retrieval = _gel.observe_retrieval
 tick = _gel.tick
 
+
 class _Ctx:
     def __init__(self, graph_cfg):
         self.config = {"graph": graph_cfg}
         self.cfg = self.config
 
+
 class _State:
     pass
+
 
 def _base_cfg(**over):
     cfg = {
@@ -30,8 +33,10 @@ def _base_cfg(**over):
             cfg[k] = v
     return cfg
 
+
 def _edge(state, key):
     return getattr(state, "graph", {}).get("edges", {}).get(key)
+
 
 def test_observe_additive_clamps():
     # alpha 0.05, clamp at 0.1; two observes should clamp
@@ -115,5 +120,3 @@ def test_decay_half_life_and_floor_drop():
     assert "p→q" not in s.graph["edges"]
     assert m["event"] == "edge_decay"
     assert m["dropped_edges"] >= 1
-
-

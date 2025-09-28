@@ -1,6 +1,3 @@
-
-
-
 from pathlib import Path
 
 import numpy as np
@@ -32,7 +29,9 @@ def test_fp32_reader_without_precomputed_norms_computes_on_the_fly(tmp_path: Pat
     assert len(r_ids) == N and r_vecs.shape == (N, D) and r_norms.shape == (N,)
 
     # Norms computed by the reader should match direct fp32 norms
-    expected = np.linalg.norm(embeds_fp32.astype(np.float32, copy=False), ord=2, axis=1).astype(np.float32, copy=False)
+    expected = np.linalg.norm(embeds_fp32.astype(np.float32, copy=False), ord=2, axis=1).astype(
+        np.float32, copy=False
+    )
     assert np.allclose(r_norms, expected, rtol=0.0, atol=0.0)
 
 

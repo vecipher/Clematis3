@@ -2,6 +2,7 @@ import pytest
 
 from clematis.engine.util.lru_det import DeterministicLRUSet, DeterministicLRU
 
+
 def test_lru_set_fifo_eviction_and_contains():
     s = DeterministicLRUSet(2)
     assert not s.contains("a")
@@ -16,6 +17,7 @@ def test_lru_set_fifo_eviction_and_contains():
     assert s.size() == 2
     s.clear()
     assert s.size() == 0 and not s.contains("b")
+
 
 def test_lru_map_put_get_eviction_and_touch():
     # Map LRU with deterministic recency updates on get/put

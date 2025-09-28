@@ -1,11 +1,10 @@
-
-
 """
 Normalization utilities for CLI golden snapshots.
 
 - normalize_help(): scrubs incidental diffs (width, dates, versions, __main__.py).
 - write_or_assert(): writes on first run or when BLESS=1; otherwise asserts equality.
 """
+
 from __future__ import annotations
 
 import os
@@ -17,8 +16,10 @@ _USAGE_MAIN = re.compile(r"(?im)^usage:\s+__main__\.py")
 # collapse runs of 2+ spaces that aren't at start of line
 _RUN_SPACES = re.compile(r"(?m)(?<!^)[ ]{2,}")
 
+
 def _normalize_newlines(text: str) -> str:
     return text.replace("\r\n", "\n").replace("\r", "\n")
+
 
 def normalize_help(text: str) -> str:
     text = _normalize_newlines(text)
@@ -36,6 +37,7 @@ def normalize_help(text: str) -> str:
         text += "\n"
     return text
 
+
 def normalize_completion(text: str) -> str:
     # Completions are already fairly stable; just normalize newlines and strip trailing spaces
     text = _normalize_newlines(text)
@@ -43,6 +45,7 @@ def normalize_completion(text: str) -> str:
     if not text.endswith("\n"):
         text += "\n"
     return text
+
 
 def write_or_assert(path: str, content: str, bless: bool) -> None:
     os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -53,5 +56,6 @@ def write_or_assert(path: str, content: str, bless: bool) -> None:
     with open(path, "r", encoding="utf-8") as f:
         expected = f.read()
     assert content == expected, f"Golden mismatch for {path}. Set BLESS=1 to update."
+
 
 __all__ = ["normalize_help", "normalize_completion", "write_or_assert"]

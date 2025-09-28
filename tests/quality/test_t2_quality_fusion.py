@@ -1,5 +1,3 @@
-
-
 from typing import List, Dict, Any, Tuple
 from clematis.engine.stages.t2_quality import fuse
 
@@ -12,6 +10,7 @@ def _items() -> List[Dict[str, Any]]:
         {"id": "a", "score": 2.0, "text": "x"},
         {"id": "c", "score": 1.0, "text": "foo foo"},
     ]
+
 
 def _cfg_enabled(alpha: float = 0.6) -> Dict[str, Any]:
     return {
@@ -27,6 +26,7 @@ def _cfg_enabled(alpha: float = 0.6) -> Dict[str, Any]:
         }
     }
 
+
 def _cfg_disabled() -> Dict[str, Any]:
     return {
         "t2": {
@@ -39,8 +39,10 @@ def _cfg_disabled() -> Dict[str, Any]:
         }
     }
 
+
 def _ids(seq: List[Dict[str, Any]]) -> List[str]:
     return [d["id"] for d in seq]
+
 
 def _scores_fused(seq: List[Dict[str, Any]]) -> Dict[str, float]:
     return {d["id"]: float(d.get("score_fused", 0.0)) for d in seq}

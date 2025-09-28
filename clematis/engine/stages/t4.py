@@ -85,6 +85,7 @@ def t4_filter(ctx, state, t1, t2, plan, utter) -> T4Result:
 # Helpers (pure functions)
 # ------------------------
 
+
 def _get_cfg(ctx) -> Dict[str, Any]:
     # Safe config accessor with deterministic defaults
     t4_default = {
@@ -157,14 +158,16 @@ def _combine_by_ckey(deltas: List[ProposedDelta]) -> List[ProposedDelta]:
     combined: List[ProposedDelta] = []
     for ckey in sorted(accum.keys()):
         val, op_idx, idx, exemplar = accum[ckey]
-        combined.append(ProposedDelta(
-            target_kind=exemplar.target_kind,
-            target_id=exemplar.target_id,
-            attr=exemplar.attr,
-            delta=val,
-            op_idx=op_idx,
-            idx=idx,
-        ))
+        combined.append(
+            ProposedDelta(
+                target_kind=exemplar.target_kind,
+                target_id=exemplar.target_id,
+                attr=exemplar.attr,
+                delta=val,
+                op_idx=op_idx,
+                idx=idx,
+            )
+        )
     return combined
 
 
@@ -176,7 +179,9 @@ def _min_optional_int(a: Optional[int], b: Optional[int]) -> Optional[int]:
     return a if a <= b else b
 
 
-def _collect_blocked_ops(ops: List[Any], state: Any, ctx: Any, cooldowns: Dict[str, int]) -> set[int]:
+def _collect_blocked_ops(
+    ops: List[Any], state: Any, ctx: Any, cooldowns: Dict[str, int]
+) -> set[int]:
     """
     Return set of op indices that are within cooldown.
     Expects cooldowns: {kind: turns}.
@@ -256,18 +261,20 @@ def _novelty_clamp(deltas: List[ProposedDelta], cap: float) -> Tuple[List[Propos
     for d in deltas:
         mag = abs(d.delta)
         if mag > cap:
-            new_delta = (cap if d.delta > 0 else -cap)
+            new_delta = cap if d.delta > 0 else -cap
             clamped_count += 1
         else:
             new_delta = d.delta
-        out.append(ProposedDelta(
-            target_kind=d.target_kind,
-            target_id=d.target_id,
-            attr=d.attr,
-            delta=new_delta,
-            op_idx=d.op_idx,
-            idx=d.idx,
-        ))
+        out.append(
+            ProposedDelta(
+                target_kind=d.target_kind,
+                target_id=d.target_id,
+                attr=d.attr,
+                delta=new_delta,
+                op_idx=d.op_idx,
+                idx=d.idx,
+            )
+        )
     return out, clamped_count
 
 
@@ -303,10 +310,7 @@ def _churn_cap(deltas: List[ProposedDelta], k: int) -> Tuple[List[ProposedDelta]
     if n <= k:
         return deltas, 0
     # Rank by |Δ| desc, tie-break by canonical key asc
-    ranked = sorted(
-        deltas,
-        key=lambda d: (-abs(float(d.delta)), _canonical_key(d))
-    )
+    ranked = sorted(deltas, key=lambda d: (-abs(float(d.delta)), _canonical_key(d)))
     kept = ranked[:k]
     dropped = n - k
     return kept, dropped

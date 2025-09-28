@@ -1,22 +1,35 @@
 from clematis.engine.types import Config
 from clematis.graph.store import InMemoryGraphStore, Node, Edge
 
+
 def bootstrap_state():
     store = InMemoryGraphStore()
     g = store.ensure("g:surface")
-    store.upsert_nodes("g:surface", [Node(id="n:hello", label="hello"),
-                                     Node(id="n:world", label="world"),
-                                     Node(id="n:reply", label="reply")])
-    store.upsert_edges("g:surface", [Edge(id="e:h->w", src="n:hello", dst="n:world", weight=0.8, rel="supports"),
-                                     Edge(id="e:w->r", src="n:world", dst="n:reply", weight=0.5, rel="associates")])
+    store.upsert_nodes(
+        "g:surface",
+        [
+            Node(id="n:hello", label="hello"),
+            Node(id="n:world", label="world"),
+            Node(id="n:reply", label="reply"),
+        ],
+    )
+    store.upsert_edges(
+        "g:surface",
+        [
+            Edge(id="e:h->w", src="n:hello", dst="n:world", weight=0.8, rel="supports"),
+            Edge(id="e:w->r", src="n:world", dst="n:reply", weight=0.5, rel="associates"),
+        ],
+    )
     return {"store": store, "active_graphs": ["g:surface"]}
+
 
 def test_t1_determinism(tmp_path, monkeypatch):
     cfg = Config()
     state = bootstrap_state()
     # first run
     from clematis.engine.stages.t1 import t1_propagate
-    ctx = type("Ctx", (), {"cfg": cfg, "turn_id":"t", "agent_id":"A"})()  # quick ctx stub
+
+    ctx = type("Ctx", (), {"cfg": cfg, "turn_id": "t", "agent_id": "A"})()  # quick ctx stub
     r1 = t1_propagate(ctx, state, "hello world")
     r2 = t1_propagate(ctx, state, "hello world")
     assert r1.metrics["pops"] >= 0
@@ -24,17 +37,20 @@ def test_t1_determinism(tmp_path, monkeypatch):
     assert isinstance(r2.metrics["pops"], int)
     assert r1.graph_deltas == r2.graph_deltas
 
+
 def test_t1_budgets_respected():
     cfg = Config()
     cfg.t1["queue_budget"] = 1
     cfg.t1["iter_cap"] = 1
     state = bootstrap_state()
     from clematis.engine.stages.t1 import t1_propagate
-    ctx = type("Ctx", (), {"cfg": cfg, "turn_id":"t", "agent_id":"A"})()
+
+    ctx = type("Ctx", (), {"cfg": cfg, "turn_id": "t", "agent_id": "A"})()
     r = t1_propagate(ctx, state, "hello world")
     # iter_cap caps layers beyond seeds; queue_budget caps PQ pops.
     assert r.metrics["iters"] <= cfg.t1["iter_cap"]
     assert r.metrics["pops"] <= cfg.t1["queue_budget"]
+
 
 def test_t1_tiebreak_deterministic_equal_weights():
     """
@@ -48,15 +64,21 @@ def test_t1_tiebreak_deterministic_equal_weights():
     # Build a tiny tie graph
     store = InMemoryGraphStore()
     g = store.ensure("g:tie")
-    store.upsert_nodes("g:tie", [
-        Node(id="n:seed", label="seed"),
-        Node(id="n:a", label="alpha"),
-        Node(id="n:b", label="beta"),
-    ])
-    store.upsert_edges("g:tie", [
-        Edge(id="e:s->a", src="n:seed", dst="n:a", weight=1.0, rel="supports"),
-        Edge(id="e:s->b", src="n:seed", dst="n:b", weight=1.0, rel="supports"),
-    ])
+    store.upsert_nodes(
+        "g:tie",
+        [
+            Node(id="n:seed", label="seed"),
+            Node(id="n:a", label="alpha"),
+            Node(id="n:b", label="beta"),
+        ],
+    )
+    store.upsert_edges(
+        "g:tie",
+        [
+            Edge(id="e:s->a", src="n:seed", dst="n:a", weight=1.0, rel="supports"),
+            Edge(id="e:s->b", src="n:seed", dst="n:b", weight=1.0, rel="supports"),
+        ],
+    )
     state = {"store": store, "active_graphs": ["g:tie"]}
     ctx = type("Ctx", (), {"cfg": cfg, "turn_id": "t", "agent_id": "A"})()
 
@@ -64,8 +86,11 @@ def test_t1_tiebreak_deterministic_equal_weights():
     r2 = t1_propagate(ctx, state, "seed")
 
     def extract_ab_order(result):
-        return [d["id"] for d in result.graph_deltas
-                if d.get("op") == "upsert_node" and d.get("id") in ("n:a", "n:b")]
+        return [
+            d["id"]
+            for d in result.graph_deltas
+            if d.get("op") == "upsert_node" and d.get("id") in ("n:a", "n:b")
+        ]
 
     order1 = extract_ab_order(r1)
     order2 = extract_ab_order(r2)
@@ -76,6 +101,7 @@ def test_t1_tiebreak_deterministic_equal_weights():
     # And (by design) alphabetical by node id due to heap tie-breaker
     assert order1 == ["n:a", "n:b"]
 
+
 def test_t1_cache_hit_and_invalidation():
     cfg = Config()
     from clematis.engine.stages.t1 import t1_propagate
@@ -84,15 +110,21 @@ def test_t1_cache_hit_and_invalidation():
     store = InMemoryGraphStore()
     gid = "g:cachetest"
     store.ensure(gid)
-    store.upsert_nodes(gid, [
-        Node(id="n:hello", label="hello"),
-        Node(id="n:world", label="world"),
-        Node(id="n:reply", label="reply"),
-    ])
-    store.upsert_edges(gid, [
-        Edge(id="e:h->w", src="n:hello", dst="n:world", weight=0.8, rel="supports"),
-        Edge(id="e:w->r", src="n:world", dst="n:reply", weight=0.5, rel="associates"),
-    ])
+    store.upsert_nodes(
+        gid,
+        [
+            Node(id="n:hello", label="hello"),
+            Node(id="n:world", label="world"),
+            Node(id="n:reply", label="reply"),
+        ],
+    )
+    store.upsert_edges(
+        gid,
+        [
+            Edge(id="e:h->w", src="n:hello", dst="n:world", weight=0.8, rel="supports"),
+            Edge(id="e:w->r", src="n:world", dst="n:reply", weight=0.5, rel="associates"),
+        ],
+    )
     state = {"store": store, "active_graphs": [gid]}
     ctx = type("Ctx", (), {"cfg": cfg, "turn_id": "t", "agent_id": "A"})()
 
@@ -113,6 +145,7 @@ def test_t1_cache_hit_and_invalidation():
     assert r3.metrics.get("cache_hits", 0) == 0
     assert r3.metrics.get("cache_misses", 0) >= 1
 
+
 def test_t1_radius_cap_blocks_propagation():
     """
     With radius_cap=0, neighbors at depth 1 must not be expanded/emitted.
@@ -125,13 +158,19 @@ def test_t1_radius_cap_blocks_propagation():
     store = InMemoryGraphStore()
     gid = "g:radius"
     store.ensure(gid)
-    store.upsert_nodes(gid, [
-        Node(id="n:seed", label="seed"),
-        Node(id="n:down", label="downstream"),
-    ])
-    store.upsert_edges(gid, [
-        Edge(id="e:s->d", src="n:seed", dst="n:down", weight=1.0, rel="supports"),
-    ])
+    store.upsert_nodes(
+        gid,
+        [
+            Node(id="n:seed", label="seed"),
+            Node(id="n:down", label="downstream"),
+        ],
+    )
+    store.upsert_edges(
+        gid,
+        [
+            Edge(id="e:s->d", src="n:seed", dst="n:down", weight=1.0, rel="supports"),
+        ],
+    )
     state = {"store": store, "active_graphs": [gid]}
     ctx = type("Ctx", (), {"cfg": cfg, "turn_id": "t", "agent_id": "A"})()
 
@@ -154,13 +193,19 @@ def test_t1_node_budget_blocks_expansion():
     store = InMemoryGraphStore()
     gid = "g:nodebudget"
     store.ensure(gid)
-    store.upsert_nodes(gid, [
-        Node(id="n:seed", label="seed"),
-        Node(id="n:neighbor", label="neighbor"),
-    ])
-    store.upsert_edges(gid, [
-        Edge(id="e:s->n", src="n:seed", dst="n:neighbor", weight=1.0, rel="supports"),
-    ])
+    store.upsert_nodes(
+        gid,
+        [
+            Node(id="n:seed", label="seed"),
+            Node(id="n:neighbor", label="neighbor"),
+        ],
+    )
+    store.upsert_edges(
+        gid,
+        [
+            Edge(id="e:s->n", src="n:seed", dst="n:neighbor", weight=1.0, rel="supports"),
+        ],
+    )
     state = {"store": store, "active_graphs": [gid]}
     ctx = type("Ctx", (), {"cfg": cfg, "turn_id": "t", "agent_id": "A"})()
 
@@ -183,15 +228,21 @@ def test_t1_iter_cap_layers_blocks_depth():
     store = InMemoryGraphStore()
     gid = "g:layers"
     store.ensure(gid)
-    store.upsert_nodes(gid, [
-        Node(id="n:seed", label="seed"),
-        Node(id="n:mid", label="mid"),
-        Node(id="n:deep", label="deep"),
-    ])
-    store.upsert_edges(gid, [
-        Edge(id="e:s->m", src="n:seed", dst="n:mid", weight=1.0, rel="supports"),
-        Edge(id="e:m->d", src="n:mid", dst="n:deep", weight=1.0, rel="supports"),
-    ])
+    store.upsert_nodes(
+        gid,
+        [
+            Node(id="n:seed", label="seed"),
+            Node(id="n:mid", label="mid"),
+            Node(id="n:deep", label="deep"),
+        ],
+    )
+    store.upsert_edges(
+        gid,
+        [
+            Edge(id="e:s->m", src="n:seed", dst="n:mid", weight=1.0, rel="supports"),
+            Edge(id="e:m->d", src="n:mid", dst="n:deep", weight=1.0, rel="supports"),
+        ],
+    )
     state = {"store": store, "active_graphs": [gid]}
     ctx = type("Ctx", (), {"cfg": cfg, "turn_id": "t", "agent_id": "A"})()
 
@@ -215,23 +266,34 @@ def test_t1_relax_cap_limits_propagations():
     store = InMemoryGraphStore()
     gid = "g:relax"
     store.ensure(gid)
-    store.upsert_nodes(gid, [
-        Node(id="n:seed", label="seed"),
-        Node(id="n:a", label="a"),
-        Node(id="n:b", label="b"),
-        Node(id="n:c", label="c"),
-    ])
-    store.upsert_edges(gid, [
-        Edge(id="e:s->a", src="n:seed", dst="n:a", weight=1.0, rel="supports"),
-        Edge(id="e:s->b", src="n:seed", dst="n:b", weight=1.0, rel="supports"),
-        Edge(id="e:s->c", src="n:seed", dst="n:c", weight=1.0, rel="supports"),
-    ])
+    store.upsert_nodes(
+        gid,
+        [
+            Node(id="n:seed", label="seed"),
+            Node(id="n:a", label="a"),
+            Node(id="n:b", label="b"),
+            Node(id="n:c", label="c"),
+        ],
+    )
+    store.upsert_edges(
+        gid,
+        [
+            Edge(id="e:s->a", src="n:seed", dst="n:a", weight=1.0, rel="supports"),
+            Edge(id="e:s->b", src="n:seed", dst="n:b", weight=1.0, rel="supports"),
+            Edge(id="e:s->c", src="n:seed", dst="n:c", weight=1.0, rel="supports"),
+        ],
+    )
     state = {"store": store, "active_graphs": [gid]}
     ctx = type("Ctx", (), {"cfg": cfg, "turn_id": "t", "agent_id": "A"})()
 
     r = t1_propagate(ctx, state, "seed")
-    emitted_neighbors = sorted([d["id"] for d in r.graph_deltas
-                                if d.get("op") == "upsert_node" and d["id"] in {"n:a", "n:b", "n:c"}])
+    emitted_neighbors = sorted(
+        [
+            d["id"]
+            for d in r.graph_deltas
+            if d.get("op") == "upsert_node" and d["id"] in {"n:a", "n:b", "n:c"}
+        ]
+    )
     # Exactly one neighbor should be emitted due to relax_cap=1
     assert len(emitted_neighbors) == 1, f"Expected 1 neighbor, got {emitted_neighbors}"
     assert r.metrics.get("propagations", 0) == 1

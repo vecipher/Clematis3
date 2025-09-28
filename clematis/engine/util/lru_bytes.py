@@ -1,5 +1,3 @@
-
-
 from __future__ import annotations
 
 from collections import deque
@@ -139,8 +137,9 @@ class LRUBytes(Generic[K, V]):
         # First, compute the resulting bytes if we keep the new/updated item.
         target_bytes = self._bytes + cost_bytes
         # Evict while exceeding entries cap or byte cap
-        while ((self.max_entries and len(self._map) > self.max_entries) or
-               (self.max_bytes and target_bytes > self.max_bytes)):
+        while (self.max_entries and len(self._map) > self.max_entries) or (
+            self.max_bytes and target_bytes > self.max_bytes
+        ):
             # Evict from LRU side
             k0 = self._q.popleft()
             # If k0 was just inserted/updated (same as key), skip and continue;

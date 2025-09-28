@@ -6,12 +6,14 @@ Parses no custom flags here; captures passthrough via REMAINDER and forwards to
 the packaged shim (`clematis.scripts.demo`). For compatibility with the repo
 layout, we set `sys.argv` and call the shim's zero‑arg `main()`.
 """
+
 from __future__ import annotations
 
 import argparse
-from ._util import add_passthrough_subparser
-from ._io import set_verbosity, eprint_once
+
 from ._exit import OK, USER_ERR
+from ._io import eprint_once, set_verbosity
+from ._util import add_passthrough_subparser
 
 _HELP = "Delegates to scripts/"
 _DESC = "Delegates to scripts/run_demo.py"
@@ -73,10 +75,12 @@ def _run(ns: argparse.Namespace) -> int:
 
     # Delegate to the packaged shim. We set sys.argv to support zero‑arg main().
     import sys as _sys
+
     _orig_argv = list(_sys.argv)
     try:
         _sys.argv = ["clematis.scripts.demo"] + rest
-        from clematis.scripts.demo import main as _main  # type: ignore
+        from clematis.scripts.demo import main as _main
+
         return _main()  # shim adapts to run_demo main()
     finally:
         _sys.argv = _orig_argv
@@ -85,6 +89,7 @@ def _run(ns: argparse.Namespace) -> int:
 if __name__ == "__main__":  # pragma: no cover
     # Allow direct execution for convenience
     import sys
+
     _dummy = type("_", (), {})()
     setattr(_dummy, "args", sys.argv[1:])
     raise SystemExit(_run(_dummy))

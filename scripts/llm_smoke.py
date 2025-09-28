@@ -9,9 +9,11 @@ Requirements (local only; NOT for CI):
 Usage:
   python scripts/llm_smoke.py
 """
+
 import json
 import sys
 import os
+
 # Ensure repo root is importable when running as a script from ./scripts
 ROOT = os.path.dirname(os.path.dirname(__file__))
 if ROOT not in sys.path:

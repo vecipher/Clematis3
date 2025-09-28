@@ -1,16 +1,14 @@
-
-
 from __future__ import annotations
 
 import argparse
-from typing import Any
 
 __all__ = ["add_passthrough_subparser"]
 
+
 def add_passthrough_subparser(
-    subparsers: argparse._SubParsersAction, 
-    name: str, 
-    help_text: str, 
+    subparsers: argparse._SubParsersAction,
+    name: str,
+    help_text: str,
     description: str,
 ) -> argparse.ArgumentParser:
     """

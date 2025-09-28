@@ -11,20 +11,31 @@ t4_filter = t4.t4_filter
 # Helpers (duck-typed, no deps)
 # --------------------------
 
+
 class _Ctx:
     def __init__(self, cfg):
         # Most engines expect ctx.config or similar; expose both to be safe.
         self.config = cfg
         self.cfg = cfg
 
+
 class _State:
     pass
 
+
 class _Op:
     __slots__ = ("target_kind", "target_id", "attr", "delta", "kind", "op_idx", "idx")
-    def __init__(self, target_id: str, delta: float, kind: str = "EditGraph",
-                 target_kind: str = "Node", attr: str = "weight",
-                 op_idx: int | None = None, idx: int | None = None):
+
+    def __init__(
+        self,
+        target_id: str,
+        delta: float,
+        kind: str = "EditGraph",
+        target_kind: str = "Node",
+        attr: str = "weight",
+        op_idx: int | None = None,
+        idx: int | None = None,
+    ):
         self.target_kind = target_kind
         self.target_id = target_id
         self.attr = attr
@@ -32,6 +43,7 @@ class _Op:
         self.kind = kind
         self.op_idx = op_idx
         self.idx = idx
+
 
 def _mk_cfg(
     l2=1.5,
@@ -50,9 +62,15 @@ def _mk_cfg(
             "weight_min": -1.0,
             "weight_max": 1.0,
             # cache settings irrelevant for T4 purity checks
-            "cache": {"enabled": True, "namespaces": ["t2:semantic"], "max_entries": 512, "ttl_sec": 600},
+            "cache": {
+                "enabled": True,
+                "namespaces": ["t2:semantic"],
+                "max_entries": 512,
+                "ttl_sec": 600,
+            },
         }
     }
+
 
 def _mag(x):
     # Try common shapes used for "delta magnitude"
@@ -64,6 +82,7 @@ def _mag(x):
             if isinstance(v, (int, float)):
                 return float(v)
     return 0.0
+
 
 def _target_id(x):
     for k in ("target_id", "node", "id", "src"):
@@ -77,6 +96,7 @@ def _target_id(x):
     # Fallback: stable repr
     return repr(x)
 
+
 def _approved_list(res):
     # T4Result.approved_deltas is expected; fall back to .approved if present.
     if hasattr(res, "approved_deltas"):
@@ -86,10 +106,12 @@ def _approved_list(res):
     # Last ditch: look in metrics
     return list((getattr(res, "metrics", {}) or {}).get("approved_deltas", []))
 
+
 def _reasons_list(res):
     if hasattr(res, "reasons"):
         return list(getattr(res, "reasons") or [])
     return list((getattr(res, "metrics", {}) or {}).get("reasons", []))
+
 
 def _serialize_result(res):
     """Make a deterministic, JSON-serializable view of the result for idempotence checks."""
@@ -119,12 +141,15 @@ def _serialize_result(res):
         "approved_len": len(approved),
     }
 
+
 def _l2_norm(vals):
     return math.sqrt(sum((float(v) ** 2) for v in vals))
+
 
 # --------------------------
 # Synthetic input generator
 # --------------------------
+
 
 def _synth_ops(N, rng):
     """Produce a list of synthetic deltas shaped like the engine expects (attribute-based)."""
@@ -137,23 +162,26 @@ def _synth_ops(N, rng):
         ops.append(_Op(target_id=tgt, delta=amt, op_idx=i, idx=i))
     return ops
 
+
 def _mk_inputs(N, seed=1337):
     rng = random.Random(seed)
     ops = _synth_ops(N, rng)
     # Construct a minimal "plan" that carries proposed deltas in a discoverable field name.
     plan = {
-        "proposed_deltas": ops,        # common name
-        "ops": ops,                    # alternate
-        "deltas": ops,                 # alternate
+        "proposed_deltas": ops,  # common name
+        "ops": ops,  # alternate
+        "deltas": ops,  # alternate
     }
     utter = {}
     t1 = {}
     t2 = {}
     return t1, t2, plan, utter
 
+
 # --------------------------
 # Tests
 # --------------------------
+
 
 @pytest.mark.parametrize("N", [0, 1, 2, 8, 64, 256, 1024])
 def test_t4_fuzz_invariants_basic(N):
@@ -187,6 +215,7 @@ def test_t4_fuzz_invariants_basic(N):
     snap2 = _serialize_result(res2)
     assert snap1 == snap2
 
+
 def test_t4_deterministic_tie_break_and_purity():
     """
     Feed a crafted set with equal magnitudes to exercise tie-break stability.
@@ -210,6 +239,7 @@ def test_t4_deterministic_tie_break_and_purity():
     res_b = t4_filter(ctx, state, t1, t2, plan, utter)
 
     assert _serialize_result(res_a) == _serialize_result(res_b)
+
 
 def test_t4_records_reasons_when_blocking():
     """

@@ -1,5 +1,3 @@
-
-
 import pytest
 
 from clematis.engine.gel import (
@@ -12,12 +10,19 @@ from clematis.engine.gel import (
 # Helpers
 # ------------------------------
 
+
 class _State:
     def __init__(self, edges=None, nodes=None):
         self.graph = {
             "nodes": dict(nodes or {}),
             "edges": dict(edges or {}),
-            "meta": {"schema": "v1.1", "merges": [], "splits": [], "promotions": [], "concept_nodes_count": 0},
+            "meta": {
+                "schema": "v1.1",
+                "merges": [],
+                "splits": [],
+                "promotions": [],
+                "concept_nodes_count": 0,
+            },
         }
 
 
@@ -60,6 +65,7 @@ def _edge_key_in_map(edges, u, v):
 # Tests
 # ------------------------------
 
+
 def test_promote_clusters_lexmin_and_order():
     ctx = _ctx_promotion(label_mode="lexmin")
     state = _State()
@@ -90,7 +96,7 @@ def test_promote_clusters_concat_k_labels():
     assert len(promos) == 1
     p = promos[0]
     assert p["concept_id"] == "c::a"  # lexmin determines id
-    assert p["label"] == "a+b"        # top-2 joined by '+'
+    assert p["label"] == "a+b"  # top-2 joined by '+'
 
 
 def test_apply_promotion_attaches_edges_and_counts():
@@ -134,7 +140,9 @@ def test_attach_weight_is_clamped_to_bounds():
     assert p["attach_weight"] == 1.0
 
     apply_promotion(ctx, state, p)
-    k = _edge_key_in_map(state.graph["edges"], p["concept_id"], "x") or _edge_key_in_map(state.graph["edges"], p["concept_id"], "y")
+    k = _edge_key_in_map(state.graph["edges"], p["concept_id"], "x") or _edge_key_in_map(
+        state.graph["edges"], p["concept_id"], "y"
+    )
     assert k is not None
     assert abs(float(state.graph["edges"][k]["weight"]) - 1.0) < 1e-9
 

@@ -1,5 +1,3 @@
-
-
 # Clematis3 — M5 Scheduler Config validation tests (PR25)
 
 import pytest
@@ -50,7 +48,9 @@ def test_quantum_and_wall_bounds():
     # quantum_ms must be >= 1
     _expect_error({"scheduler": {"quantum_ms": 0}}, "scheduler.quantum_ms")
     # wall_ms must be >= quantum_ms
-    _expect_error({"scheduler": {"quantum_ms": 20, "budgets": {"wall_ms": 10}}}, "scheduler.budgets.wall_ms")
+    _expect_error(
+        {"scheduler": {"quantum_ms": 20, "budgets": {"wall_ms": 10}}}, "scheduler.budgets.wall_ms"
+    )
 
 
 @pytest.mark.parametrize("budget_key", ["t1_pops", "t1_iters", "t2_k", "t3_ops"])
@@ -63,7 +63,10 @@ def test_wall_ms_must_be_int_ge_1_if_present():
 
 
 def test_fairness_bounds():
-    _expect_error({"scheduler": {"fairness": {"max_consecutive_turns": 0}}}, "scheduler.fairness.max_consecutive_turns")
+    _expect_error(
+        {"scheduler": {"fairness": {"max_consecutive_turns": 0}}},
+        "scheduler.fairness.max_consecutive_turns",
+    )
     _expect_error({"scheduler": {"fairness": {"aging_ms": -1}}}, "scheduler.fairness.aging_ms")
 
 

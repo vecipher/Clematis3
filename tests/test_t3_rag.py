@@ -1,5 +1,3 @@
-
-
 import pytest
 from dataclasses import asdict
 from datetime import datetime, timezone
@@ -21,20 +19,47 @@ def _bundle(s_max=0.2, labels=None, ops_cap=3, tokens=256, owner_scope="any"):
         "now": now,
         "agent": {"id": "agentA", "style_prefix": "", "caps": {"tokens": tokens, "ops": ops_cap}},
         "world": {"hot_labels": [], "k": 0},
-        "t1": {"touched_nodes": nodes, "metrics": {"pops": 0, "iters": 0, "propagations": 0, "radius_cap_hits": 0, "layer_cap_hits": 0, "node_budget_hits": 0}},
-        "t2": {"retrieved": [], "metrics": {"tier_sequence": [], "k_returned": 0, "sim_stats": {"mean": s_max/2, "max": s_max}, "cache_used": False}},
+        "t1": {
+            "touched_nodes": nodes,
+            "metrics": {
+                "pops": 0,
+                "iters": 0,
+                "propagations": 0,
+                "radius_cap_hits": 0,
+                "layer_cap_hits": 0,
+                "node_budget_hits": 0,
+            },
+        },
+        "t2": {
+            "retrieved": [],
+            "metrics": {
+                "tier_sequence": [],
+                "k_returned": 0,
+                "sim_stats": {"mean": s_max / 2, "max": s_max},
+                "cache_used": False,
+            },
+        },
         "text": {"input": "hello world", "labels_from_t1": labels},
-        "cfg": {"t3": {"max_rag_loops": 1, "tokens": tokens, "temp": 0.7,
-                          "policy": {"tau_high": 0.8, "tau_low": 0.4, "epsilon_edit": 0.10}},
-                 "t2": {"owner_scope": owner_scope, "k_retrieval": 6, "sim_threshold": 0.3}},
+        "cfg": {
+            "t3": {
+                "max_rag_loops": 1,
+                "tokens": tokens,
+                "temp": 0.7,
+                "policy": {"tau_high": 0.8, "tau_low": 0.4, "epsilon_edit": 0.10},
+            },
+            "t2": {"owner_scope": owner_scope, "k_retrieval": 6, "sim_threshold": 0.3},
+        },
     }
 
 
 def _plan_with_rr(intent="question", owner="any", k=3, tier_pref="cluster_semantic"):
     # Minimal plan dict form is acceptable; Plan requires version/ops fields. Use dataclass API.
     from clematis.engine.types import SpeakOp, RequestRetrieveOp
+
     speak = SpeakOp(kind="Speak", intent=intent, topic_labels=["alpha", "beta"], max_tokens=256)
-    rr = RequestRetrieveOp(kind="RequestRetrieve", query="hello world", owner=owner, k=k, tier_pref=tier_pref, hints={})
+    rr = RequestRetrieveOp(
+        kind="RequestRetrieve", query="hello world", owner=owner, k=k, tier_pref=tier_pref, hints={}
+    )
     return Plan(version="t3-plan-v1", reflection=False, ops=[speak, rr], request_retrieve=None)
 
 
@@ -62,7 +87,12 @@ def test_refinement_improves_intent_and_keeps_ops_capped():
         seen.update(payload)
         return {
             "retrieved": [
-                {"id": "x2", "score": 0.85, "owner": payload.get("owner", "any"), "quarter": "2025Q3"},
+                {
+                    "id": "x2",
+                    "score": 0.85,
+                    "owner": payload.get("owner", "any"),
+                    "quarter": "2025Q3",
+                },
                 {"id": "x1", "score": 0.70},
             ],
             "metrics": {"k_returned": 2},
@@ -70,7 +100,9 @@ def test_refinement_improves_intent_and_keeps_ops_capped():
 
     p2, m = rag_once(b, p, fake_retrieve, already_used=False)
     # Speak intent should flip to summary (>= tau_high)
-    speak_intents = [getattr(op, "intent", None) for op in p2.ops if getattr(op, "kind", None) == "Speak"]
+    speak_intents = [
+        getattr(op, "intent", None) for op in p2.ops if getattr(op, "kind", None) == "Speak"
+    ]
     assert speak_intents and speak_intents[0] == "summary"
     # Ops should not exceed cap
     assert len(p2.ops) <= b["agent"]["caps"]["ops"]
@@ -94,7 +126,9 @@ def test_no_improvement_intent_stays_question():
         return {"retrieved": [{"id": "x", "score": 0.25}]}
 
     p2, m = rag_once(b, p, fake_retrieve)
-    speak_intents = [getattr(op, "intent", None) for op in p2.ops if getattr(op, "kind", None) == "Speak"]
+    speak_intents = [
+        getattr(op, "intent", None) for op in p2.ops if getattr(op, "kind", None) == "Speak"
+    ]
     assert speak_intents[0] == "question"
     assert m["post_s_max"] == pytest.approx(0.25)
 
@@ -130,6 +164,7 @@ def test_determinism_same_inputs_same_outputs():
 def test_noop_when_no_rr_in_plan():
     # Plan without RequestRetrieve should be returned unchanged
     from clematis.engine.types import SpeakOp
+
     b = _bundle(s_max=0.2)
     speak = SpeakOp(kind="Speak", intent="question", topic_labels=["alpha"], max_tokens=256)
     plan = Plan(version="t3-plan-v1", reflection=False, ops=[speak], request_retrieve=None)
