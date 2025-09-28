@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
 Name: clematis
-Version: 0.8.0a1
+Version: 0.8.0a4
 Summary: Clematis — deterministic mind-like simulation engine (M1–M8 baseline)
 Author: vecipher
 License-Expression: MIT
@@ -10,8 +10,9 @@ Project-URL: Issues, https://github.com/vecipher/Clematis3/issues
 Classifier: Programming Language :: Python :: 3 :: Only
 Classifier: Programming Language :: Python :: 3.11
 Classifier: Programming Language :: Python :: 3.12
+Classifier: Programming Language :: Python :: 3.13
 Classifier: Operating System :: OS Independent
-Requires-Python: <3.13,>=3.11
+Requires-Python: <3.14,>=3.11
 Description-Content-Type: text/markdown
 License-File: LICENSE
 Requires-Dist: pyyaml>=6.0.1
