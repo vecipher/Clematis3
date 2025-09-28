@@ -18,6 +18,11 @@ jobs:
       fail-fast: false
       matrix:
         python-version: [ "3.12" ]
+    env:
+      LC_ALL: C
+      PYTHONUTF8: "1"
+      COLUMNS: "80"
+      PYTHONHASHSEED: "0"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -37,9 +42,12 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install -U pip
-          if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-          pip install -e .
+          if [ -f requirements-dev.txt ]; then python -m pip install -r requirements-dev.txt; fi
+          if [ -f requirements.txt ]; then python -m pip install -r requirements.txt; fi
+          # Ensure test extras (shtab for completions goldens) are available; fall back gracefully
+          python -m pip install -e ".[dev,test]" || \
+          python -m pip install -e ".[test]" || \
+          python -m pip install -e .
           # Ensure pytest is present even if not listed
           python - <<'PY'
           import pkgutil, subprocess, sys

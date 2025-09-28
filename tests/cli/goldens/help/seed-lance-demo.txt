@@ -1,0 +1,14 @@
+usage: clematis seed-lance-demo [-h] [--json | --table] [--quiet] [--verbose]
+  ...
+
+Delegates to scripts/seed_lance_demo.py
+
+positional arguments:
+  args Pass-through arguments for scripts/seed_lance_demo.py.
+
+options:
+  -h, --help show this help message and exit
+  --json JSON output (stable, machine-readable) (default: False)
+  --table Plain table output (no color) (default: False)
+  --quiet suppress non-essential stderr (default: False)
+  --verbose increase stderr verbosity (default: False)

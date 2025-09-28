@@ -1,0 +1,14 @@
+usage: clematis inspect-snapshot [-h] [--json | --table] [--quiet] [--verbose]
+  ...
+
+Delegates to scripts/inspect_snapshot.py
+
+positional arguments:
+  args Pass-through arguments for scripts/inspect_snapshot.py.
+
+options:
+  -h, --help show this help message and exit
+  --json JSON output (stable, machine-readable)
+  --table Plain table output (no color)
+  --quiet suppress non-essential stderr
+  --verbose increase stderr verbosity
