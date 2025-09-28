@@ -1,0 +1,140 @@
+name: OCI (GHCR) publish
+
+on:
+  push:
+    branches: ['**']
+    tags: ['v*']
+  pull_request: {}
+  release:
+    types: [ published ]
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+
+jobs:
+  oci:
+    name: "Publish OCI image to GHCR"
+    if: ${{ startsWith(github.ref, 'refs/tags/') || github.event_name == 'release' }}
+    runs-on: ubuntu-latest
+    concurrency:
+      group: oci-publish-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract tag/version/image
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME:-${{ github.event.release.tag_name || '' }}}"
+          if [ -z "$TAG" ]; then
+            echo "Tag not found in context" >&2
+            exit 1
+          fi
+          VERSION="${TAG#v}"
+          OWNER_LC="$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')"
+          IMAGE="ghcr.io/${OWNER_LC}/clematis"
+          {
+            echo "tag=$TAG"
+            echo "version=$VERSION"
+            echo "image=$IMAGE"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Determine Dockerfile path
+        id: dfpath
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -f Dockerfile ]; then
+            echo "df=./Dockerfile" >> "$GITHUB_OUTPUT"
+            echo "Using Dockerfile path: ./Dockerfile"
+          elif [ -f dockerfile ]; then
+            echo "df=./dockerfile" >> "$GITHUB_OUTPUT"
+            echo "Using Dockerfile path: ./dockerfile"
+          else
+            echo "No Dockerfile or dockerfile found in workspace:" >&2
+            ls -la
+            exit 1
+          fi
+      - name: Build & push (multi-arch)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ steps.dfpath.outputs.df }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          tags: |
+            ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.tag }}
+            ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.version }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ steps.meta.outputs.version }}
+
+      - name: Smoke (offline) --version
+        run: |
+          docker run --rm --network=none \
+            ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.tag }} --version
+
+      - name: Smoke (offline) validate --json
+        run: |
+          docker run --rm --network=none \
+            ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.tag }} validate --json
+
+  oci-dry-build:
+    name: "OCI dry build (no push) on branch/PR"
+    if: ${{ github.event_name != 'release' && !startsWith(github.ref, 'refs/tags/') }}
+    runs-on: ubuntu-latest
+    concurrency:
+      group: oci-dry-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Determine Dockerfile path
+        id: dfpath
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -f Dockerfile ]; then
+            echo "df=./Dockerfile" >> "$GITHUB_OUTPUT"
+            echo "Using Dockerfile path: ./Dockerfile"
+          elif [ -f dockerfile ]; then
+            echo "df=./dockerfile" >> "$GITHUB_OUTPUT"
+            echo "Using Dockerfile path: ./dockerfile"
+          else
+            echo "No Dockerfile or dockerfile found in workspace:" >&2
+            ls -la
+            exit 1
+          fi
+
+      - name: Dry build (no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ steps.dfpath.outputs.df }}
+          platforms: linux/amd64
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
