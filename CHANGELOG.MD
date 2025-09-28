@@ -3,6 +3,47 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added (PR57 — OCI image to GHCR, offline-by-default)
+- **Container:** Multi-stage image; non-root `appuser` (UID 10001); `ENTRYPOINT ["clematis"]`.
+- **Offline default:** `ENV CLEMATIS_NETWORK_BAN=1`; verified with `--network=none` for `--version` and `validate --json`.
+- **Configs baked:** `COPY configs ./configs` + `ENV PYTHONPATH=/app:$PYTHONPATH` to satisfy `import configs.*` during runs.
+- **Slim context:** `.dockerignore` prunes build context; keeps `configs/`.
+- **Caching:** Buildx cache-to/from GHA; BuildKit pip cache mount in builder.
+
+### CI (PR57)
+- **`oci_publish.yml`:**
+  - Triggers on branch pushes, PRs, and `v*` tags.
+  - Added **OCI dry build** (branch/PR, build-only, amd64) to catch Dockerfile breakage early.
+  - Publish job remains tag/release-gated; multi-arch build with provenance; fixed Dockerfile-path detection (missing `fi`).
+- **Docs:** README + `docs/m8/packaging_cli.md` gained **Container usage (M8-15)** quickstart.
+- **Docs:** `git-etiquette.md` added (branch-first, required checks, no detached HEAD).
+
+### Changed (PR58 — Version metadata cleanup)
+- **Version source of truth:** `clematis/__init__.py` now resolves `__version__` via `importlib.metadata.version("clematis")`.
+  - Fallbacks: packaged `clematis/VERSION` → optional `clematis/_version.py` → `"0+unknown"`.
+  - Removes hardcoded string; wheel/sdist/container now print the installed version.
+- **Fallback VERSION:** `clematis/VERSION` bumped to `0.8.0a1` for editable/dev installs.
+
+### Packaging (PR58 — pipx & Homebrew tap) — tracks #89
+- **Homebrew tap:** Added `Formula/clematis.rb` (builds from GitHub **sdist**; uses Homebrew Python virtualenv). Test asserts `--version` and `validate --json --help`.
+- **Tap updater:** New workflow `.github/workflows/homebrew_tap.yml` updates formula `url/sha256/version` on tag/release by hashing the Release sdist and opening an automated PR.
+
+### Docs (PR58)
+- `docs/m8/packaging_cli.md`: new **Install (pipx or Homebrew Tap)** section with verify/upgrade/uninstall; container recap (offline-by-default).
+- `README.md`: Quick start now highlights **pipx**, **Homebrew (tap)**, and **Container** with a link to the full packaging doc.
+
+### CI (PR58)
+- **`pkg_build.yml`:**
+  - Triggers broadened: all branches on push; added `pull_request` and `tests/**` path filter so test-only PRs run.
+  - Job guards relaxed to run on PRs and non-tag pushes (skip tags).
+  - New **CLI smokes (pytest minimal)** job runs:
+    - `tests/cli/test_help_matrix.py::test_each_sub_help`
+    - `tests/cli/test_exit_codes.py::test_quiet_suppresses_stderr_on_wrapper_errors`
+- **Dedicated required check:** `.github/workflows/cli_smokes.yml` added with **workflow name and job name** set to `Run CLI smoke tests` to satisfy branch protection.
+
+### Known notes
+- **Manpage headers** still show `Clematis 0.8.0a0`. They will be refreshed the next time manpages are regenerated or can be bumped mechanically in a docs-only PR.
+
 ### Added (PR55 — CLI output contract & exit codes)
 - **Std flags across wrappers:** `--json` / `--table` (mutually exclusive) and `--quiet` / `--verbose` parsed by all CLI wrappers. Defaults unchanged when flags are omitted.
 - **Helpers:** `clematis/cli/_io.py` (plain ASCII `print_table`, compact `print_json`, `set_verbosity`) and `clematis/cli/_exit.py` (standard exit codes).
