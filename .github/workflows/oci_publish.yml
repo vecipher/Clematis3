@@ -64,8 +64,10 @@ jobs:
           set -euo pipefail
           if [ -f Dockerfile ]; then
             echo "df=./Dockerfile" >> "$GITHUB_OUTPUT"
+            echo "Using Dockerfile path: ./Dockerfile"
           elif [ -f dockerfile ]; then
             echo "df=./dockerfile" >> "$GITHUB_OUTPUT"
+            echo "Using Dockerfile path: ./dockerfile"
           else
             echo "No Dockerfile or dockerfile found in workspace:" >&2
             ls -la
