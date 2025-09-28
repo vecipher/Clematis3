@@ -10,9 +10,14 @@ on:
       - ".github/workflows/**"
   push:
     branches: [ main ]
+    tags:
+      - 'v*'
+  release:
+    types: [ published ]
 
 jobs:
   reproducible:
+    if: ${{ github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main') }}
     runs-on: ubuntu-latest
     env:
       # Repro knobs
@@ -113,6 +118,7 @@ jobs:
           diff -u /tmp/hashes1.txt /tmp/hashes2.txt
 
   pkg-smoke-matrix:
+    if: ${{ github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main') }}
     name: Pkg smoke (${{ matrix.os }} / py${{ matrix.python-version }})
     runs-on: ${{ matrix.os }}
     strategy:
@@ -125,7 +131,6 @@ jobs:
       PYTHONUTF8: "1"
       PYTHONHASHSEED: "0"
       CLEMATIS_NETWORK_BAN: "1"
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -246,3 +251,71 @@ jobs:
         with:
           name: wheel-${{ matrix.os }}-py${{ matrix.python-version }}
           path: dist/*.whl
+
+  tag-sbom-attest:
+    name: "Tag: build → SBOM → attest"
+    if: ${{ startsWith(github.ref, 'refs/tags/') || github.event_name == 'release' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Build sdist + wheel (deterministic)
+        env:
+          SOURCE_DATE_EPOCH: "1704067200"
+        run: |
+          python -m pip install --upgrade pip build twine
+          python -m build
+          python -m twine check dist/*
+
+      - name: Generate CycloneDX SBOM (from clean venv)
+        run: |
+          python -m venv .sbom
+          . .sbom/bin/activate
+          python -m pip install --upgrade pip
+          python -m pip install 'cyclonedx-bom>=4,<5'
+          python -m pip install "dist/"*.whl[cli-demo] || python -m pip install dist/*.whl
+          python -m cyclonedx_py environment \
+            --output-format JSON \
+            --schema-version 1.5 \
+            --outfile dist/sbom.cdx.json
+          deactivate
+
+      - name: Verify SBOM is valid JSON
+        run: |
+          python - <<'PY'
+          import json, sys
+          json.load(open('dist/sbom.cdx.json'))
+          print("SBOM JSON OK")
+          PY
+
+      - name: Upload SBOM as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-cyclonedx
+          path: dist/sbom.cdx.json
+          if-no-files-found: error
+
+      - name: Attest provenance (wheel + sdist)
+        uses: actions/attest-build-provenance@v3
+        with:
+          subject-path: |
+            dist/*.whl
+            dist/*.tar.gz
+
+      - name: Attach SBOM to Release
+        if: ${{ github.event_name == 'release' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${{ github.event.release.tag_name }}" dist/sbom.cdx.json --clobber

@@ -23,8 +23,12 @@ All notable changes to this project will be documented in this file.
   - `python -m clematis demo -- --steps 1 --json --table` must exit **1**.
   - `python -m clematis rotate-logs -- --dry-run --json` and `--table` must succeed.
 
+
 ### Docs (PR55)
 - `docs/m8/packaging_cli.md` updated with: structured output quickstart; support matrix; exit‑code table; `--quiet/--verbose` semantics. Defaults and human output remain unchanged when no format flag is provided.
+
+### Docs (PR56 — Supply chain: SBOM & provenance)
+- Added **Supply chain** section in [`docs/m8/packaging_cli.md`](docs/m8/packaging_cli.md#supply-chain-sbom--provenance-m8-14): how SBOMs are generated on tag builds, how SLSA attestations are created, and how to verify them with `gh attestation` (online/offline) and `jq` sanity checks.
 
 ### Added (PR52 — Cross-platform packaging smoke)
 - **CI:** Cross-platform matrix over Linux (`ubuntu-latest`), macOS (`macos-latest`, arm64), and Windows (`windows-latest`) on Python 3.11 & 3.12. Builds an axis-local wheel, installs into a fresh venv, and runs offline CLI smokes with `CLEMATIS_NETWORK_BAN=1`:

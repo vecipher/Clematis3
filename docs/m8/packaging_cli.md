@@ -194,3 +194,51 @@ $VENV/share/man/man1/clematis.1
 ```
 
 Note: Windows runners don’t have `man(1)`, but pages ship inside the wheel for parity.
+
+---
+
+## Supply chain: SBOM + provenance (M8‑14)
+
+On tag builds (`push` tags matching `v*` or when a Release is published), CI produces:
+
+- **Deterministic artifacts**: sdist and wheel (respecting `SOURCE_DATE_EPOCH`).
+- **CycloneDX SBOM** at `dist/sbom.cdx.json`, generated from a clean virtualenv where the built wheel (optionally with `[cli-demo]`) is installed, using the CycloneDX Python v4 CLI:
+
+  ```bash
+  python -m cyclonedx_py environment \
+    --output-format JSON \
+    --schema-version 1.5 \
+    --outfile dist/sbom.cdx.json
+  ```
+
+- **SLSA provenance attestations** for `dist/*.whl` and `dist/*.tar.gz` via GitHub `actions/attest-build-provenance`.
+- **SBOM publication**: uploaded as a workflow artifact; when triggered by a Release, attached to the Release page.
+
+### Verify provenance
+
+With GitHub CLI (online):
+
+```bash
+gh attestation verify dist/clematis-<ver>-py3-none-any.whl -R <OWNER>/<REPO>
+```
+
+Offline flow:
+
+```bash
+gh attestation download dist/clematis-<ver>-py3-none-any.whl -R <OWNER>/<REPO> > attestation.intoto.jsonl
+gh attestation verify dist/clematis-<ver>-py3-none-any.whl -R <OWNER>/<REPO> --bundle attestation.intoto.jsonl
+```
+
+### Verify SBOM
+
+Quick sanity:
+
+```bash
+jq -e . dist/sbom.cdx.json >/dev/null
+```
+
+### Notes
+
+- CycloneDX Python v4 uses the `cyclonedx_py` module entrypoint. We invoke it with `python -m cyclonedx_py` to avoid PATH issues across runners.
+- The SBOM job runs only on tags/releases; regular PR/branch jobs remain unchanged (disabled‑path identity preserved).
+- SBOM generation installs the built wheel into a temporary venv to resolve dependencies for an **environment SBOM** (more useful than manifest-only).

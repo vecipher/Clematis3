@@ -1,6 +1,6 @@
 [project]
 name = "clematis"
-dynamic = ["version"]
+version = "0.8.0a1"
 description = "Clematis — deterministic mind-like simulation engine (M1–M8 baseline)"
 readme = "README.md"
 requires-python = ">=3.11,<3.13"
@@ -70,8 +70,6 @@ namespaces = false
 include-package-data = true
 zip-safe = false
 
-[tool.setuptools.dynamic]
-version = { file = "clematis/VERSION" }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
