@@ -12,7 +12,7 @@ class Clematis < Formula
   url "https://github.com/vecipher/Clematis3/releases/download/v0.8.0a1/clematis-0.8.0a1.tar.gz"
   sha256 "TO_BE_FILLED_BY_CI"
   license "MIT"
-  version "0.8.0a1"
+  version "0.8.0a4"
 
   livecheck do
     url :stable
