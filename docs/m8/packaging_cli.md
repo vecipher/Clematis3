@@ -83,6 +83,40 @@ python -m clematis rotate-logs     -- --dir ./my_logs  --dry-run
 
 ---
 
+## Config discovery & env (PR60)
+
+When you **do not** pass `--config` (or `-c`), Clematis selects a config file via a deterministic search order:
+
+1. `$CLEMATIS_CONFIG` — file path **or** directory containing `config.yaml`.
+2. `./configs/config.yaml` — relative to the **current working directory**.
+3. `${XDG_CONFIG_HOME:-$HOME/.config}/clematis/config.yaml`.
+
+**Rules**
+- Explicit `--config`/**`-c`** **always wins** and bypasses discovery.
+- In `--verbose` mode, the CLI prints the selected path and source (e.g., `env:CLEMATIS_CONFIG`, `cwd:configs/config.yaml`, `xdg`).
+
+**Example (implicit discovery):**
+```bash
+# Will use ./configs/config.yaml if present; otherwise falls back to XDG path
+python -m clematis validate -- --json --verbose
+```
+
+### Environment overrides (consolidated)
+The CLI and tests recognize these environment variables:
+
+| Variable                | Effect                                                                 | Notes |
+|-------------------------|-------------------------------------------------------------------------|-------|
+| `CLEMATIS_CONFIG`       | Points to a config file **or** a directory containing `config.yaml`.   | Used only when `--config` is absent. |
+| `XDG_CONFIG_HOME`       | Base for XDG lookup (`$XDG_CONFIG_HOME/clematis/config.yaml`).          | Defaults to `$HOME/.config` when unset. |
+| `CLEMATIS_DEBUG`        | `1` enables stderr breadcrumbs (wrapper debug).                         | Does not affect stdout or exit codes. |
+| `CLEMATIS_NETWORK_BAN`  | `1` forbids network usage during CLI smokes/tests.                      | Runtime ban only; install/build may still use network. |
+| `CLEMATIS_LLM_SMOKE`    | Enables lightweight LLM smoke paths where applicable.                   | Off by default; not used in basic CLI smokes. |
+| `CLEMATIS_GIT_SHA`      | Injects git SHA into trace headers/logs for determinism.               | Used in trace files and CI checks. |
+
+> Tip: prefer `--config` for reproducibility when invoking tools in scripts; discovery is for convenience.
+
+---
+
 ## Environment knobs
 - `CLEMATIS_DEBUG=1` — enable stderr breadcrumbs (does not alter stdout or exit codes).
 - `CLEMATIS_NETWORK_BAN=1` — CI/offline guard; networking is not required for the CLI smokes.

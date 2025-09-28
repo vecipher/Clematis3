@@ -1,8 +1,11 @@
 # clematis/cli/main.py
 import argparse
+import os
 import sys
+from pathlib import Path
 from typing import List
 from . import rotate_logs, inspect_snapshot, bench_t4, seed_lance_demo, validate, demo
+from ._config import discover_config_path, maybe_log_selected
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -72,6 +75,16 @@ def main(argv: List[str] | None = None) -> int:
         if sub_args and sub_args[0] == "--":
             sub_args = sub_args[1:]
         merged = pre + sub_args
+        # Inject discovered --config unless already provided
+        has_config_flag = any(tok in ("--config", "-c") for tok in merged)
+        if not has_config_flag:
+            selected, source = discover_config_path(None, Path.cwd(), os.environ)
+            # Only inject if we actually found a file
+            if selected is not None:
+                merged = ["--config", str(selected)] + merged
+            # Best-effort verbose check before the subparser parses
+            verbose_requested = "--verbose" in merged
+            maybe_log_selected(selected, source, verbose=verbose_requested)
         setattr(ns, "args", merged)
         return ns.func(ns)
 
@@ -84,6 +97,14 @@ def main(argv: List[str] | None = None) -> int:
     if sub_args and sub_args[0] == "--":
         sub_args = sub_args[1:]
     merged = list(extras) + sub_args
+    # Inject discovered --config unless already provided
+    has_config_flag = any(tok in ("--config", "-c") for tok in merged)
+    if not has_config_flag:
+        selected, source = discover_config_path(None, Path.cwd(), os.environ)
+        if selected is not None:
+            merged = ["--config", str(selected)] + merged
+        verbose_requested = "--verbose" in merged
+        maybe_log_selected(selected, source, verbose=verbose_requested)
     setattr(ns, "args", merged)
     return ns.func(ns)
 
