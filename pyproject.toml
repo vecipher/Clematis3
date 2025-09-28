@@ -4,6 +4,7 @@ version = "0.8.0a4"
 description = "Clematis — deterministic mind-like simulation engine (M1–M8 baseline)"
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
+
 license = { file = "LICENSE" }
 authors = [{ name = "vecipher" }]
 
