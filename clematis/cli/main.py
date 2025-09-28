@@ -75,16 +75,11 @@ def main(argv: List[str] | None = None) -> int:
         if sub_args and sub_args[0] == "--":
             sub_args = sub_args[1:]
         merged = pre + sub_args
-        # Inject discovered --config unless already provided
-        has_config_flag = any(tok in ("--config", "-c") for tok in merged)
-        if not has_config_flag:
-            selected, source = discover_config_path(None, Path.cwd(), os.environ)
-            # Only inject if we actually found a file
-            if selected is not None:
-                merged = ["--config", str(selected)] + merged
-            # Best-effort verbose check before the subparser parses
-            verbose_requested = "--verbose" in merged
-            maybe_log_selected(selected, source, verbose=verbose_requested)
+        # Discover config for umbrella only (do not inject into sub-argv)
+        selected, source = discover_config_path(None, Path.cwd(), os.environ)
+        if selected is not None and not getattr(ns, "config", None):
+            setattr(ns, "config", str(selected))
+        maybe_log_selected(selected, source, verbose=("--verbose" in merged))
         setattr(ns, "args", merged)
         return ns.func(ns)
 
@@ -97,14 +92,11 @@ def main(argv: List[str] | None = None) -> int:
     if sub_args and sub_args[0] == "--":
         sub_args = sub_args[1:]
     merged = list(extras) + sub_args
-    # Inject discovered --config unless already provided
-    has_config_flag = any(tok in ("--config", "-c") for tok in merged)
-    if not has_config_flag:
-        selected, source = discover_config_path(None, Path.cwd(), os.environ)
-        if selected is not None:
-            merged = ["--config", str(selected)] + merged
-        verbose_requested = "--verbose" in merged
-        maybe_log_selected(selected, source, verbose=verbose_requested)
+    # Discover config for umbrella only (do not inject into sub-argv)
+    selected, source = discover_config_path(None, Path.cwd(), os.environ)
+    if selected is not None and not getattr(ns, "config", None):
+        setattr(ns, "config", str(selected))
+    maybe_log_selected(selected, source, verbose=("--verbose" in merged))
     setattr(ns, "args", merged)
     return ns.func(ns)
 
