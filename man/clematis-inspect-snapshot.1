@@ -2,12 +2,13 @@
 .SH NAME
 clematis\-inspect\-snapshot \\\- Delegates to scripts/ for 'inspect\-snapshot'
 .SH SYNOPSIS
-usage: clematis inspect\-snapshot [\-h] ...
+usage: clematis inspect\-snapshot [\-h] [\-\-json | \-\-table] [\-\-quiet] [\-\-verbose]
 .SH DESCRIPTION
 Delegates to scripts/ for 'inspect\-snapshot'
 .SH OPTIONS
 .nf
-usage: clematis inspect\-snapshot [\-h] ...
+usage: clematis inspect\-snapshot [\-h] [\-\-json | \-\-table] [\-\-quiet] [\-\-verbose]
+                                 ...
 
 Delegates to scripts/inspect_snapshot.py
 
@@ -16,4 +17,8 @@ positional arguments:
 
 options:
   \-h, \-\-help  show this help message and exit
+  \-\-json      JSON output (stable, machine\-readable)
+  \-\-table     Plain table output (no color)
+  \-\-quiet     suppress non\-essential stderr
+  \-\-verbose   increase stderr verbosity
 .fi

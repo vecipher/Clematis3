@@ -2,12 +2,12 @@
 .SH NAME
 clematis\-rotate\-logs \\\- Delegates to scripts/ for 'rotate\-logs'
 .SH SYNOPSIS
-usage: clematis rotate\-logs [\-h] ...
+usage: clematis rotate\-logs [\-h] [\-\-json | \-\-table] [\-\-quiet] [\-\-verbose] ...
 .SH DESCRIPTION
 Delegates to scripts/ for 'rotate\-logs'
 .SH OPTIONS
 .nf
-usage: clematis rotate\-logs [\-h] ...
+usage: clematis rotate\-logs [\-h] [\-\-json | \-\-table] [\-\-quiet] [\-\-verbose] ...
 
 Delegates to scripts/rotate_logs.py
 
@@ -16,4 +16,8 @@ positional arguments:
 
 options:
   \-h, \-\-help  show this help message and exit
+  \-\-json      JSON output (stable, machine\-readable)
+  \-\-table     Plain table output (no color)
+  \-\-quiet     suppress non\-essential stderr
+  \-\-verbose   increase stderr verbosity
 .fi

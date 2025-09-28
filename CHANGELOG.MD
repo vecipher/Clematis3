@@ -3,6 +3,29 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added (PR55 — CLI output contract & exit codes)
+- **Std flags across wrappers:** `--json` / `--table` (mutually exclusive) and `--quiet` / `--verbose` parsed by all CLI wrappers. Defaults unchanged when flags are omitted.
+- **Helpers:** `clematis/cli/_io.py` (plain ASCII `print_table`, compact `print_json`, `set_verbosity`) and `clematis/cli/_exit.py` (standard exit codes).
+- **Quiet contract:** Wrapper diagnostics respect `--quiet` (stderr suppressed) and `--verbose` (extra breadcrumbs). Stdout remains machine‑readable; no color.
+- **validate:** `--json` output preserved **byte‑identical** to previous behavior (pass‑through formatting).
+- **inspect-snapshot:** supports `--json` (wrapper forces `--format json`) and `--table` (ASCII table). Non‑format default output unchanged.
+- **rotate-logs:** supports `--json` and `--table` summaries (e.g., `dir`, `pattern`, `dry_run`). Non‑format default output unchanged.
+- **Other wrappers:** parse the flags but reject structured formats for now (exit 1; message suppressed by `--quiet`).
+
+### Tests (PR55)
+- `tests/cli/test_output_contract.py` — JSON identity for `validate`; `inspect-snapshot` JSON/table paths; mutual‑exclusion guard.
+- `tests/cli/test_exit_codes.py` — standardized exit codes (0 OK, 1 user/validation, 2 I/O/parse, 3 internal) and quiet/verbose gates.
+
+### CI (PR55)
+- **pkg_build.yml:** Linux‑only CLI contract probes in the pkg‑smoke matrix:
+  - `python -m clematis validate --json` must succeed.
+  - `python -m clematis inspect-snapshot -- --dir does_not_exist_dir_12345` must exit **2**.
+  - `python -m clematis demo -- --steps 1 --json --table` must exit **1**.
+  - `python -m clematis rotate-logs -- --dry-run --json` and `--table` must succeed.
+
+### Docs (PR55)
+- `docs/m8/packaging_cli.md` updated with: structured output quickstart; support matrix; exit‑code table; `--quiet/--verbose` semantics. Defaults and human output remain unchanged when no format flag is provided.
+
 ### Added (PR52 — Cross-platform packaging smoke)
 - **CI:** Cross-platform matrix over Linux (`ubuntu-latest`), macOS (`macos-latest`, arm64), and Windows (`windows-latest`) on Python 3.11 & 3.12. Builds an axis-local wheel, installs into a fresh venv, and runs offline CLI smokes with `CLEMATIS_NETWORK_BAN=1`:
   - `python -m clematis --version`

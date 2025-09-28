@@ -2,12 +2,13 @@
 .SH NAME
 clematis\-seed\-lance\-demo \\\- Delegates to scripts/ for 'seed\-lance\-demo'
 .SH SYNOPSIS
-usage: clematis seed\-lance\-demo [\-h] ...
+usage: clematis seed\-lance\-demo [\-h] [\-\-json | \-\-table] [\-\-quiet] [\-\-verbose]
 .SH DESCRIPTION
 Delegates to scripts/ for 'seed\-lance\-demo'
 .SH OPTIONS
 .nf
-usage: clematis seed\-lance\-demo [\-h] ...
+usage: clematis seed\-lance\-demo [\-h] [\-\-json | \-\-table] [\-\-quiet] [\-\-verbose]
+                                ...
 
 Delegates to scripts/seed_lance_demo.py
 
@@ -16,4 +17,8 @@ positional arguments:
 
 options:
   \-h, \-\-help  show this help message and exit
+  \-\-json      JSON output (stable, machine\-readable) (default: False)
+  \-\-table     Plain table output (no color) (default: False)
+  \-\-quiet     suppress non\-essential stderr (default: False)
+  \-\-verbose   increase stderr verbosity (default: False)
 .fi

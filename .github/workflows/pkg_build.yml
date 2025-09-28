@@ -182,6 +182,40 @@ jobs:
           set -euo pipefail
           .venv/bin/python -c "import sysconfig, pathlib; d=sysconfig.get_paths()['data']; p=pathlib.Path(d)/'share'/'man'/'man1'/'clematis.1'; print('Expect manpage at:', p); assert p.exists(), f'installed manpage missing: {p}'; print('OK: installed man page present')"
 
+      - name: CLI contract probes (Linux only)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          source .venv/bin/activate
+
+          echo "validate --json (should succeed)"
+          python -m clematis validate --json > /dev/null
+
+          echo "inspect-snapshot missing dir (expect exit 2)"
+          set +e
+          python -m clematis inspect-snapshot -- --dir does_not_exist_dir_12345
+          rc=$?
+          set -e
+          if [ "$rc" -ne 2 ]; then
+            echo "Expected exit 2, got $rc" >&2
+            exit 1
+          fi
+
+          echo "demo mutual exclusion (expect exit 1)"
+          set +e
+          python -m clematis demo -- --steps 1 --json --table
+          rc=$?
+          set -e
+          if [ "$rc" -ne 1 ]; then
+            echo "Expected exit 1, got $rc" >&2
+            exit 1
+          fi
+
+          echo "rotate-logs structured summaries (both should succeed)"
+          python -m clematis rotate-logs -- --dry-run --json > /dev/null
+          python -m clematis rotate-logs -- --dry-run --table > /dev/null
+
       - name: Smoke (windows)
         if: runner.os == 'Windows'
         shell: pwsh

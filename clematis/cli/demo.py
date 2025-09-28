@@ -9,8 +9,9 @@ layout, we set `sys.argv` and call the shim's zero‑arg `main()`.
 from __future__ import annotations
 
 import argparse
-
 from ._util import add_passthrough_subparser
+from ._io import set_verbosity, eprint_once
+from ._exit import OK, USER_ERR
 
 _HELP = "Delegates to scripts/"
 _DESC = "Delegates to scripts/run_demo.py"
@@ -30,11 +31,45 @@ def register(subparsers: argparse._SubParsersAction):
 def _run(ns: argparse.Namespace) -> int:
     # REMAINDER swallows -h/--help; intercept explicitly for deterministic output
     rest = list(getattr(ns, "args", []) or [])
+    orig_rest = list(rest)
     if any(x in ("-h", "--help") for x in rest):
         print(_HELP)
-        return 0
+        return OK
     if rest and rest[0] == "--":
         rest = rest[1:]
+
+    # Configure verbosity (stderr only); stdout remains reserved for command output
+    set_verbosity(getattr(ns, "verbose", False), getattr(ns, "quiet", False))
+    quiet = bool(getattr(ns, "quiet", False) or ("--quiet" in orig_rest))
+
+    # Hoist wrapper-only flags that users might put after `--`
+    hoisted_json = False
+    hoisted_table = False
+    filtered: list[str] = []
+    for tok in rest:
+        if tok == "--json":
+            hoisted_json = True
+            continue
+        if tok == "--table":
+            hoisted_table = True
+            continue
+        if tok == "--":  # drop stray option-terminator if present mid-argv
+            continue
+        filtered.append(tok)
+    rest = filtered
+
+    # Unified wants_* across both positions (before or after `--`)
+    wants_json = bool(getattr(ns, "json", False) or hoisted_json)
+    wants_table = bool(getattr(ns, "table", False) or hoisted_table)
+
+    if wants_json and wants_table:
+        if not quiet:
+            eprint_once("Choose exactly one of --json or --table.")
+        return USER_ERR
+    if wants_json or wants_table:
+        if not quiet:
+            eprint_once("`demo` currently does not support --json/--table.")
+        return USER_ERR
 
     # Delegate to the packaged shim. We set sys.argv to support zero‑arg main().
     import sys as _sys

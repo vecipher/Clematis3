@@ -1,5 +1,3 @@
-
-
 # Packaging & CLI (Clematis v3)
 
 > Canonical doc for **post‑install** usage and CLI invariants. Zero behavior change. If you need wrapper internals, see **`docs/m8/cli.md`**.
@@ -16,6 +14,22 @@ python -m clematis demo -- --steps 1
 python -m clematis inspect-snapshot -- --format json
 python -m clematis rotate-logs -- --dry-run
 ```
+
+### Structured output (PR55)
+
+Optional flags for machine‑friendly output:
+
+```bash
+# Inspector (JSON or TABLE)
+python -m clematis inspect-snapshot --json
+python -m clematis inspect-snapshot -- --table | head
+
+# Rotate-logs summaries (JSON or TABLE)
+python -m clematis rotate-logs -- --dry-run --json
+python -m clematis rotate-logs -- --dry-run --table
+```
+
+Notes: flags are mutually exclusive (`--json` XOR `--table`). Defaults remain unchanged when you omit them.
 
 **Note:** If `demo` or `validate` complain about missing NumPy/PyYAML on a base install, add the minimal extra:
 
@@ -47,6 +61,7 @@ Wrappers locate these via `importlib.resources`. See implementation helpers:
 - **Help phrase is stable**: wrapper `--help` includes **“Delegates to scripts/…”** (non‑semantic breadcrumb).
 - **Breadcrumbs to stderr** only: enabled by `--debug` or `CLEMATIS_DEBUG=1`; stdout remains clean.
 - **No behavior change** vs PR47: exit codes and stdout are unchanged.
+- **Mutually exclusive formats**: `--json` and `--table` cannot be combined; choosing both exits with code 1 and prints a short reason (suppressed by `--quiet`).
 
 ---
 
@@ -71,13 +86,41 @@ python -m clematis rotate-logs     -- --dir ./my_logs  --dry-run
 ## Environment knobs
 - `CLEMATIS_DEBUG=1` — enable stderr breadcrumbs (does not alter stdout or exit codes).
 - `CLEMATIS_NETWORK_BAN=1` — CI/offline guard; networking is not required for the CLI smokes.
+- `--quiet` — suppress wrapper diagnostics on stderr (structured outputs remain on stdout).
+- `--verbose` — increase wrapper breadcrumbs on stderr; does not alter stdout.
 
 ---
 
-## Exit codes & I/O expectations
-- Successful demo runs exit **0**.
-- Wrapper help prints to **stdout**; debug breadcrumbs (when enabled) print to **stderr**.
-- The demos’ outputs are deterministic; expect stable field sets (subject to documented schema fields in the inspector output).
+## Exit codes & I/O expectations (PR55)
+
+Exit codes are standardized across wrappers:
+
+| Code | Meaning                                   | Typical causes                                 |
+|-----:|-------------------------------------------|------------------------------------------------|
+| 0    | OK                                        | Happy path                                     |
+| 1    | User/validation error                     | Bad flags (e.g., `--json --table`), misuse     |
+| 2    | I/O or parse error                        | Missing/invalid `--dir`, file parse errors     |
+| 3    | Internal error                            | Unexpected exception                            |
+
+I/O rules:
+- Wrapper help prints to **stdout**; diagnostics print to **stderr**.
+- `--quiet` suppresses non‑essential wrapper diagnostics on **stderr**; exit codes are unchanged.
+- `--verbose` increases stderr breadcrumbs only (no color). Stdout stays clean/machine‑readable.
+
+---
+
+## Structured output support matrix
+
+| Command             | `--json`                         | `--table`           | Notes |
+|---------------------|----------------------------------|---------------------|-------|
+| `validate`          | ✓ (pass‑through; format unchanged) | ✗                   | Output is preserved verbatim for compatibility; may not be strict JSON. |
+| `inspect-snapshot`  | ✓ (JSON; wrapper forces `--format json`) | ✓ (ASCII table)     | Defaults inject packaged demo dir if `--dir` not provided. |
+| `rotate-logs`       | ✓ (summary JSON)                 | ✓ (ASCII table)     | Summaries include fields like `dry_run`, `dir`, `pattern`. |
+| `demo`              | ✗                                | ✗                   | Flags parsed but currently rejected (exit 1). |
+| `bench-t4`          | ✗                                | ✗                   | Flags parsed but currently rejected (exit 1). |
+| `seed-lance-demo`   | ✗                                | ✗                   | Flags parsed but currently rejected (exit 1). |
+
+**Formatting:** Tables are plain ASCII (no color). JSON uses compact separators. When no format flag is provided, the human‑readable defaults are unchanged.
 
 ---
 
