@@ -14,7 +14,7 @@ class Clematis < Formula
   license "MIT"
   version "0.8.0a4"
 
-  depends_on "python@3.11"
+  depends_on "python@3.13"
 
   def install
     virtualenv_install_with_resources
