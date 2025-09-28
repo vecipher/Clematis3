@@ -57,11 +57,24 @@ jobs:
             echo "image=$IMAGE"
           } >> "$GITHUB_OUTPUT"
 
+      - name: Determine Dockerfile path
+        id: dfpath
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -f Dockerfile ]; then
+            echo "df=./Dockerfile" >> "$GITHUB_OUTPUT"
+          elif [ -f dockerfile ]; then
+            echo "df=./dockerfile" >> "$GITHUB_OUTPUT"
+          else
+            echo "No Dockerfile or dockerfile found in workspace:" >&2
+            ls -la
+            exit 1
       - name: Build & push (multi-arch)
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: ./dockerfile
+          file: ${{ steps.dfpath.outputs.df }}
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
