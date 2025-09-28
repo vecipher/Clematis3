@@ -1,0 +1,24 @@
+.TH clematis-inspect-snapshot 1 "2024-01-01" "Clematis 0.8.0a4" "User Commands"
+.SH NAME
+clematis\-inspect\-snapshot \\\- Delegates to scripts/ for 'inspect\-snapshot'
+.SH SYNOPSIS
+usage: clematis inspect\-snapshot [\-h] [\-\-json | \-\-table] [\-\-quiet] [\-\-verbose]
+.SH DESCRIPTION
+Delegates to scripts/ for 'inspect\-snapshot'
+.SH OPTIONS
+.nf
+usage: clematis inspect\-snapshot [\-h] [\-\-json | \-\-table] [\-\-quiet] [\-\-verbose]
+                                 ...
+
+Delegates to scripts/inspect_snapshot.py
+
+positional arguments:
+  args        Pass\-through arguments for scripts/inspect_snapshot.py.
+
+options:
+  \-h, \-\-help  show this help message and exit
+  \-\-json      JSON output (stable, machine\-readable)
+  \-\-table     Plain table output (no color)
+  \-\-quiet     suppress non\-essential stderr
+  \-\-verbose   increase stderr verbosity
+.fi
