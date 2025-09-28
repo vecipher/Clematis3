@@ -1,0 +1,13 @@
+usage: clematis rotate-logs [-h] [--json | --table] [--quiet] [--verbose] ...
+
+Delegates to scripts/rotate_logs.py
+
+positional arguments:
+  args
+
+options:
+  -h, --help show this help message and exit
+  --json JSON output (stable, machine-readable)
+  --table Plain table output (no color)
+  --quiet suppress non-essential stderr
+  --verbose increase stderr verbosity

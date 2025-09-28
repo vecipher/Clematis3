@@ -1,0 +1,18 @@
+usage: clematis [-h] [--version]
+  {rotate-logs,inspect-snapshot,bench-t4,seed-lance-demo,validate,demo}
+  ...
+
+Clematis umbrella CLI
+
+positional arguments:
+  {rotate-logs,inspect-snapshot,bench-t4,seed-lance-demo,validate,demo}
+  rotate-logs Delegates to scripts/rotate_logs.py
+  inspect-snapshot Delegates to scripts/inspect_snapshot.py
+  bench-t4 Delegates to scripts/bench_t4.py
+  seed-lance-demo Delegates to scripts/seed_lance_demo.py
+  validate Delegates to scripts/
+  demo Delegates to scripts/
+
+options:
+  -h, --help show this help message and exit
+  --version show program's version number and exit
