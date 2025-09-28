@@ -23,22 +23,52 @@ Clematis is a deterministic, turn‑based scaffold for agential AI. It models ag
 - **Determinism:** golden logs, identity path when gates are OFF; shadow/quality traces never affect results.
 
 ## Quick start
+
+### Install
+
+**pipx (recommended)**
+
 ```bash
-# install (editable)
+pipx install clematis
+clematis --version
+```
+
+**Homebrew (tap)**
+
+```bash
+brew tap vecipher/Clematis3
+brew install vecipher/Clematis3/clematis
+clematis --version
+```
+
+**Container (GHCR, offline by default)**
+
+```bash
+docker run --rm --network=none ghcr.io/vecipher/clematis:latest --version
+docker run --rm --network=none ghcr.io/vecipher/clematis:latest validate --json
+```
+
+**Editable install (for contributors)**
+
+```bash
 python -m pip install -e .
-
-# check umbrella CLI is wired
 python -m clematis --version
+```
 
-# try a wrapper (both orders work; single leading -- is stripped by the wrapper)
+> Runtime is offline-by-default in CI and in the container (`CLEMATIS_NETWORK_BAN=1`).
+
+### Try the CLI
+
+```bash
+# rotate-logs wrapper (both orders work; single leading -- is stripped by the wrapper)
 python -m clematis rotate-logs -- --dir ./.logs --dry-run
 # or
 python -m clematis --dir ./.logs rotate-logs -- --dry-run
-
-# For bench-t4 and seed-lance-demo, install extras: pip install clematis[cli-extras].
 ```
 
-CLI details, delegation rules, and recipes live in **[docs/m8/cli.md](docs/m8/cli.md)**.
+For `bench-t4` and `seed-lance-demo`, install extras: `pip install "clematis[cli-extras]"`.
+
+CLI details, delegation rules, and recipes live in **[docs/m8/cli.md](docs/m8/cli.md)**. See install variants and container usage in **[docs/m8/packaging_cli.md](docs/m8/packaging_cli.md)**.
 
 ## Repository layout (brief)
 - `clematis/engine/` — core stages (T1–T4), scheduler stubs, persistence, logs.

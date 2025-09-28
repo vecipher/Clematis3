@@ -4,6 +4,61 @@
 
 ---
 
+## Install (pipx or Homebrew Tap)
+
+### Option A — pipx (recommended for individuals)
+
+`pipx` installs Clematis in an isolated venv and exposes the `clematis` command on your PATH.
+
+```bash
+# macOS (Homebrew) or use the pip bootstrap
+brew install pipx || python3 -m pip install --user pipx && python3 -m pipx ensurepath
+
+# From PyPI (when published)
+pipx install clematis
+
+# Or from a GitHub Release wheel (replace version)
+VER="0.8.0a1"
+pipx install "https://github.com/vecipher/Clematis3/releases/download/v${VER}/clematis-${VER}-py3-none-any.whl"
+```
+
+Verify / manage:
+
+```bash
+clematis --version
+pipx upgrade clematis
+pipx uninstall clematis
+```
+
+> Runtime is offline-by-default (`CLEMATIS_NETWORK_BAN=1`).
+
+### Option B — Homebrew Tap (macOS/Linux)
+
+```bash
+brew tap vecipher/Clematis3
+brew install vecipher/Clematis3/clematis
+```
+
+Notes:
+- The tap builds from the GitHub Release **sdist** and uses Homebrew’s Python virtualenv helper.
+- On tag publication, CI updates the Formula (`Formula/clematis.rb`) with URL/SHA.
+
+Upgrade / uninstall:
+
+```bash
+brew upgrade clematis
+brew uninstall clematis
+```
+
+### Container (GHCR, offline by default)
+
+```bash
+docker run --rm --network=none ghcr.io/vecipher/clematis:latest --version
+docker run --rm --network=none ghcr.io/vecipher/clematis:latest validate --json
+```
+
+---
+
 ## Quickstart (post‑install)
 These work after installing the wheel (no repo checkout):
 
