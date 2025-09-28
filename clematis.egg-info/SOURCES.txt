@@ -18,6 +18,8 @@ clematis/adapters/__init__.py
 clematis/adapters/embeddings.py
 clematis/adapters/llm.py
 clematis/cli/__init__.py
+clematis/cli/_exit.py
+clematis/cli/_io.py
 clematis/cli/_resources.py
 clematis/cli/_util.py
 clematis/cli/_wrapper_common.py
