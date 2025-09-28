@@ -9,16 +9,10 @@ class Clematis < Formula
   desc "Deterministic, offline-by-default multi-agent concept-graph engine"
   homepage "https://github.com/vecipher/Clematis3"
   # CI will update url/sha256/version on tag publish
-  url "https://github.com/vecipher/Clematis3/releases/download/v0.8.0a1/clematis-0.8.0a1.tar.gz"
-  sha256 "TO_BE_FILLED_BY_CI"
+  url "https://github.com/vecipher/Clematis3/releases/download/v0.8.0a3/clematis-0.8.0a3.tar.gz"
+  sha256 "854c68150f559ebc8c043f05963fe2b92ffe92395f898ee1a5cd48efd3599cf2"
   license "MIT"
-  version "0.8.0a1"
-
-  livecheck do
-    url :stable
-    strategy :github_tags
-    regex(/^v?(\d+(?:\.\d+)+(?:[._-]?(?:a|b|rc)\d+)?)$/i)
-  end
+  version "0.8.0a3"
 
   depends_on "python@3.13"
 
