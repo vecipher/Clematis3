@@ -92,7 +92,7 @@ jobs:
       - name: Install with extras
         run: |
           python -m pip install -U pip
-          python -m pip install -e '.[zstd,lancedb]'
+          python -m pip install -e '.[dev,zstd,lancedb]'
 
       - name: Run extras smoke tests
         run: pytest -q tests/packaging
