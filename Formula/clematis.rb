@@ -14,6 +14,12 @@ class Clematis < Formula
   license "MIT"
   version "0.8.0a1"
 
+  livecheck do
+    url :stable
+    strategy :github_tags
+    regex(/^v?(\d+(?:\.\d+)+(?:[._-]?(?:a|b|rc)\d+)?)$/i)
+  end
+
   depends_on "python@3.11"
 
   def install
