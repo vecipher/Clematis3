@@ -12,7 +12,7 @@ class Clematis < Formula
   url "https://github.com/vecipher/Clematis3/releases/download/v0.8.0a3/clematis-0.8.0a3.tar.gz"
   sha256 "854c68150f559ebc8c043f05963fe2b92ffe92395f898ee1a5cd48efd3599cf2"
   license "MIT"
-  version "0.8.0a3"
+  version "0.8.0a4"
 
   depends_on "python@3.13"
 
