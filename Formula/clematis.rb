@@ -20,7 +20,7 @@ class Clematis < Formula
     regex(/^v?(\d+(?:\.\d+)+(?:[._-]?(?:a|b|rc)\d+)?)$/i)
   end
 
-  depends_on "python@3.11"
+  depends_on "python@3.13"
 
   def install
     virtualenv_install_with_resources
