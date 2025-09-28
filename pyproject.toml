@@ -4,8 +4,8 @@ version = "0.8.0a4"
 description = "Clematis — deterministic mind-like simulation engine (M1–M8 baseline)"
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
-license = "MIT"
-license-files = ["LICENSE"]
+
+license = { file = "LICENSE" }
 authors = [{ name = "vecipher" }]
 
 dependencies = ["pyyaml>=6.0.1"]
@@ -16,12 +16,15 @@ classifiers = [
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
   "Operating System :: OS Independent",
+  "License :: OSI Approved :: MIT License",
 ]
 
 [project.urls]
 Homepage = "https://github.com/vecipher/Clematis3"
 Repository = "https://github.com/vecipher/Clematis3.git"
 Issues = "https://github.com/vecipher/Clematis3/issues"
+Documentation = "https://github.com/vecipher/Clematis3/blob/main/docs/m8/packaging_cli.md"
+Changelog = "https://github.com/vecipher/Clematis3/blob/main/CHANGELOG.MD"
 
 [project.optional-dependencies]
 dev = [
@@ -31,8 +34,8 @@ dev = [
   "hypothesis>=6,<7",
   "ruff>=0.6,<1",
   "pyright>=1.1,<2",
-  "numpy>=1.24",
-  "PyYAML>=6.0"
+  "numpy>=1.26,<2",
+  "pyyaml>=6.0"
 ]
 test = [
   "pytest>=8,<9",
@@ -55,7 +58,7 @@ cli-extras = [
   "lancedb>=0.8,<1",
   "pyarrow>=15,<19",
 ]
-cli-demo = ["numpy>=1.24", "PyYAML>=6.0"]
+cli-demo = ["numpy>=1.24", "pyyaml>=6.0"]
 
 [build-system]
 requires = ["setuptools>=77", "wheel"]
@@ -80,7 +83,7 @@ markers = [
 ]
 
 [tool.setuptools.package-data]
-clematis = ["fixtures/**/*", "examples/**/*"]
+clematis = ["fixtures/**/*", "examples/**/*", "VERSION"]
 
 [tool.setuptools.data-files]
 "share/man/man1" = ["man/*.1"]
