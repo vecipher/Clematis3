@@ -35,10 +35,33 @@ python -m clematis rotate-logs -- --dir ./.logs --dry-run
 # or
 python -m clematis --dir ./.logs rotate-logs -- --dry-run
 
-# For bench-t4 and seed-lance-demo, install extras: pip install clematis[cli-extras].
+# For bench-t4 and seed-lance-demo, install extras: pip install "clematis[cli-demo]".
 ```
 
+
 CLI details, delegation rules, and recipes live in **[docs/m8/cli.md](docs/m8/cli.md)**.
+
+## Release verification (SBOM & provenance)
+
+On tagged builds (`v*`), CI publishes:
+- CycloneDX SBOM: `dist/sbom.cdx.json`
+- SLSA v1 provenance attestations for wheel & sdist (and the SBOM)
+
+Verify with GitHub CLI (2.47+):
+
+```bash
+# provenance (online)
+gh attestation verify dist/clematis-<ver>-py3-none-any.whl -R <OWNER>/<REPO>
+gh attestation verify dist/clematis-<ver>.tar.gz -R <OWNER>/<REPO>
+
+# optional: SBOM attestation
+gh attestation verify dist/sbom.cdx.json -R <OWNER>/<REPO>
+
+# SBOM sanity
+jq -e . dist/sbom.cdx.json >/dev/null
+```
+
+Details: see **[Supply chain: SBOM + provenance](docs/m8/packaging_cli.md#supply-chain-sbom--provenance-m8-14)**.
 
 ## Repository layout (brief)
 - `clematis/engine/` — core stages (T1–T4), scheduler stubs, persistence, logs.

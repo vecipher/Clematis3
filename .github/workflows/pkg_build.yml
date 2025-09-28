@@ -119,7 +119,7 @@ jobs:
 
   pkg-smoke-matrix:
     if: ${{ github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main') }}
-    name: Pkg smoke (${{ matrix.os }} / py${{ matrix.python-version }})
+    name: "Pkg smoke (${{ matrix.os }} / py${{ matrix.python-version }})"
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -287,7 +287,8 @@ jobs:
           . .sbom/bin/activate
           python -m pip install --upgrade pip
           python -m pip install 'cyclonedx-bom==4.3.*'
-          python -m pip install "dist/"*.whl[cli-demo] || python -m pip install dist/*.whl
+          WHEEL=$(ls dist/*.whl | head -n1)
+          python -m pip install "$WHEEL[cli-demo]" || python -m pip install "$WHEEL"
           python -m cyclonedx_py environment \
             --output-format JSON \
             --schema-version 1.5 \
@@ -357,3 +358,36 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release upload "${{ github.event.release.tag_name }}" dist/*.whl dist/*.tar.gz --clobber
+
+      - name: Append "Verify this release" snippet to Release notes
+        if: ${{ github.event_name == 'release' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="${{ github.event.release.tag_name }}"
+          OWNER_REPO="$GITHUB_REPOSITORY"
+          VER="${TAG#v}"   # strip leading 'v' from tag
+
+          # fetch current body (may be empty)
+          BODY="$(gh release view "$TAG" -R "$OWNER_REPO" --json body -q .body || echo "")"
+
+          # prepare snippet (uses the actual tag/version + owner/repo)
+          SNIPPET=$(cat <<EOF
+          ### Verify this release
+
+              gh attestation verify dist/clematis-$VER-py3-none-any.whl -R $OWNER_REPO
+              gh attestation verify dist/clematis-$VER.tar.gz -R $OWNER_REPO
+
+              # SBOM
+              jq -e . dist/sbom.cdx.json >/dev/null
+
+          See docs: [Supply chain: SBOM + provenance](docs/m8/packaging_cli.md#supply-chain-sbom--provenance-m8-14)
+          EOF
+          )
+
+          # append once (idempotent)
+          if ! grep -q "### Verify this release" <<<"$BODY"; then
+            printf "%s\n\n%s\n" "$BODY" "$SNIPPET" > /tmp/release_body.md
+            gh release edit "$TAG" -R "$OWNER_REPO" -F /tmp/release_body.md
+          fi
