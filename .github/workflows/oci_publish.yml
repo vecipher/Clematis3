@@ -72,6 +72,7 @@ jobs:
             echo "No Dockerfile or dockerfile found in workspace:" >&2
             ls -la
             exit 1
+          fi
       - name: Build & push (multi-arch)
         uses: docker/build-push-action@v6
         with:
