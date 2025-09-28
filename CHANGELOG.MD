@@ -3,6 +3,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+- Prerelease 0.8.0a4 (python_requires <3.14; Homebrew formula now on python@3.13).
+
 ### Added (PR55 — CLI output contract & exit codes)
 - **Std flags across wrappers:** `--json` / `--table` (mutually exclusive) and `--quiet` / `--verbose` parsed by all CLI wrappers. Defaults unchanged when flags are omitted.
 - **Helpers:** `clematis/cli/_io.py` (plain ASCII `print_table`, compact `print_json`, `set_verbosity`) and `clematis/cli/_exit.py` (standard exit codes).
