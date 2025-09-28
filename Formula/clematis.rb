@@ -7,7 +7,7 @@ class Clematis < Formula
   homepage "https://github.com/vecipher/Clematis3"
   # These three are substituted below after heredoc with env vars.
   url "https://github.com/vecipher/Clematis3/releases/download/v0.8.0a4/clematis-0.8.0a4.tar.gz"
-  sha256 "38e188c2137fe2d66725fee16b7fffd46322732459aab019ff4a359f564d6680"
+  sha256 "c98b1b968f0b959ca2d1d58107d8b36a1525dcc197ae2bc3574e9eeb27c439a4"
   license "MIT"
   version "0.8.0a4"
 
