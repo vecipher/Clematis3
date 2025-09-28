@@ -1,11 +1,6 @@
-
-
 name: Homebrew Tap Update
 
 on:
-  push:
-    tags:
-      - "v*"
   release:
     types: [published]
   workflow_dispatch: {}
@@ -16,7 +11,7 @@ permissions:
 
 jobs:
   update-tap:
-    name: Update Homebrew Formula on tag/release
+    name: Update Homebrew Formula on release
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -26,11 +21,31 @@ jobs:
         id: vars
         env:
           INPUT_TAG: ${{ github.event.release.tag_name }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           TAG="${INPUT_TAG}"
-          if [ -z "$TAG" ]; then TAG="${GITHUB_REF_NAME}"; fi
+          # If manually dispatched, pick the latest release tag.
+          if [ -z "$TAG" ]; then
+            TAG="$(gh release list --limit 1 --json tagName --jq '.[0].tagName')"
+          fi
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "ver=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for sdist asset (poll)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${{ steps.vars.outputs.tag }}"
+          VER="${{ steps.vars.outputs.ver }}"
+          for i in {1..30}; do
+            names="$(gh release view "$TAG" --json assets --jq '.assets[].name' || true)"
+            echo "Assets: $names"
+            echo "$names" | grep -q "clematis-${VER}\.tar\.gz" && exit 0
+            echo "Waiting for clematis-${VER}.tar.gz to appear... ($i/30)"
+            sleep 5
+          done
+          echo "Timed out waiting for sdist asset." >&2
+          exit 1
 
       - name: Download sdist from Release
         env:
