@@ -9,8 +9,8 @@ class Clematis < Formula
   desc "Deterministic, offline-by-default multi-agent concept-graph engine"
   homepage "https://github.com/vecipher/Clematis3"
   # CI will update url/sha256/version on tag publish
-  url "https://github.com/vecipher/Clematis3/releases/download/v0.8.0a3/clematis-0.8.0a3.tar.gz"
-  sha256 "854c68150f559ebc8c043f05963fe2b92ffe92395f898ee1a5cd48efd3599cf2"
+  url "https://github.com/vecipher/Clematis3/releases/download/v0.8.0a4/clematis-0.8.0a4.tar.gz"
+  sha256 "38e188c2137fe2d66725fee16b7fffd46322732459aab019ff4a359f564d6680"
   license "MIT"
   version "0.8.0a4"
 
