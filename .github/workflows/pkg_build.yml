@@ -260,6 +260,9 @@ jobs:
       contents: write
       id-token: write
       attestations: write
+    concurrency:
+      group: tag-sbom-attest-${{ github.ref }}
+      cancel-in-progress: true
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -283,7 +286,7 @@ jobs:
           python -m venv .sbom
           . .sbom/bin/activate
           python -m pip install --upgrade pip
-          python -m pip install 'cyclonedx-bom>=4,<5'
+          python -m pip install 'cyclonedx-bom==4.3.*'
           python -m pip install "dist/"*.whl[cli-demo] || python -m pip install dist/*.whl
           python -m cyclonedx_py environment \
             --output-format JSON \
@@ -298,6 +301,10 @@ jobs:
           json.load(open('dist/sbom.cdx.json'))
           print("SBOM JSON OK")
           PY
+
+      - name: SBOM sanity assertions
+        run: |
+          jq -e '.bomFormat=="CycloneDX" and (.specVersion=="1.5" or .specVersion=="1.4")' dist/sbom.cdx.json >/dev/null
 
       - name: Upload SBOM as workflow artifact
         uses: actions/upload-artifact@v4
@@ -315,12 +322,27 @@ jobs:
             dist/*.tar.gz
           if-no-files-found: error
 
-      - name: Attest provenance (wheel + sdist)
+      - name: Attest provenance (wheel + sdist + sbom)
         uses: actions/attest-build-provenance@v3
         with:
           subject-path: |
             dist/*.whl
             dist/*.tar.gz
+            dist/sbom.cdx.json
+
+      - name: Self-verify provenance (wheel + sdist)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euxo pipefail
+          if ! command -v gh >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y gh
+          fi
+          WHEEL=$(ls dist/*.whl | head -n1)
+          SDIST=$(ls dist/*.tar.gz | head -n1)
+          gh attestation verify "$WHEEL" -R "$GITHUB_REPOSITORY" >/dev/null
+          gh attestation verify "$SDIST" -R "$GITHUB_REPOSITORY" >/dev/null
 
       - name: Attach SBOM to Release
         if: ${{ github.event_name == 'release' }}
@@ -328,3 +350,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release upload "${{ github.event.release.tag_name }}" dist/sbom.cdx.json --clobber
+
+      - name: Attach wheel/sdist to Release
+        if: ${{ github.event_name == 'release' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${{ github.event.release.tag_name }}" dist/*.whl dist/*.tar.gz --clobber
