@@ -2,7 +2,7 @@
 
 Clematis is a deterministic, turn‑based scaffold for agential AI. It models agents with concept graphs and tiered reasoning (T1→T4), uses small LLMs where needed, and keeps runtime behavior reproducible (no hidden network calls in tests/CI).
 
-> **Status (Milestone 8):** Complete ✅ — PR61 (Optional extras: `zstd`, `lancedb`) and PR62 (pre-commit, Ruff/Mypy configs, CI lint/type gates). **Next:** Milestone 9 (Performance and Deterministic Parallelism).
+> **Status (Milestone 8):** Complete ✅ — PR61 (Optional extras: `zstd`, `lancedb`) and PR62 (pre-commit, Ruff/Mypy configs, CI lint/type gates). **Next:** Milestone 9 (Performance and Deterministic Parallelism). MY CONFIG IS A FUCKING MESS I NEED TO FIX IT
 
 ---
 
