@@ -54,7 +54,7 @@ def print_table(
         rows_s = [cast(Sequence[Any], r) for r in it]
         matrix = [[_stringify(c) for c in r] for r in rows_s]
         if headers is None:
-            headers = [f"col{i+1}" for i in range(len(rows_s[0]))]
+            headers = [f"col{i + 1}" for i in range(len(rows_s[0]))]
 
     assert headers is not None
 

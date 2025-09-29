@@ -43,3 +43,6 @@ htmlcov/
 
 # OS files
 .DS_Store
+
+# build artifacts
+clematis.egg-info/
