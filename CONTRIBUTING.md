@@ -14,6 +14,41 @@ python -m pip install -U pip
 python -m pip install -e '.[test]'
 ```
 
+## Development hygiene (M8)
+
+Set up lint and type gates locally so your PR passes the CI gates from PR62.
+
+- Install dev tools and hooks:
+
+  ```bash
+  python -m pip install -e '.[dev]'
+  pre-commit install
+  ```
+
+- Before pushing, ensure a clean run:
+
+  ```bash
+  pre-commit run -a
+  ```
+
+- Local CI parity (what the workflow runs):
+
+  ```bash
+  # Formatting gate
+  ruff format --check .
+  # Repo-wide safety lint (fatal error set only)
+  ruff check --force-exclude --select E9,F63,F7,F82 .
+  # Strict lint for CLI package
+  ruff check --force-exclude clematis/cli
+  # Types on CLI only
+  mypy --config-file pyproject.toml
+  ```
+
+**Policy**
+- **Types:** MyPy runs on `clematis/cli/**` only (we’ll expand later).
+- **Lint:** Repo-wide “safety” (E9,F63,F7,F82), and **strict** on `clematis/cli/**`.
+- **Format:** Ruff format gate is enforced.
+
 ## Running tests
 
 Most tests are offline by default:
@@ -59,3 +94,5 @@ Notes:
 - Main is protected with required checks; prefer **squash merges**.
 - Releases are tag‑driven; OCI images/SBOMs attach on tagged releases.
 - Keep PR descriptions factual and include any golden fixture updates (what changed and why).
+
+- Before opening a PR: run `pre-commit run -a` locally; PRs must pass **Lint & Types** (Ruff format repo-wide, Ruff safety repo-wide, Ruff strict on CLI, MyPy on CLI).
