@@ -2,7 +2,7 @@
 
 Clematis is a deterministic, turn‑based scaffold for agential AI. It models agents with concept graphs and tiered reasoning (T1→T4), uses small LLMs where needed, and keeps runtime behavior reproducible (no hidden network calls in tests/CI).
 
-**Status:** M1–M7 are stable and hardened. M8 (Packaging & CLI polish) is in progress. PR47 shipped umbrella CLI hardening with **zero behavior change** (help determinism, first‑subcommand anchoring, single‑sentinel strip, stderr‑only breadcrumbs).
+> **Status (Milestone 8):** Complete ✅ — PR61 (Optional extras: `zstd`, `lancedb`) and PR62 (pre-commit, Ruff/Mypy configs, CI lint/type gates). **Next:** Milestone 9 (Performance and Deterministic Parallelism).
 
 ---
 
@@ -35,10 +35,10 @@ python -m clematis rotate-logs -- --dir ./.logs --dry-run
 # or
 python -m clematis --dir ./.logs rotate-logs -- --dry-run
 
-# For bench-t4 and seed-lance-demo, install extras: pip install clematis[cli-extras].
+# Some scripts need optional extras. See docs/m8/packaging_cli.md (e.g., pip install "clematis[zstd]" or "clematis[lancedb]").
 ```
 
-CLI details, delegation rules, and recipes live in **[docs/m8/cli.md](docs/m8/cli.md)**.
+CLI details, delegation rules, and recipes live in **[docs/m8/cli.md](docs/m8/cli.md)**. Packaging/extras and quality gates: **[docs/m8/packaging_cli.md](docs/m8/packaging_cli.md)** · **[CONTRIBUTING.md](CONTRIBUTING.md)**.
 
 ## Repository layout (brief)
 - `clematis/engine/` — core stages (T1–T4), scheduler stubs, persistence, logs.
@@ -57,9 +57,11 @@ CLI details, delegation rules, and recipes live in **[docs/m8/cli.md](docs/m8/cl
 - **M5:** scheduler config and groundwork (feature‑gated; identity path when disabled).
 - **M6:** memory/perf scaffolding; caches and snapshot hygiene (default‑off quality toggles).
 - **M7:** observability/dev‑ex; shadow quality traces; golden tests; gate hardening.
-- **M8 (current):** packaging & CLI docs/CI polish.
+- **M8 (finished):** packaging & CLI docs/CI polish.
   – README trimmed; canonical CLI doc split to `docs/m8/cli.md`.
   – Add fast CLI smokes to CI (help phrase, arg‑order, sentinel strip, shim hint).
+  – pre-commit + Ruff/Mypy configs; dual Ruff CI gates (repo safety + CLI strict).
+  – declare NumPy as a runtime dependency (examples smoke).
 
 Pre‑M8 hardening notes: **`Changelog/PreM8Hardening.txt`**.
 LLM adapter + fixtures: **`docs/m3/llm_adapter.md`**.

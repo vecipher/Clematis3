@@ -31,11 +31,7 @@ python -m clematis rotate-logs -- --dry-run --table
 
 Notes: flags are mutually exclusive (`--json` XOR `--table`). Defaults remain unchanged when you omit them.
 
-**Note:** If `demo` or `validate` complain about missing NumPy/PyYAML on a base install, add the minimal extra:
-
-```bash
-pip install "clematis[cli-demo]"
-```
+**Note:** `numpy` and `PyYAML` are **runtime dependencies**; a base `pip install clematis` already includes them. No extra is required for `demo` or `validate`. Heavier scripts may need optional extras like `[zstd]` or `[lancedb]` (see **Optional extras (PR61)** below).
 
 **Rules:**
 - One leading `--` (the sentinel) is stripped by the umbrella CLI; everything after is passed to the script.
@@ -158,23 +154,6 @@ I/O rules:
 
 ---
 
-## Optional extras (pip groups)
-These are **metadata-only** groups. For offline `demo`/`validate`, the minimal `cli-demo` extra is recommended.
-
-| Extra name     | Purpose / typical libs                                           |
-|----------------|------------------------------------------------------------------|
-| `cli-demo`     | Minimal deps for offline demo/validate (e.g., `numpy`, `PyYAML`) |
-| `bench`        | Lightweight benchmarking helpers (e.g., `numpy`)                 |
-| `cli-extras`   | CLI demos for snapshots/IO (e.g., `numpy`, `pyarrow`, `lancedb`) |
-
-Install with e.g.:
-```bash
-pip install "clematis[cli-demo]"
-```
-(Adjust name to your published package.)
-
----
-
 ## CI: Wheel‑smoke (post‑install acceptance)
 
 CI builds the wheel, installs into a fresh venv, then runs the three quickstart commands above with `CLEMATIS_NETWORK_BAN=1`. No heavy extras are installed. This guards the packaged defaults and CLI invariants without changing runtime behavior.
@@ -195,9 +174,28 @@ python -m clematis demo -- --steps 1 # or: python -m clematis demo --steps 1
 
 Notes:
 - No LLM smokes in this job.
-- The job installs the minimal extra via: `pip install "$WHL[cli-demo]"` to satisfy demo/validate imports.
+- No extras are installed; `numpy` and `PyYAML` are runtime deps so the base wheel suffices.
 - Install/build may use network; only the **runtime** of the smokes is network‑banned (`CLEMATIS_NETWORK_BAN=1`).
 - Windows enables long paths with `git config --global core.longpaths true` to avoid path length issues.
+
+---
+
+## Lint & Type Gates (PR62)
+
+Developer hygiene for this repo:
+
+- Install hooks: `pip install -e '.[dev]' && pre-commit install`
+- Run locally:
+  - `pre-commit run -a`
+  - `ruff format --check .`
+  - `ruff check --force-exclude --select E9,F63,F7,F82 .`
+  - `ruff check --force-exclude clematis/cli`
+  - `mypy --config-file pyproject.toml`
+
+**Policy**
+- **Types:** MyPy runs on `clematis/cli/**` only (ratchet later).
+- **Lint:** Repo-wide “safety” (E9,F63,F7,F82), and **strict** on `clematis/cli/**`.
+- **Format:** Ruff format gate active.
 
 ---
 
@@ -288,8 +286,8 @@ Some features are optional and installed via extras:
 | `dev`     | test+linters | Local dev setup (`.[dev]`)               |
 
 Install examples:
+```bash
 python -m pip install 'clematis[zstd]'
 python -m pip install 'clematis[lancedb]'
 python -m pip install 'clematis[dev]'
-
-Tests are skip-aware: if an extra isn’t installed, its tests are skipped.
+```
