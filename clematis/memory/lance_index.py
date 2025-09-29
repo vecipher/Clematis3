@@ -31,6 +31,7 @@ logger = logging.getLogger(__name__)
 
 # ----------------------------- helper utilities -----------------------------
 
+
 def _parse_iso8601(ts: str) -> datetime:
     """Parse ISO8601 timestamps robustly; treat naive as UTC."""
     if ts.endswith("Z"):
@@ -57,13 +58,14 @@ def _as_float32_list(vec: Any) -> List[float]:
 
 def _cosine(a: np.ndarray, b: np.ndarray) -> float:
     # Safe cosine with deterministic tie behavior on zeros
-    denom = (np.linalg.norm(a) * np.linalg.norm(b))
+    denom = np.linalg.norm(a) * np.linalg.norm(b)
     if denom == 0.0:
         return 0.0
     return float(np.dot(a, b) / denom)
 
 
 # ------------------------------- main adapter -------------------------------
+
 
 class LanceIndex:
     """
@@ -72,7 +74,9 @@ class LanceIndex:
     caller to gracefully handle environments where Lance is unavailable.
     """
 
-    def __init__(self, uri: str, table: str = "episodes", meta_table: str = "meta", create_ok: bool = True):
+    def __init__(
+        self, uri: str, table: str = "episodes", meta_table: str = "meta", create_ok: bool = True
+    ):
         # Defer heavy imports here for graceful fallback
         try:
             import lancedb  # type: ignore
@@ -119,11 +123,15 @@ class LanceIndex:
                 tbl.add([{"key": "counter", "version": 0}])
             return tbl
         # Create with a single seed row
-        schema = pa.schema([
-            pa.field("key", pa.string()),
-            pa.field("version", pa.int64()),
-        ])
-        meta = self._db.create_table(self._meta_name, data=[{"key": "counter", "version": 0}], schema=schema)
+        schema = pa.schema(
+            [
+                pa.field("key", pa.string()),
+                pa.field("version", pa.int64()),
+            ]
+        )
+        meta = self._db.create_table(
+            self._meta_name, data=[{"key": "counter", "version": 0}], schema=schema
+        )
         return meta
 
     def _ensure_episodes_table(self, first_row: Dict[str, Any]):
@@ -300,7 +308,9 @@ class LanceIndex:
             for cid, items in clusters.items():
                 if not items:
                     continue
-                mat = np.stack([np.asarray(it.get("vec_full", []), dtype=np.float32) for it in items], axis=0)
+                mat = np.stack(
+                    [np.asarray(it.get("vec_full", []), dtype=np.float32) for it in items], axis=0
+                )
                 centroid = mat.mean(axis=0)
                 centroids.append((cid, _cosine(q, centroid)))
             # Pick top-M clusters

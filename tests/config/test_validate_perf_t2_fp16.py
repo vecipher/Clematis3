@@ -1,5 +1,3 @@
-
-
 import subprocess
 import sys
 import textwrap
@@ -13,8 +11,9 @@ SCRIPT = Path("scripts/validate_config.py")
 @pytest.mark.skipif(not SCRIPT.exists(), reason="validator CLI not found")
 def test_cli_validator_accepts_fp16_with_precompute_norms_and_partitions(tmp_path: Path):
     cfg = tmp_path / "good.yaml"
-    cfg.write_text(textwrap.dedent(
-        """
+    cfg.write_text(
+        textwrap.dedent(
+            """
         perf:
           enabled: true
           metrics:
@@ -38,17 +37,23 @@ def test_cli_validator_accepts_fp16_with_precompute_norms_and_partitions(tmp_pat
             enabled: false
             namespaces: []
         """
-    ).strip() + "\n", encoding="utf-8")
+        ).strip()
+        + "\n",
+        encoding="utf-8",
+    )
 
-    res = subprocess.run([sys.executable, str(SCRIPT), str(cfg), "--strict"], capture_output=True, text=True)
+    res = subprocess.run(
+        [sys.executable, str(SCRIPT), str(cfg), "--strict"], capture_output=True, text=True
+    )
     assert res.returncode == 0, f"STDOUT:\n{res.stdout}\nSTDERR:\n{res.stderr}"
 
 
 @pytest.mark.skipif(not SCRIPT.exists(), reason="validator CLI not found")
 def test_cli_validator_warns_fp16_without_precompute_norms(tmp_path: Path):
     cfg = tmp_path / "warn.yaml"
-    cfg.write_text(textwrap.dedent(
-        """
+    cfg.write_text(
+        textwrap.dedent(
+            """
         perf:
           enabled: true
           t2:
@@ -65,7 +70,10 @@ def test_cli_validator_warns_fp16_without_precompute_norms(tmp_path: Path):
             enabled: false
             namespaces: []
         """
-    ).strip() + "\n", encoding="utf-8")
+        ).strip()
+        + "\n",
+        encoding="utf-8",
+    )
 
     # Non-strict: should succeed but emit a warning recommending fp32 norms
     res = subprocess.run([sys.executable, str(SCRIPT), str(cfg)], capture_output=True, text=True)
@@ -76,8 +84,9 @@ def test_cli_validator_warns_fp16_without_precompute_norms(tmp_path: Path):
 @pytest.mark.skipif(not SCRIPT.exists(), reason="validator CLI not found")
 def test_cli_validator_rejects_invalid_partition_layout(tmp_path: Path):
     cfg = tmp_path / "bad_layout.yaml"
-    cfg.write_text(textwrap.dedent(
-        """
+    cfg.write_text(
+        textwrap.dedent(
+            """
         perf:
           enabled: true
           t2:
@@ -96,9 +105,14 @@ def test_cli_validator_rejects_invalid_partition_layout(tmp_path: Path):
             enabled: false
             namespaces: []
         """
-    ).strip() + "\n", encoding="utf-8")
+        ).strip()
+        + "\n",
+        encoding="utf-8",
+    )
 
-    res = subprocess.run([sys.executable, str(SCRIPT), str(cfg), "--strict"], capture_output=True, text=True)
+    res = subprocess.run(
+        [sys.executable, str(SCRIPT), str(cfg), "--strict"], capture_output=True, text=True
+    )
     assert res.returncode != 0
     # Error messages are printed to stdout by the validator
     assert "perf.t2.reader.partitions.layout" in res.stdout
@@ -107,8 +121,9 @@ def test_cli_validator_rejects_invalid_partition_layout(tmp_path: Path):
 @pytest.mark.skipif(not SCRIPT.exists(), reason="validator CLI not found")
 def test_cli_validator_rejects_empty_partition_path(tmp_path: Path):
     cfg = tmp_path / "bad_path.yaml"
-    cfg.write_text(textwrap.dedent(
-        """
+    cfg.write_text(
+        textwrap.dedent(
+            """
         perf:
           enabled: true
           t2:
@@ -128,8 +143,13 @@ def test_cli_validator_rejects_empty_partition_path(tmp_path: Path):
             enabled: false
             namespaces: []
         """
-    ).strip() + "\n", encoding="utf-8")
+        ).strip()
+        + "\n",
+        encoding="utf-8",
+    )
 
-    res = subprocess.run([sys.executable, str(SCRIPT), str(cfg), "--strict"], capture_output=True, text=True)
+    res = subprocess.run(
+        [sys.executable, str(SCRIPT), str(cfg), "--strict"], capture_output=True, text=True
+    )
     assert res.returncode != 0
     assert "perf.t2.reader.partitions.path" in res.stdout

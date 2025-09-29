@@ -1,10 +1,13 @@
 import sys, subprocess
 
+
 def _run(args, debug=False):
     argv = [sys.executable, "-m", "clematis"]
-    if debug: argv.append("--debug")
+    if debug:
+        argv.append("--debug")
     argv += args
     return subprocess.run(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+
 
 def test_debug_breadcrumb_and_no_behavior_change():
     p1 = _run(["rotate-logs", "--dir", "./.logs", "--dry-run"], debug=False)

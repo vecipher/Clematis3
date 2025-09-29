@@ -1,5 +1,3 @@
-
-
 import pytest
 from dataclasses import asdict
 from datetime import datetime, timezone
@@ -20,11 +18,31 @@ def _bundle(s_max=0.9, labels=None, n_nodes=6, ops_cap=3, tokens=256, owner_scop
         "now": now,
         "agent": {"id": "agentA", "style_prefix": "", "caps": {"tokens": tokens, "ops": ops_cap}},
         "world": {"hot_labels": [], "k": 0},
-        "t1": {"touched_nodes": nodes, "metrics": {"pops": 0, "iters": 0, "propagations": 0, "radius_cap_hits": 0, "layer_cap_hits": 0, "node_budget_hits": 0}},
-        "t2": {"retrieved": [], "metrics": {"tier_sequence": [], "k_returned": 0, "sim_stats": {"mean": s_max/2, "max": s_max}, "cache_used": False}},
+        "t1": {
+            "touched_nodes": nodes,
+            "metrics": {
+                "pops": 0,
+                "iters": 0,
+                "propagations": 0,
+                "radius_cap_hits": 0,
+                "layer_cap_hits": 0,
+                "node_budget_hits": 0,
+            },
+        },
+        "t2": {
+            "retrieved": [],
+            "metrics": {
+                "tier_sequence": [],
+                "k_returned": 0,
+                "sim_stats": {"mean": s_max / 2, "max": s_max},
+                "cache_used": False,
+            },
+        },
         "text": {"input": "hello world", "labels_from_t1": labels},
-        "cfg": {"t3": {"max_rag_loops": 1, "tokens": tokens, "temp": 0.7},
-                 "t2": {"owner_scope": owner_scope, "k_retrieval": 6, "sim_threshold": 0.3}},
+        "cfg": {
+            "t3": {"max_rag_loops": 1, "tokens": tokens, "temp": 0.7},
+            "t2": {"owner_scope": owner_scope, "k_retrieval": 6, "sim_threshold": 0.3},
+        },
     }
 
 

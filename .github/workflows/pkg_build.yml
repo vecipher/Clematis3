@@ -174,7 +174,7 @@ jobs:
 
           # 3) demo minimal
           python -m clematis demo -- --steps 1
-          
+
           # 4) rotate-logs (dry-run)
           python -m clematis rotate-logs -- --dry-run
 

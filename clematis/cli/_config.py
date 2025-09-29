@@ -1,11 +1,9 @@
-
-
 from __future__ import annotations
 
 import os
 import sys
 from pathlib import Path
-from typing import Mapping, Optional, Tuple, TextIO
+from typing import Mapping, Optional, TextIO, Tuple
 
 # Relative default searched under the current working directory
 DEFAULT_REL = Path("configs") / "config.yaml"
@@ -76,7 +74,9 @@ def discover_config_path(
     return None, "none"
 
 
-def maybe_log_selected(path: Optional[Path], source: str, *, verbose: bool = False, stream: Optional[TextIO] = None) -> None:
+def maybe_log_selected(
+    path: Optional[Path], source: str, *, verbose: bool = False, stream: Optional[TextIO] = None
+) -> None:
     """Emit a one-line message about the selected config when verbose.
 
     Logged to stderr by default to avoid mixing with command outputs.

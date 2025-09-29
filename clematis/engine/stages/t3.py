@@ -8,6 +8,7 @@ from ..policy.json_schemas import PLANNER_V1
 from ..policy.sanitize import parse_and_validate
 
 from ..types import Plan, SpeakOp, EditGraphOp, RequestRetrieveOp
+
 # PR8/M3-08: Optional LLM adapter types (duck-typed if unavailable)
 try:  # runtime optional
     from ...adapters.llm import (
@@ -19,9 +20,10 @@ try:  # runtime optional
     )  # type: ignore
 except Exception:  # pragma: no cover
     LLMAdapter = object  # type: ignore
-    LLMResult = object   # type: ignore
+    LLMResult = object  # type: ignore
     FixtureLLMAdapter = None  # type: ignore
     QwenLLMAdapter = None  # type: ignore
+
     class LLMAdapterError(Exception):  # type: ignore
         pass
 
@@ -44,7 +46,11 @@ def _iso_now(ctx) -> str:
 
 
 def _get_cfg_caps(ctx) -> Dict[str, int]:
-    cfg_t3 = getattr(ctx, "cfg", {}).t3 if hasattr(getattr(ctx, "cfg", {}), "t3") else getattr(getattr(ctx, "cfg", {}), "get", lambda *_: {})("t3", {})
+    cfg_t3 = (
+        getattr(ctx, "cfg", {}).t3
+        if hasattr(getattr(ctx, "cfg", {}), "t3")
+        else getattr(getattr(ctx, "cfg", {}), "get", lambda *_: {})("t3", {})
+    )
     # Fall back safely if cfg is dict-like
     if isinstance(getattr(ctx, "cfg", None), dict):
         cfg_t3 = ctx.cfg.get("t3", {})
@@ -101,7 +107,13 @@ def _extract_t1_touched_nodes(t1, cap: int = 32) -> List[Dict[str, Any]]:
                     delta = float(v)
                 except Exception:
                     delta = 0.0
-            items.append({"id": str(nid), "label": str(v.get("label", nid)) if isinstance(v, dict) else str(nid), "delta": float(delta)})
+            items.append(
+                {
+                    "id": str(nid),
+                    "label": str(v.get("label", nid)) if isinstance(v, dict) else str(nid),
+                    "delta": float(delta),
+                }
+            )
     elif isinstance(candidates, list):
         for e in candidates:
             if not isinstance(e, dict):
@@ -131,7 +143,14 @@ def _extract_t1_metrics(t1) -> Dict[str, Any]:
             "layer_cap_hits": int(m.get("layer_cap_hits", 0)),
             "node_budget_hits": int(m.get("node_budget_hits", 0)),
         }
-    return {"pops": 0, "iters": 0, "propagations": 0, "radius_cap_hits": 0, "layer_cap_hits": 0, "node_budget_hits": 0}
+    return {
+        "pops": 0,
+        "iters": 0,
+        "propagations": 0,
+        "radius_cap_hits": 0,
+        "layer_cap_hits": 0,
+        "node_budget_hits": 0,
+    }
 
 
 def _extract_labels_from_t1(t1) -> List[str]:
@@ -151,7 +170,7 @@ def _extract_labels_from_t1(t1) -> List[str]:
 def _extract_t2_retrieved(t2, k_retrieval: int) -> List[Dict[str, Any]]:
     out: List[Dict[str, Any]] = []
     retrieved = getattr(t2, "retrieved", [])
-    for r in (retrieved or []):
+    for r in retrieved or []:
         if isinstance(r, dict):
             rid = str(r.get("id"))
             score = float(r.get("_score", r.get("score", 0.0)) or 0.0)
@@ -276,8 +295,10 @@ def make_plan_bundle(ctx, state, t1, t2) -> Dict[str, Any]:
     }
     return bundle
 
+
 # --- PR7: Dialogue bundle (deterministic, pure)
 DIALOG_BUNDLE_VERSION = "t3-dialog-bundle-v1"
+
 
 def make_dialog_bundle(ctx, state, t1, t2, plan=None) -> Dict[str, Any]:
     """Assemble a deterministic dialogue bundle from PR4 bundle + Plan.
@@ -285,7 +306,11 @@ def make_dialog_bundle(ctx, state, t1, t2, plan=None) -> Dict[str, Any]:
     """
     base = make_plan_bundle(ctx, state, t1, t2)
     # Dialogue config snapshot
-    cfg_t3 = (getattr(ctx, "cfg", {}) or {}).get("t3", {}) if isinstance(getattr(ctx, "cfg", {}), dict) else {}
+    cfg_t3 = (
+        (getattr(ctx, "cfg", {}) or {}).get("t3", {})
+        if isinstance(getattr(ctx, "cfg", {}), dict)
+        else {}
+    )
     dialogue_cfg = {}
     if isinstance(cfg_t3, dict):
         dialogue_cfg = cfg_t3.get("dialogue", {}) or {}
@@ -304,6 +329,7 @@ def make_dialog_bundle(ctx, state, t1, t2, plan=None) -> Dict[str, Any]:
         "dialogue": {"template": template, "include_top_k_snippets": include_top_k},
     }
 
+
 # --- PR5: Rule-based policy (no RAG) ---
 # Deterministic `deliberate(bundle) -> Plan` using explicit thresholds and caps.
 
@@ -313,7 +339,7 @@ _DEFAULT_EPS_EDIT = 0.10
 
 
 def _policy_thresholds(bundle: Dict[str, Any]) -> Dict[str, float]:
-    t3cfg = (bundle.get("cfg", {}).get("t3", {}) if isinstance(bundle.get("cfg", {}), dict) else {})
+    t3cfg = bundle.get("cfg", {}).get("t3", {}) if isinstance(bundle.get("cfg", {}), dict) else {}
     pol = t3cfg.get("policy", {}) if isinstance(t3cfg, dict) else {}
     return {
         "tau_high": float(pol.get("tau_high", _DEFAULT_TAU_HIGH)),
@@ -326,13 +352,17 @@ def _topic_labels_from_bundle(bundle: Dict[str, Any], cap: int = 5) -> List[str]
     labels = list(bundle.get("text", {}).get("labels_from_t1", []) or [])
     if not labels:
         # Fallback to labels from touched nodes
-        labels = [str(n.get("label", n.get("id"))) for n in bundle.get("t1", {}).get("touched_nodes", [])]
+        labels = [
+            str(n.get("label", n.get("id"))) for n in bundle.get("t1", {}).get("touched_nodes", [])
+        ]
     # Deterministic: dedupe + sort + cap
     labels = sorted({str(x) for x in labels})
     return labels[: max(int(cap), 0)]
 
 
-def _edit_nodes_from_bundle(bundle: Dict[str, Any], eps_edit: float, cap_nodes: int) -> List[Dict[str, Any]]:
+def _edit_nodes_from_bundle(
+    bundle: Dict[str, Any], eps_edit: float, cap_nodes: int
+) -> List[Dict[str, Any]]:
     """Select nodes with |delta| >= eps_edit; return deterministic edits.
     Returns a list of {op:"upsert_node", id: <node_id>} sorted by id asc, capped to cap_nodes.
     """
@@ -384,9 +414,7 @@ def deliberate(bundle: Dict[str, Any]) -> Plan:
 
     ops: List[Any] = []
     # Always include a Speak op first (intent + labels)
-    ops.append(
-        SpeakOp(kind="Speak", intent=intent, topic_labels=labels, max_tokens=tokens)
-    )
+    ops.append(SpeakOp(kind="Speak", intent=intent, topic_labels=labels, max_tokens=tokens))
 
     # Optionally include a small EditGraph op if evidence is not too weak
     if s_max >= tau_low and len(ops) < caps_ops:
@@ -394,7 +422,9 @@ def deliberate(bundle: Dict[str, Any]) -> Plan:
         edits = _edit_nodes_from_bundle(bundle, eps_edit=eps_edit, cap_nodes=remaining * 4)
         # Only emit if we have edits and stay within ops cap
         if edits:
-            ops.append(EditGraphOp(kind="EditGraph", edits=edits, cap=min(len(edits), remaining * 4)))
+            ops.append(
+                EditGraphOp(kind="EditGraph", edits=edits, cap=min(len(edits), remaining * 4))
+            )
 
     # Optionally include a RequestRetrieve op for low evidence (executed in PR6)
     if s_max < tau_low and len(ops) < caps_ops:
@@ -408,7 +438,10 @@ def deliberate(bundle: Dict[str, Any]) -> Plan:
                 owner=owner if owner in ("agent", "world", "any") else "any",
                 k=k,
                 tier_pref="cluster_semantic",
-                hints={"now": bundle.get("now", ""), "sim_threshold": float(cfg_t2.get("sim_threshold", 0.3))},
+                hints={
+                    "now": bundle.get("now", ""),
+                    "sim_threshold": float(cfg_t2.get("sim_threshold", 0.3)),
+                },
             )
         )
 
@@ -417,6 +450,7 @@ def deliberate(bundle: Dict[str, Any]) -> Plan:
         ops = ops[:caps_ops]
 
     return Plan(version="t3-plan-v1", reflection=False, ops=ops, request_retrieve=None)
+
 
 # --- PR6: One-shot RAG refinement (pure) ---
 # Orchestrator provides a deterministic retrieve_fn; this function remains pure.
@@ -458,7 +492,7 @@ def _normalize_rr_payload(bundle: Dict[str, Any], rr: Dict[str, Any]) -> Dict[st
 
 def _normalize_retrieved_result(result: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], int, float]:
     hits: List[Dict[str, Any]] = []
-    for r in (result.get("retrieved", []) or []):
+    for r in result.get("retrieved", []) or []:
         if isinstance(r, dict):
             rid = str(r.get("id"))
             score = float(r.get("_score", r.get("score", 0.0)) or 0.0)
@@ -528,11 +562,17 @@ def rag_once(
 
     payload = _normalize_rr_payload(bundle, rr)
     result = retrieve_fn(payload)
-    hits, k_retrieved, s_max_rag = _normalize_retrieved_result(result if isinstance(result, dict) else {})
+    hits, k_retrieved, s_max_rag = _normalize_retrieved_result(
+        result if isinstance(result, dict) else {}
+    )
 
     # Compute refined evidence level
     thresholds = _policy_thresholds(bundle)
-    tau_high, tau_low, eps_edit = thresholds["tau_high"], thresholds["tau_low"], thresholds["eps_edit"]
+    tau_high, tau_low, eps_edit = (
+        thresholds["tau_high"],
+        thresholds["tau_low"],
+        thresholds["eps_edit"],
+    )
     labels = _topic_labels_from_bundle(bundle)
 
     post_s_max = max(pre_s_max, s_max_rag)
@@ -554,7 +594,9 @@ def rag_once(
     for op in plan.ops:
         k = getattr(op, "kind", None)
         if k == "Speak" and not speak_replaced:
-            new_ops.append(SpeakOp(kind="Speak", intent=new_intent, topic_labels=labels, max_tokens=tokens))
+            new_ops.append(
+                SpeakOp(kind="Speak", intent=new_intent, topic_labels=labels, max_tokens=tokens)
+            )
             speak_replaced = True
         else:
             new_ops.append(op)
@@ -565,13 +607,20 @@ def rag_once(
         remaining = max(caps_ops - len(new_ops), 0)
         edits = _edit_nodes_from_bundle(bundle, eps_edit=eps_edit, cap_nodes=remaining * 4)
         if edits:
-            new_ops.append(EditGraphOp(kind="EditGraph", edits=edits, cap=min(len(edits), remaining * 4)))
+            new_ops.append(
+                EditGraphOp(kind="EditGraph", edits=edits, cap=min(len(edits), remaining * 4))
+            )
 
     # Enforce ops cap deterministically
     if len(new_ops) > caps_ops:
         new_ops = new_ops[:caps_ops]
 
-    refined = Plan(version="t3-plan-v1", reflection=getattr(plan, "reflection", False), ops=new_ops, request_retrieve=getattr(plan, "request_retrieve", None))
+    refined = Plan(
+        version="t3-plan-v1",
+        reflection=getattr(plan, "reflection", False),
+        ops=new_ops,
+        request_retrieve=getattr(plan, "request_retrieve", None),
+    )
 
     metrics = {
         "rag_used": True,
@@ -586,6 +635,7 @@ def rag_once(
 
 
 # --- PR7: Deterministic dialogue synthesis ---
+
 
 def _dedupe_sort_list(xs: List[str]) -> List[str]:
     return sorted({str(x) for x in (xs or [])})
@@ -638,7 +688,9 @@ def speak(dialog_bundle: Dict[str, Any], plan: Plan) -> Tuple[str, Dict[str, Any
 
     intent = getattr(speak_op, "intent", "ack") if speak_op else "ack"
     style_prefix = str(dialog_bundle.get("agent", {}).get("style_prefix", ""))
-    template = str(dialog_bundle.get("dialogue", {}).get("template", "summary: {labels}. next: {intent}"))
+    template = str(
+        dialog_bundle.get("dialogue", {}).get("template", "summary: {labels}. next: {intent}")
+    )
 
     # Snippets: top-K ids
     snippet_ids = _top_snippet_ids(dialog_bundle)
@@ -690,7 +742,9 @@ def speak(dialog_bundle: Dict[str, Any], plan: Plan) -> Tuple[str, Dict[str, Any
     }
     return utter_capped, metrics
 
+
 # --- PR8: LLM-based dialogue (optional backend) ---
+
 
 def build_llm_prompt(dialog_bundle: Dict[str, Any], plan: Plan) -> str:
     """
@@ -721,7 +775,9 @@ def build_llm_prompt(dialog_bundle: Dict[str, Any], plan: Plan) -> str:
     return "\n".join(lines).strip()
 
 
-def llm_speak(dialog_bundle: Dict[str, Any], plan: Plan, adapter: Any) -> Tuple[str, Dict[str, Any]]:
+def llm_speak(
+    dialog_bundle: Dict[str, Any], plan: Plan, adapter: Any
+) -> Tuple[str, Dict[str, Any]]:
     """
     Produce an utterance using an injected LLM adapter. Deterministic under a deterministic adapter.
     Enforces the same token budget as rule-based speak() and prefixes style if template omits it.
@@ -780,17 +836,24 @@ def llm_speak(dialog_bundle: Dict[str, Any], plan: Plan, adapter: Any) -> Tuple[
         "style_prefix_used": bool(style_prefix != ""),
         "snippet_count": int(len(snippet_ids)),
         "backend": "llm",
-        "adapter": getattr(adapter, "name", adapter.__class__.__name__ if hasattr(adapter, "__class__") else "Unknown"),
+        "adapter": getattr(
+            adapter,
+            "name",
+            adapter.__class__.__name__ if hasattr(adapter, "__class__") else "Unknown",
+        ),
     }
     return text_capped, metrics
 
+
 # --- M3-08: LLM Planner (opt-in, defaults OFF) ---
+
 
 def make_planner_prompt(ctx) -> str:
     """Deterministic, compact planner prompt for the LLM backend.
     Kept intentionally small so fixtures remain stable; M3-10 will add schema hardening.
     """
     import json as _json
+
     summary = {
         "turn": getattr(ctx, "turn_id", 0),
         "agent": getattr(ctx, "agent_id", "agent"),
@@ -801,6 +864,7 @@ def make_planner_prompt(ctx) -> str:
         f"STATE: {_json.dumps(summary, separators=(',',':'))}\n"
         "USER: Propose up to 4 next steps as short strings; include a brief rationale."
     )
+
 
 def _get_llm_adapter_from_cfg(cfg: Dict[str, Any]):
     """Build an LLM adapter instance from cfg when backend=='llm'.
@@ -832,8 +896,7 @@ def _get_llm_adapter_from_cfg(cfg: Dict[str, Any]):
     if provider == "fixture":
         if FixtureLLMAdapter is None:
             return None
-        path = ((llm.get("fixtures", {}) or {}).get("path")
-                or "fixtures/llm/qwen_small.jsonl")
+        path = (llm.get("fixtures", {}) or {}).get("path") or "fixtures/llm/qwen_small.jsonl"
         return FixtureLLMAdapter(path)
     if provider == "ollama":
         if QwenLLMAdapter is None:
@@ -844,17 +907,22 @@ def _get_llm_adapter_from_cfg(cfg: Dict[str, Any]):
         timeout_s = max(1, int(int(llm.get("timeout_ms", 10000)) / 1000))
 
         # Build an Ollama call_fn matching QwenLLMAdapter's expected signature
-        def _ollama_call(prompt: str, *, model: str, max_tokens: int, temperature: float, timeout_s: int) -> str:
+        def _ollama_call(
+            prompt: str, *, model: str, max_tokens: int, temperature: float, timeout_s: int
+        ) -> str:
             import json as _json
             import urllib.request as _ur
-            body = _json.dumps({
-                "model": model,
-                "prompt": prompt,
-                "options": {"temperature": float(temperature), "num_predict": int(max_tokens)},
-                "stream": False,
-                # Hint to return strict JSON when possible
-                "format": "json",
-            }).encode("utf-8")
+
+            body = _json.dumps(
+                {
+                    "model": model,
+                    "prompt": prompt,
+                    "options": {"temperature": float(temperature), "num_predict": int(max_tokens)},
+                    "stream": False,
+                    # Hint to return strict JSON when possible
+                    "format": "json",
+                }
+            ).encode("utf-8")
             req = _ur.Request(endpoint, data=body, headers={"Content-Type": "application/json"})
             with _ur.urlopen(req, timeout=timeout_s) as resp:
                 payload = _json.loads(resp.read().decode("utf-8"))
@@ -863,9 +931,12 @@ def _get_llm_adapter_from_cfg(cfg: Dict[str, Any]):
                 raise LLMAdapterError("Ollama returned no text response")
             return txt
 
-        return QwenLLMAdapter(call_fn=_ollama_call, model=model, temperature=temp, timeout_s=timeout_s)
+        return QwenLLMAdapter(
+            call_fn=_ollama_call, model=model, temperature=temp, timeout_s=timeout_s
+        )
     # Unknown provider -> surface as validation error upstream; here we fail closed.
     return None
+
 
 def plan_with_llm(ctx, state: Any, cfg: Dict[str, Any]) -> Dict[str, Any]:
     """Run the opt-in LLM planner and return a minimal planner dict.
@@ -874,13 +945,16 @@ def plan_with_llm(ctx, state: Any, cfg: Dict[str, Any]) -> Dict[str, Any]:
     Does not mutate graphs or downstream state.
     """
     import json as _json
+
     try:
         adapter = _get_llm_adapter_from_cfg(cfg)
     except Exception as e:
         try:
             logs = getattr(state, "logs", None)
             if isinstance(logs, list):
-                prov = str((((cfg.get("t3", {}) or {}).get("llm", {}) or {}).get("provider", "unknown")))
+                prov = str(
+                    (((cfg.get("t3", {}) or {}).get("llm", {}) or {}).get("provider", "unknown"))
+                )
                 ci = str(os.environ.get("CI", ""))
                 logs.append({"llm_error": str(e), "provider": prov, "ci": ci})
         except Exception:
@@ -907,7 +981,13 @@ def plan_with_llm(ctx, state: Any, cfg: Dict[str, Any]) -> Dict[str, Any]:
             try:
                 logs = getattr(state, "logs", None)
                 if isinstance(logs, list):
-                    prov = str((((cfg.get("t3", {}) or {}).get("llm", {}) or {}).get("provider", "unknown")))
+                    prov = str(
+                        (
+                            ((cfg.get("t3", {}) or {}).get("llm", {}) or {}).get(
+                                "provider", "unknown"
+                            )
+                        )
+                    )
                     ci = str(os.environ.get("CI", ""))
                     logs.append({"llm_validation_failed": str(parsed), "provider": prov, "ci": ci})
             except Exception:
@@ -919,7 +999,9 @@ def plan_with_llm(ctx, state: Any, cfg: Dict[str, Any]) -> Dict[str, Any]:
         try:
             logs = getattr(state, "logs", None)
             if isinstance(logs, list):
-                prov = str((((cfg.get("t3", {}) or {}).get("llm", {}) or {}).get("provider", "unknown")))
+                prov = str(
+                    (((cfg.get("t3", {}) or {}).get("llm", {}) or {}).get("provider", "unknown"))
+                )
                 ci = str(os.environ.get("CI", ""))
                 logs.append({"llm_error": str(e), "provider": prov, "ci": ci})
         except Exception:

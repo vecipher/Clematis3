@@ -25,6 +25,7 @@ from .cache import CacheManager
 
 # --- M5: Scheduler wiring (PR26 — helpers & scaffolding; yields gated) ---
 from typing import TypedDict
+
 try:
     # Core from PR25 (pure, deterministic)
     from clematis.scheduler import next_turn as _sched_next_turn, on_yield as _sched_on_yield
@@ -32,16 +33,19 @@ except Exception:
     _sched_next_turn = None
     _sched_on_yield = None
 
+
 class _SliceCtx(TypedDict):
     slice_idx: int
     started_ms: int
     budgets: Dict[str, int]
     agent_id: str
 
+
 def _m5_enabled(ctx) -> bool:
     cfg = _get_cfg(ctx)
     s = (cfg.get("scheduler") if isinstance(cfg, dict) else {}) or {}
     return bool(s.get("enabled", False))
+
 
 def _clock(ctx) -> int:
     fn = getattr(ctx, "now_ms", None)
@@ -52,12 +56,13 @@ def _clock(ctx) -> int:
             return 0
     return 0
 
+
 def _derive_budgets(ctx) -> Dict[str, int]:
     cfg = _get_cfg(ctx)
     s = (cfg.get("scheduler") if isinstance(cfg, dict) else {}) or {}
-    b = (s.get("budgets") or {})
+    b = s.get("budgets") or {}
     out: Dict[str, int] = {}
-    for k in ("t1_pops","t1_iters","t2_k","t3_ops","wall_ms"):
+    for k in ("t1_pops", "t1_iters", "t2_k", "t3_ops", "wall_ms"):
         v = b.get(k)
         if v is None:
             continue
@@ -66,7 +71,7 @@ def _derive_budgets(ctx) -> Dict[str, int]:
     return out
 
 
-def _should_yield(slice_ctx: _SliceCtx, consumed: Dict[str,int]) -> str | None:
+def _should_yield(slice_ctx: _SliceCtx, consumed: Dict[str, int]) -> str | None:
     """
     Decide if a slice should yield based on budgets and elapsed time.
     Precedence: WALL_MS > BUDGET_* > QUANTUM_EXCEEDED.
@@ -102,8 +107,8 @@ def agent_ready(ctx, state, agent_id: str) -> tuple[bool, str]:
     return True, "DEFAULT_TRUE"
 
 
-
 # --- Config accessor for harmonized config usage ---
+
 
 def _get_cfg(ctx) -> Dict[str, Any]:
     """Normalize config access across ctx.cfg / ctx.config; always returns a dict."""
@@ -118,6 +123,7 @@ def _get_cfg(ctx) -> Dict[str, Any]:
     if isinstance(cfg2, SimpleNamespace):
         return dict(cfg2.__dict__)
     return {}
+
 
 # --- Helper for pick reason passthrough to scheduler logs ---
 def _get_pick_reason(ctx) -> str | None:
@@ -136,6 +142,7 @@ def _get_pick_reason(ctx) -> str | None:
 
 # --- Helper to write or capture scheduler events (PR29) ---
 
+
 def _write_or_capture_scheduler_event(ctx, event: Dict[str, Any]) -> None:
     """If driver logging is enabled on ctx, capture event instead of writing.
     Otherwise, append to scheduler.jsonl.
@@ -151,7 +158,6 @@ def _write_or_capture_scheduler_event(ctx, event: Dict[str, Any]) -> None:
         # Fall back to writing
         pass
     append_jsonl("scheduler.jsonl", event)
-
 
 
 class Orchestrator:
@@ -176,7 +182,9 @@ class Orchestrator:
             # If PR25 core is available, record the pick (no enforcement here).
             if _sched_next_turn is not None:
                 try:
-                    policy = str((_get_cfg(ctx).get("scheduler") or {}).get("policy", "round_robin"))
+                    policy = str(
+                        (_get_cfg(ctx).get("scheduler") or {}).get("policy", "round_robin")
+                    )
                     fairness = (_get_cfg(ctx).get("scheduler") or {}).get("fairness", {}) or {}
                     # We don't maintain a global sched state here; external loop owns it.
                     # This call is only to keep logs consistent with policy naming.
@@ -202,7 +210,11 @@ class Orchestrator:
                     setattr(ctx, "slice_budgets", None)
 
         # --- Boot hook: load latest snapshot once per process ---
-        boot_loaded = state.get("_boot_loaded", False) if isinstance(state, dict) else getattr(state, "_boot_loaded", False)
+        boot_loaded = (
+            state.get("_boot_loaded", False)
+            if isinstance(state, dict)
+            else getattr(state, "_boot_loaded", False)
+        )
         if not boot_loaded:
             try:
                 load_latest_snapshot(ctx, state)
@@ -219,8 +231,14 @@ class Orchestrator:
         full_cfg = _get_cfg(ctx)
         t4_cfg_for_cache = (full_cfg.get("t4") if isinstance(full_cfg, dict) else {}) or {}
         cache_cfg = t4_cfg_for_cache.get("cache", {}) if isinstance(t4_cfg_for_cache, dict) else {}
-        cache_enabled = bool(cache_cfg.get("enabled", True)) if isinstance(cache_cfg, dict) else False
-        cm_existing = (state.get("_cache_mgr") if isinstance(state, dict) else getattr(state, "_cache_mgr", None))
+        cache_enabled = (
+            bool(cache_cfg.get("enabled", True)) if isinstance(cache_cfg, dict) else False
+        )
+        cm_existing = (
+            state.get("_cache_mgr")
+            if isinstance(state, dict)
+            else getattr(state, "_cache_mgr", None)
+        )
         if cache_enabled and cm_existing is None:
             max_entries = int(cache_cfg.get("max_entries", 512))
             ttl_conf = cache_cfg.get("ttl_sec", cache_cfg.get("ttl_s", 600))
@@ -276,15 +294,21 @@ class Orchestrator:
                     "consumed": consumed,
                     "queued": [],  # external loop owns the queue
                     "ms": 0,
-                } 
-                _write_or_capture_scheduler_event(ctx,event)
+                }
+                _write_or_capture_scheduler_event(ctx, event)
                 total_ms_now = round((time.perf_counter() - total_t0) * 1000.0, 3)
                 append_jsonl(
                     "turn.jsonl",
                     {
                         "turn": turn_id,
                         "agent": agent_id,
-                        "durations_ms": {"t1": t1_ms, "t2": 0.0, "t4": 0.0, "apply": 0.0, "total": total_ms_now},
+                        "durations_ms": {
+                            "t1": t1_ms,
+                            "t2": 0.0,
+                            "t4": 0.0,
+                            "apply": 0.0,
+                            "total": total_ms_now,
+                        },
                         "t1": {
                             "pops": t1.metrics.get("pops"),
                             "iters": t1.metrics.get("iters"),
@@ -303,8 +327,16 @@ class Orchestrator:
         # --- T2 (with version-aware cache) ---
         t0 = time.perf_counter()
         # Resolve cache manager
-        cm = (state.get("_cache_mgr") if isinstance(state, dict) else getattr(state, "_cache_mgr", None))
-        ver = (state.get("version_etag") if isinstance(state, dict) else getattr(state, "version_etag", None)) or "0"
+        cm = (
+            state.get("_cache_mgr")
+            if isinstance(state, dict)
+            else getattr(state, "_cache_mgr", None)
+        )
+        ver = (
+            state.get("version_etag")
+            if isinstance(state, dict)
+            else getattr(state, "version_etag", None)
+        ) or "0"
         ns = "t2:semantic"
         key = (ver, str(input_text))
 
@@ -319,7 +351,6 @@ class Orchestrator:
                 cm.set(ns, key, t2)
         else:
             t2 = t2_semantic(ctx, state, input_text, t1)
-
 
         t2_ms = round((time.perf_counter() - t0) * 1000.0, 3)
         append_jsonl(
@@ -370,7 +401,13 @@ class Orchestrator:
                     {
                         "turn": turn_id,
                         "agent": agent_id,
-                        "durations_ms": {"t1": t1_ms, "t2": t2_ms, "t4": 0.0, "apply": 0.0, "total": total_ms_now},
+                        "durations_ms": {
+                            "t1": t1_ms,
+                            "t2": t2_ms,
+                            "t4": 0.0,
+                            "apply": 0.0,
+                            "total": total_ms_now,
+                        },
                         "t1": {
                             "pops": t1.metrics.get("pops"),
                             "iters": t1.metrics.get("iters"),
@@ -391,8 +428,12 @@ class Orchestrator:
                 return TurnResult(line="", events=[])
 
         # --- GEL observe (optional; gated by graph.enabled) ---
-        graph_cfg_all = (_get_cfg(ctx).get("graph") if isinstance(_get_cfg(ctx), dict) else {}) or {}
-        graph_enabled = bool(graph_cfg_all.get("enabled", False)) if isinstance(graph_cfg_all, dict) else False
+        graph_cfg_all = (
+            _get_cfg(ctx).get("graph") if isinstance(_get_cfg(ctx), dict) else {}
+        ) or {}
+        graph_enabled = (
+            bool(graph_cfg_all.get("enabled", False)) if isinstance(graph_cfg_all, dict) else False
+        )
         if graph_enabled:
             t0_gel = time.perf_counter()
             items = getattr(t2, "retrieved", []) or []  # gel adapts dicts/objs/tuples
@@ -459,7 +500,13 @@ class Orchestrator:
                     {
                         "turn": turn_id,
                         "agent": agent_id,
-                        "durations_ms": {"t1": t1_ms, "t2": t2_ms, "t4": 0.0, "apply": 0.0, "total": total_ms_now},
+                        "durations_ms": {
+                            "t1": t1_ms,
+                            "t2": t2_ms,
+                            "t4": 0.0,
+                            "apply": 0.0,
+                            "total": total_ms_now,
+                        },
                         "t1": {
                             "pops": t1.metrics.get("pops"),
                             "iters": t1.metrics.get("iters"),
@@ -492,26 +539,40 @@ class Orchestrator:
             hits = []
             for r in getattr(t2_alt, "retrieved", []) or []:
                 if isinstance(r, dict):
-                    hits.append({
-                        "id": str(r.get("id")),
-                        "score": float(r.get("_score", r.get("score", 0.0)) or 0.0),
-                        "owner": str(r.get("owner", "any")),
-                        "quarter": str(r.get("quarter", "")),
-                    })
+                    hits.append(
+                        {
+                            "id": str(r.get("id")),
+                            "score": float(r.get("_score", r.get("score", 0.0)) or 0.0),
+                            "owner": str(r.get("owner", "any")),
+                            "quarter": str(r.get("quarter", "")),
+                        }
+                    )
                 else:
                     rid = str(getattr(r, "id", ""))
                     if not rid:
                         continue
-                    hits.append({
-                        "id": rid,
-                        "score": float(getattr(r, "score", 0.0) or 0.0),
-                        "owner": str(getattr(r, "owner", "any")),
-                        "quarter": str(getattr(r, "quarter", "")),
-                    })
+                    hits.append(
+                        {
+                            "id": rid,
+                            "score": float(getattr(r, "score", 0.0) or 0.0),
+                            "owner": str(getattr(r, "owner", "any")),
+                            "quarter": str(getattr(r, "quarter", "")),
+                        }
+                    )
             return {"retrieved": hits, "metrics": getattr(t2_alt, "metrics", {})}
 
-        requested_retrieve = any(getattr(op, "kind", None) == "RequestRetrieve" for op in getattr(plan, "ops", []) or [])
-        rag_metrics = {"rag_used": False, "rag_blocked": False, "pre_s_max": 0.0, "post_s_max": 0.0, "k_retrieved": 0, "owner": None, "tier_pref": None}
+        requested_retrieve = any(
+            getattr(op, "kind", None) == "RequestRetrieve" for op in getattr(plan, "ops", []) or []
+        )
+        rag_metrics = {
+            "rag_used": False,
+            "rag_blocked": False,
+            "pre_s_max": 0.0,
+            "post_s_max": 0.0,
+            "k_retrieved": 0,
+            "owner": None,
+            "tier_pref": None,
+        }
         if requested_retrieve and max_rag_loops >= 1:
             t0_rag = time.perf_counter()
             plan, rag_metrics = rag_once(bundle, plan, _retrieve_fn, already_used=False)
@@ -524,10 +585,14 @@ class Orchestrator:
         dialog_bundle = make_dialog_bundle(ctx, state, t1, t2, plan)
 
         # Backend selection
-        backend_cfg = str(t3cfg.get("backend", "rulebased")) if isinstance(t3cfg, dict) else "rulebased"
+        backend_cfg = (
+            str(t3cfg.get("backend", "rulebased")) if isinstance(t3cfg, dict) else "rulebased"
+        )
         llm_cfg = t3cfg.get("llm", {}) if isinstance(t3cfg, dict) else {}
         adapter = (
-            state.get("llm_adapter", None) if isinstance(state, dict) else getattr(state, "llm_adapter", None)
+            state.get("llm_adapter", None)
+            if isinstance(state, dict)
+            else getattr(state, "llm_adapter", None)
         ) or getattr(ctx, "llm_adapter", None)
 
         backend_used = "rulebased"
@@ -570,7 +635,9 @@ class Orchestrator:
             k = getattr(op, "kind", None)
             ops_counts[k] = ops_counts.get(k, 0) + 1
 
-        policy_backend = str(t3cfg.get("backend", "rulebased")) if isinstance(t3cfg, dict) else "rulebased"
+        policy_backend = (
+            str(t3cfg.get("backend", "rulebased")) if isinstance(t3cfg, dict) else "rulebased"
+        )
         append_jsonl(
             "t3_plan.jsonl",
             {
@@ -578,7 +645,11 @@ class Orchestrator:
                 "agent": agent_id,
                 "policy_backend": policy_backend,
                 "backend": backend_used,
-                **({"backend_fallback": backend_fallback, "fallback_reason": fallback_reason} if backend_fallback else {}),
+                **(
+                    {"backend_fallback": backend_fallback, "fallback_reason": fallback_reason}
+                    if backend_fallback
+                    else {}
+                ),
                 "ops_counts": ops_counts,
                 "requested_retrieve": bool(requested_retrieve),
                 "rag_used": bool(rag_metrics.get("rag_used", False)),
@@ -592,10 +663,21 @@ class Orchestrator:
         # Dialogue logging
         dlg_extra = {}
         if backend_used == "llm":
-            adapter_name = getattr(adapter, "name", adapter.__class__.__name__ if hasattr(adapter, "__class__") else "Unknown")
+            adapter_name = getattr(
+                adapter,
+                "name",
+                adapter.__class__.__name__ if hasattr(adapter, "__class__") else "Unknown",
+            )
             model = str(llm_cfg.get("model", ""))
             temperature = float(llm_cfg.get("temperature", 0.2))
-            dlg_extra.update({"backend": "llm", "adapter": adapter_name, "model": model, "temperature": temperature})
+            dlg_extra.update(
+                {
+                    "backend": "llm",
+                    "adapter": adapter_name,
+                    "model": model,
+                    "temperature": temperature,
+                }
+            )
         else:
             dlg_extra.update({"backend": "rulebased"})
 
@@ -616,7 +698,9 @@ class Orchestrator:
 
         # Kill switch (t4.enabled). Default True if unspecified.
         t4_cfg_full = (_get_cfg(ctx).get("t4") if isinstance(_get_cfg(ctx), dict) else {}) or {}
-        t4_enabled = bool(t4_cfg_full.get("enabled", True)) if isinstance(t4_cfg_full, dict) else True
+        t4_enabled = (
+            bool(t4_cfg_full.get("enabled", True)) if isinstance(t4_cfg_full, dict) else True
+        )
 
         # --- T4 / Apply (honor kill switch) ---
         if t4_enabled:
@@ -648,14 +732,18 @@ class Orchestrator:
                         "turn": turn_id,
                         "slice": slice_ctx["slice_idx"],
                         "agent": agent_id,
-                        "policy": (_get_cfg(ctx).get("scheduler") or {}).get("policy", "round_robin"),
+                        "policy": (_get_cfg(ctx).get("scheduler") or {}).get(
+                            "policy", "round_robin"
+                        ),
                         **({"pick_reason": _get_pick_reason(ctx)} if _get_pick_reason(ctx) else {}),
                         "reason": reason,
                         "enforced": True,
                         "stage_end": "T4",
                         "quantum_ms": slice_ctx["budgets"].get("quantum_ms"),
                         "wall_ms": slice_ctx["budgets"].get("wall_ms"),
-                        "budgets": {k: v for k, v in slice_ctx["budgets"].items() if k != "quantum_ms"},
+                        "budgets": {
+                            k: v for k, v in slice_ctx["budgets"].items() if k != "quantum_ms"
+                        },
                         "consumed": consumed,
                         "queued": [],
                         "ms": 0,
@@ -667,7 +755,13 @@ class Orchestrator:
                         {
                             "turn": turn_id,
                             "agent": agent_id,
-                            "durations_ms": {"t1": t1_ms, "t2": t2_ms, "t4": t4_ms, "apply": 0.0, "total": total_ms_now},
+                            "durations_ms": {
+                                "t1": t1_ms,
+                                "t2": t2_ms,
+                                "t4": t4_ms,
+                                "apply": 0.0,
+                                "total": total_ms_now,
+                            },
                             "t1": {
                                 "pops": t1.metrics.get("pops"),
                                 "iters": t1.metrics.get("iters"),
@@ -690,8 +784,14 @@ class Orchestrator:
                     )
                     return TurnResult(line=utter if 'utter' in locals() else "", events=[])
             # --- GEL decay tick (optional; run before Apply so snapshot includes decay) ---
-            graph_cfg_all2 = (_get_cfg(ctx).get("graph") if isinstance(_get_cfg(ctx), dict) else {}) or {}
-            graph_enabled2 = bool(graph_cfg_all2.get("enabled", False)) if isinstance(graph_cfg_all2, dict) else False
+            graph_cfg_all2 = (
+                _get_cfg(ctx).get("graph") if isinstance(_get_cfg(ctx), dict) else {}
+            ) or {}
+            graph_enabled2 = (
+                bool(graph_cfg_all2.get("enabled", False))
+                if isinstance(graph_cfg_all2, dict)
+                else False
+            )
             if graph_enabled2:
                 t0_decay = time.perf_counter()
                 try:
@@ -714,9 +814,15 @@ class Orchestrator:
             # --- PR24: GEL merge/split/promotion (optional; deterministic, bounded) ---
             if graph_enabled2:
                 try:
-                    mg_cfg = (graph_cfg_all2.get("merge") if isinstance(graph_cfg_all2, dict) else {}) or {}
-                    sp_cfg = (graph_cfg_all2.get("split") if isinstance(graph_cfg_all2, dict) else {}) or {}
-                    pr_cfg = (graph_cfg_all2.get("promotion") if isinstance(graph_cfg_all2, dict) else {}) or {}
+                    mg_cfg = (
+                        graph_cfg_all2.get("merge") if isinstance(graph_cfg_all2, dict) else {}
+                    ) or {}
+                    sp_cfg = (
+                        graph_cfg_all2.get("split") if isinstance(graph_cfg_all2, dict) else {}
+                    ) or {}
+                    pr_cfg = (
+                        graph_cfg_all2.get("promotion") if isinstance(graph_cfg_all2, dict) else {}
+                    ) or {}
 
                     do_merge = bool(mg_cfg.get("enabled", False))
                     do_split = bool(sp_cfg.get("enabled", False))
@@ -783,7 +889,9 @@ class Orchestrator:
                     "clamps": apply.clamps,
                     "version_etag": apply.version_etag,
                     "snapshot": apply.snapshot_path,
-                    "cache_invalidations": int((getattr(apply, "metrics", {}) or {}).get("cache_invalidations", 0)),
+                    "cache_invalidations": int(
+                        (getattr(apply, "metrics", {}) or {}).get("cache_invalidations", 0)
+                    ),
                     "ms": apply_ms,
                     **({"now": now} if now else {}),
                 },
@@ -799,14 +907,18 @@ class Orchestrator:
                         "turn": turn_id,
                         "slice": slice_ctx["slice_idx"],
                         "agent": agent_id,
-                        "policy": (_get_cfg(ctx).get("scheduler") or {}).get("policy", "round_robin"),
+                        "policy": (_get_cfg(ctx).get("scheduler") or {}).get(
+                            "policy", "round_robin"
+                        ),
                         **({"pick_reason": _get_pick_reason(ctx)} if _get_pick_reason(ctx) else {}),
                         "reason": reason,
                         "enforced": True,
                         "stage_end": "Apply",
                         "quantum_ms": slice_ctx["budgets"].get("quantum_ms"),
                         "wall_ms": slice_ctx["budgets"].get("wall_ms"),
-                        "budgets": {k: v for k, v in slice_ctx["budgets"].items() if k != "quantum_ms"},
+                        "budgets": {
+                            k: v for k, v in slice_ctx["budgets"].items() if k != "quantum_ms"
+                        },
                         "consumed": consumed,
                         "queued": [],
                         "ms": 0,
@@ -818,7 +930,13 @@ class Orchestrator:
                         {
                             "turn": turn_id,
                             "agent": agent_id,
-                            "durations_ms": {"t1": t1_ms, "t2": t2_ms, "t4": t4_ms, "apply": apply_ms, "total": total_ms_now},
+                            "durations_ms": {
+                                "t1": t1_ms,
+                                "t2": t2_ms,
+                                "t4": t4_ms,
+                                "apply": apply_ms,
+                                "total": total_ms_now,
+                            },
                             "t1": {
                                 "pops": t1.metrics.get("pops"),
                                 "iters": t1.metrics.get("iters"),
@@ -844,11 +962,22 @@ class Orchestrator:
             # Bypassed: provide inert placeholders; no t4/apply logs
             t4_ms = 0.0
             apply_ms = 0.0
-            t4 = SimpleNamespace(approved_deltas=[], rejected_ops=[], reasons=["T4_DISABLED"], metrics={"counts": {"approved": 0}})
-            apply = SimpleNamespace(applied=0, clamps=0, version_etag=getattr(state, "version_etag", None), snapshot_path=None)
+            t4 = SimpleNamespace(
+                approved_deltas=[],
+                rejected_ops=[],
+                reasons=["T4_DISABLED"],
+                metrics={"counts": {"approved": 0}},
+            )
+            apply = SimpleNamespace(
+                applied=0,
+                clamps=0,
+                version_etag=getattr(state, "version_etag", None),
+                snapshot_path=None,
+            )
 
         # --- Health summary + per-turn rollup ---
         from . import health
+
         health.check_and_log(ctx, state, t1, t2, t4, apply, append_jsonl)
 
         total_ms = round((time.perf_counter() - total_t0) * 1000.0, 3)
@@ -857,7 +986,13 @@ class Orchestrator:
             {
                 "turn": turn_id,
                 "agent": agent_id,
-                "durations_ms": {"t1": t1_ms, "t2": t2_ms, "t4": t4_ms, "apply": apply_ms, "total": total_ms},
+                "durations_ms": {
+                    "t1": t1_ms,
+                    "t2": t2_ms,
+                    "t4": t4_ms,
+                    "apply": apply_ms,
+                    "total": total_ms,
+                },
                 "t1": {
                     "pops": t1.metrics.get("pops"),
                     "iters": t1.metrics.get("iters"),
@@ -872,10 +1007,14 @@ class Orchestrator:
                     "approved": len(getattr(t4, "approved_deltas", [])),
                     "rejected": len(getattr(t4, "rejected_ops", [])),
                 },
-                **({
-                    "slice_idx": (slice_ctx["slice_idx"] if slice_ctx is not None else None),
-                    "yielded": False,
-                } if slice_ctx is not None else {}),
+                **(
+                    {
+                        "slice_idx": (slice_ctx["slice_idx"] if slice_ctx is not None else None),
+                        "yielded": False,
+                    }
+                    if slice_ctx is not None
+                    else {}
+                ),
                 **({"now": now} if now else {}),
             },
         )

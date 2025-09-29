@@ -31,6 +31,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 # Config handling (with defaults)
 # ---------------------------
 
+
 def _graph_cfg(ctx: Any) -> Dict[str, Any]:
     # Accept both dict contexts and objects with .config/.cfg
     if isinstance(ctx, dict):
@@ -92,6 +93,7 @@ def _graph_cfg(ctx: Any) -> Dict[str, Any]:
 # ---------------------------
 # State access helpers
 # ---------------------------
+
 
 def _ensure_graph_store(state: Any) -> Dict[str, Any]:
     """Return the mutable graph store attached to state, creating if absent."""
@@ -166,7 +168,10 @@ def _as_id_score(item: Any) -> Tuple[str, float]:
 # Graph utilities for PR24 (deterministic)
 # ---------------------------
 
-def _build_adj(edges: Dict[str, Any], *, nodes: Optional[List[str]] = None, min_w: float = 0.0) -> Dict[str, List[str]]:
+
+def _build_adj(
+    edges: Dict[str, Any], *, nodes: Optional[List[str]] = None, min_w: float = 0.0
+) -> Dict[str, List[str]]:
     """Undirected adjacency filtered by |weight| >= min_w; neighbors sorted.
     If `nodes` provided, restrict to that induced set.
     """
@@ -183,7 +188,8 @@ def _build_adj(edges: Dict[str, Any], *, nodes: Optional[List[str]] = None, min_
             w = 0.0
         if w < float(min_w):
             continue
-        a = str(rec.get("src")); b = str(rec.get("dst"))
+        a = str(rec.get("src"))
+        b = str(rec.get("dst"))
         if allow is not None and (a not in allow or b not in allow):
             continue
         adj.setdefault(a, [])
@@ -223,7 +229,8 @@ def _component_edges(edges: Dict[str, Any], nodes: List[str]) -> List[float]:
     for key, rec in edges.items():
         if not isinstance(rec, dict):
             continue
-        a = str(rec.get("src")); b = str(rec.get("dst"))
+        a = str(rec.get("src"))
+        b = str(rec.get("dst"))
         if a in node_set and b in node_set:
             try:
                 ws.append(abs(float(rec.get("weight", 0.0))))
@@ -241,6 +248,7 @@ def _diameter_unweighted(adj: Dict[str, List[str]], nodes: List[str]) -> int:
         return 0
     node_set = set(nodes)
     import collections
+
     diam = 0
     for s in nodes:  # nodes already sorted
         # BFS from s restricted to the component
@@ -265,6 +273,7 @@ def _diameter_unweighted(adj: Dict[str, List[str]], nodes: List[str]) -> int:
 # PR24: Merge / Split / Promotion (feature-flagged, deterministic)
 # ---------------------------
 
+
 def merge_candidates(ctx: Any, state: Any) -> List[Dict[str, Any]]:
     cfg = _graph_cfg(ctx)
     mg = cfg.get("merge", {})
@@ -288,14 +297,16 @@ def merge_candidates(ctx: Any, state: Any) -> List[Dict[str, Any]]:
         ws = _component_edges(edges, nodes)
         avg_w = (sum(ws) / len(ws)) if ws else 0.0
         sig = "|".join(nodes)
-        out.append({
-            "type": "merge_candidate",
-            "nodes": nodes,
-            "size": len(nodes),
-            "avg_w": avg_w,
-            "diameter": d,
-            "signature": sig,
-        })
+        out.append(
+            {
+                "type": "merge_candidate",
+                "nodes": nodes,
+                "size": len(nodes),
+                "avg_w": avg_w,
+                "diameter": d,
+                "signature": sig,
+            }
+        )
 
     # Deterministic ordering
     out.sort(key=lambda c: (-float(c["avg_w"]), -int(c["size"]), tuple(c["nodes"])))
@@ -308,13 +319,18 @@ def apply_merge(ctx: Any, state: Any, cluster: Dict[str, Any]) -> Dict[str, Any]
     merges = meta.setdefault("merges", [])
     rec = {
         "nodes": list(cluster.get("nodes", [])),
-        "size": int(cluster.get("size", len(cluster.get("nodes", [])))) ,
+        "size": int(cluster.get("size", len(cluster.get("nodes", [])))),
         "avg_w": float(cluster.get("avg_w", 0.0)),
         "diameter": int(cluster.get("diameter", 0)),
         "signature": str(cluster.get("signature", "")),
     }
     merges.append(rec)
-    return {"event": "merge_applied", "size": rec["size"], "avg_w": rec["avg_w"], "diameter": rec["diameter"]}
+    return {
+        "event": "merge_applied",
+        "size": rec["size"],
+        "avg_w": rec["avg_w"],
+        "diameter": rec["diameter"],
+    }
 
 
 def split_candidates(ctx: Any, state: Any) -> List[Dict[str, Any]]:
@@ -339,7 +355,8 @@ def split_candidates(ctx: Any, state: Any) -> List[Dict[str, Any]]:
         for key, rec in edges.items():
             if not isinstance(rec, dict):
                 continue
-            a = str(rec.get("src")); b = str(rec.get("dst"))
+            a = str(rec.get("src"))
+            b = str(rec.get("dst"))
             if a in node_set and b in node_set:
                 total_in += 1
                 try:
@@ -356,14 +373,16 @@ def split_candidates(ctx: Any, state: Any) -> List[Dict[str, Any]]:
         if any(len(c) < min_comp for c in subcomps):
             continue
         sig = "|".join(nodes)
-        out.append({
-            "type": "split_candidate",
-            "original": nodes,
-            "parts": subcomps,
-            "removed_edges": int(removed),
-            "orig_edges": int(total_in),
-            "signature": sig,
-        })
+        out.append(
+            {
+                "type": "split_candidate",
+                "original": nodes,
+                "parts": subcomps,
+                "removed_edges": int(removed),
+                "orig_edges": int(total_in),
+                "signature": sig,
+            }
+        )
 
     out.sort(key=lambda s: (-int(s["removed_edges"]), tuple(s["original"])))
     return out
@@ -381,7 +400,11 @@ def apply_split(ctx: Any, state: Any, split: Dict[str, Any]) -> Dict[str, Any]:
         "signature": str(split.get("signature", "")),
     }
     splits.append(rec)
-    return {"event": "split_applied", "removed_edges": rec["removed_edges"], "parts": len(rec["parts"]) }
+    return {
+        "event": "split_applied",
+        "removed_edges": rec["removed_edges"],
+        "parts": len(rec["parts"]),
+    }
 
 
 def promote_clusters(ctx: Any, state: Any, clusters: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -404,15 +427,17 @@ def promote_clusters(ctx: Any, state: Any, clusters: List[Dict[str, Any]]) -> Li
         nodes_sorted = sorted(nodes)
         cid = f"c::{nodes_sorted[0]}"  # deterministic id by lexmin member
         if mode == "concat_k":
-            label = "+".join(nodes_sorted[:max(1, topk)])
+            label = "+".join(nodes_sorted[: max(1, topk)])
         else:
             label = nodes_sorted[0]
-        promos.append({
-            "concept_id": cid,
-            "label": label,
-            "members": nodes_sorted,
-            "attach_weight": attach_w,
-        })
+        promos.append(
+            {
+                "concept_id": cid,
+                "label": label,
+                "members": nodes_sorted,
+                "attach_weight": attach_w,
+            }
+        )
     # deterministic order by concept id
     promos.sort(key=lambda p: p["concept_id"])
     return promos
@@ -466,7 +491,15 @@ def apply_promotion(ctx: Any, state: Any, promo: Dict[str, Any]) -> Dict[str, An
 # Public API
 # ---------------------------
 
-def observe_retrieval(ctx: Any, state: Any, items: Iterable[Any], *, turn: Optional[int] = None, agent: Optional[str] = None) -> Dict[str, Any]:
+
+def observe_retrieval(
+    ctx: Any,
+    state: Any,
+    items: Iterable[Any],
+    *,
+    turn: Optional[int] = None,
+    agent: Optional[str] = None,
+) -> Dict[str, Any]:
     """Observe a retrieval list and update co‑activation edges deterministically.
 
     Args:
@@ -490,13 +523,11 @@ def observe_retrieval(ctx: Any, state: Any, items: Iterable[Any], *, turn: Optio
     clamp_max = float(upd.get("clamp_max", 1.0))
 
     # Normalize, filter, and sort input deterministically: (-score, id)
-    norm: List[Tuple[str, float]] = [
-        _as_id_score(it) for it in (items or [])
-    ]
+    norm: List[Tuple[str, float]] = [_as_id_score(it) for it in (items or [])]
     k_in = len(norm)
     norm = [(i, s) for (i, s) in norm if s >= threshold]
     norm.sort(key=lambda t: (-t[1], t[0]))
-    used = norm[: top_k]
+    used = norm[:top_k]
 
     # Generate undirected pairs in lexicographic id order, cap total pairs
     pairs_updated = 0
@@ -566,7 +597,14 @@ def observe_retrieval(ctx: Any, state: Any, items: Iterable[Any], *, turn: Optio
     }
 
 
-def tick(ctx: Any, state: Any, *, decay_dt: int = 1, turn: Optional[int] = None, agent: Optional[str] = None) -> Dict[str, Any]:
+def tick(
+    ctx: Any,
+    state: Any,
+    *,
+    decay_dt: int = 1,
+    turn: Optional[int] = None,
+    agent: Optional[str] = None,
+) -> Dict[str, Any]:
     """Apply exponential decay to all edges; drop those below the floor.
 
     Args:
@@ -583,7 +621,14 @@ def tick(ctx: Any, state: Any, *, decay_dt: int = 1, turn: Optional[int] = None,
     floor = float(cfg["decay"].get("floor", 0.0))
 
     if not edges:
-        return {"event": "edge_decay", "agent": agent, "decayed_edges": 0, "dropped_edges": 0, "half_life_turns": half_life, "floor": floor}
+        return {
+            "event": "edge_decay",
+            "agent": agent,
+            "decayed_edges": 0,
+            "dropped_edges": 0,
+            "half_life_turns": half_life,
+            "floor": floor,
+        }
 
     # Compute decay factor once; if half_life is huge, this approaches 1.
     dt = max(0, int(decay_dt))

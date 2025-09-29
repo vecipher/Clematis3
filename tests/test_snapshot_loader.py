@@ -1,5 +1,3 @@
-
-
 from types import SimpleNamespace
 import json
 import os
@@ -13,6 +11,7 @@ from clematis.engine.types import ProposedDelta, T4Result
 # -----------------
 # Helper builders
 # -----------------
+
 
 def mk_ctx(turn=0, agent="Tester", snapshot_dir=None, t4_overrides=None):
     cfg = {
@@ -54,11 +53,13 @@ def mk_t4(deltas):
 # Fake stores
 # -----------------
 
+
 class ExportImportStore:
     """
     Store that supports export_state / import_state for snapshots.
     Keeps weights in a .w dict keyed by (target_kind, target_id, attr).
     """
+
     def __init__(self, wmin=-1.0, wmax=1.0):
         self.w = {}
         self.wmin = float(wmin)
@@ -106,6 +107,7 @@ class WeightsOnlyStore:
     """
     Store without export/import; snapshot should fall back to .w dict weights.
     """
+
     def __init__(self, wmin=-1.0, wmax=1.0):
         self.w = {}
         self.wmin = float(wmin)
@@ -133,6 +135,7 @@ class WeightsOnlyStore:
 # -----------------
 # Tests
 # -----------------
+
 
 def test_loader_with_export_import_store(tmp_path):
     snap_dir = tmp_path / "snaps"
@@ -206,6 +209,9 @@ def test_loader_idempotent_twice(tmp_path):
     w1 = dict(store.w)
 
     info2 = load_latest_snapshot(ctx, state)
-    assert info2["loaded"] in (True, False)  # loader may report True again depending on path; both acceptable
+    assert info2["loaded"] in (
+        True,
+        False,
+    )  # loader may report True again depending on path; both acceptable
     assert store.w == w1
     assert state.version_etag == "1"

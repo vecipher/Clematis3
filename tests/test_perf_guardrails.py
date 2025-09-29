@@ -1,5 +1,3 @@
-
-
 import math
 import os
 import random
@@ -15,19 +13,30 @@ t4_filter = _t4.t4_filter
 # Minimal helpers (no engine deps)
 # --------------------------
 
+
 class _Ctx:
     def __init__(self, cfg):
         self.config = cfg
         self.cfg = cfg
 
+
 class _State:
     pass
 
+
 class _Op:
     __slots__ = ("target_kind", "target_id", "attr", "delta", "kind", "op_idx", "idx")
-    def __init__(self, target_id: str, delta: float, kind: str = "EditGraph",
-                 target_kind: str = "Node", attr: str = "weight",
-                 op_idx: int | None = None, idx: int | None = None):
+
+    def __init__(
+        self,
+        target_id: str,
+        delta: float,
+        kind: str = "EditGraph",
+        target_kind: str = "Node",
+        attr: str = "weight",
+        op_idx: int | None = None,
+        idx: int | None = None,
+    ):
         self.target_kind = target_kind
         self.target_id = target_id
         self.attr = attr
@@ -47,7 +56,12 @@ def _mk_cfg(churn=64, l2=1.5, novelty=0.3):
             "cooldowns": {"EditGraph": 2, "CreateGraph": 10},
             "weight_min": -1.0,
             "weight_max": 1.0,
-            "cache": {"enabled": True, "namespaces": ["t2:semantic"], "max_entries": 512, "ttl_sec": 600},
+            "cache": {
+                "enabled": True,
+                "namespaces": ["t2:semantic"],
+                "max_entries": 512,
+                "ttl_sec": 600,
+            },
         }
     }
 
@@ -115,10 +129,14 @@ def test_t4_relative_scaling_doubling_does_not_quadruple():
     state = _State()
 
     plan1 = _gen_ops(2_000, seed=7)
-    t1 = time.perf_counter(); _ = t4_filter(ctx, state, {}, {}, plan1, {}); dt1 = time.perf_counter() - t1
+    t1 = time.perf_counter()
+    _ = t4_filter(ctx, state, {}, {}, plan1, {})
+    dt1 = time.perf_counter() - t1
 
     plan2 = _gen_ops(4_000, seed=8)
-    t2 = time.perf_counter(); _ = t4_filter(ctx, state, {}, {}, plan2, {}); dt2 = time.perf_counter() - t2
+    t2 = time.perf_counter()
+    _ = t4_filter(ctx, state, {}, {}, plan2, {})
+    dt2 = time.perf_counter() - t2
 
     ratio = dt2 / max(dt1, 1e-6)
     # Allow up to ~3x when doubling input (quite generous); flags egregious superlinear regressions.

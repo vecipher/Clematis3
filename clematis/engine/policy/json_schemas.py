@@ -3,6 +3,7 @@
 These schemas are intentionally small and dependency-free so CI stays deterministic.
 Keep the limits in sync with the enforcement in `sanitize.parse_and_validate`.
 """
+
 from typing import Final, Dict, Any
 
 # Hard caps (mirrored in sanitizer). If you change these, update sanitize.py too.

@@ -1,5 +1,3 @@
-
-
 import pytest
 
 from clematis.engine.util.ring import DedupeRing
@@ -49,7 +47,9 @@ def test_dedupe_ring_discard_and_clear():
     assert not r.contains("z")
 
     # Add a few, then clear
-    r.add("x"); r.add("y"); r.add("z")
+    r.add("x")
+    r.add("y")
+    r.add("z")
     assert r.contains("x") and r.contains("y") and r.contains("z")
     r.clear()
     assert len(r) == 0

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 from __future__ import annotations
+
 """
 PR42 — Examples smoke checker
 
@@ -18,9 +19,11 @@ import glob
 import json
 import os
 import sys
+
 # Ensure repo root is on sys.path when invoked as a file (not -m)
 try:
     import pathlib as _pathlib  # local import to avoid polluting namespace
+
     _REPO_ROOT = _pathlib.Path(__file__).resolve().parents[1]
     _p = str(_REPO_ROOT)
     if _p not in sys.path:
@@ -32,11 +35,15 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 # ------------------------------ imports ------------------------------------
 
+
 def _import_or_die():
     try:
         from configs.validate import validate_config_verbose  # type: ignore
     except Exception as e:
-        print(f"FATAL: could not import configs.validate.validate_config_verbose: {e}", file=sys.stderr)
+        print(
+            f"FATAL: could not import configs.validate.validate_config_verbose: {e}",
+            file=sys.stderr,
+        )
         sys.exit(2)
     try:
         from clematis.engine.stages.t2 import run_t2  # type: ignore
@@ -58,14 +65,24 @@ def _load_yaml(path: str) -> Mapping[str, Any]:
 
 # ------------------------------ helpers ------------------------------------
 
+
 def _gate_on(cfg: Mapping[str, Any]) -> bool:
     perf = cfg.get("perf") or {}
-    t2 = (cfg.get("t2") or {})
-    q = (t2.get("quality") or {})
-    return bool((perf.get("enabled") is True or str(perf.get("enabled")).lower() == "true")
-                and ((perf.get("metrics") or {}).get("report_memory") is True or str((perf.get("metrics") or {}).get("report_memory")).lower() == "true")
-                and (q.get("shadow") is True or q.get("enabled") is True
-                     or str(q.get("shadow")).lower() == "true" or str(q.get("enabled")).lower() == "true"))
+    t2 = cfg.get("t2") or {}
+    q = t2.get("quality") or {}
+    return bool(
+        (perf.get("enabled") is True or str(perf.get("enabled")).lower() == "true")
+        and (
+            (perf.get("metrics") or {}).get("report_memory") is True
+            or str((perf.get("metrics") or {}).get("report_memory")).lower() == "true"
+        )
+        and (
+            q.get("shadow") is True
+            or q.get("enabled") is True
+            or str(q.get("shadow")).lower() == "true"
+            or str(q.get("enabled")).lower() == "true"
+        )
+    )
 
 
 def _extract_ranked_ids(result_obj: Any, k: int = 10) -> List[str]:
@@ -108,7 +125,15 @@ def _metrics_dict(result_obj: Any) -> Dict[str, Any]:
 
 # ------------------------------ runner -------------------------------------
 
-def _run_example(path: str, validate_config_verbose, run_t2, queries: Sequence[str], repeat: int, check_traces: bool) -> Tuple[bool, str]:
+
+def _run_example(
+    path: str,
+    validate_config_verbose,
+    run_t2,
+    queries: Sequence[str],
+    repeat: int,
+    check_traces: bool,
+) -> Tuple[bool, str]:
     cfg = _load_yaml(path)
     try:
         normalized, warnings = validate_config_verbose(cfg)
@@ -165,17 +190,23 @@ def _run_example(path: str, validate_config_verbose, run_t2, queries: Sequence[s
         if not ref_metrics or "t2.reader_mode" not in ref_metrics:
             return False, "gate on but 't2.reader_mode' metric missing"
         # If MMR enabled in config, expect selection metric when it runs
-        qcfg = ((cfg.get("t2") or {}).get("quality") or {})
-        mmr_cfg = (qcfg.get("mmr") or {})
-        if (str(qcfg.get("enabled")).lower() == "true") and (str(mmr_cfg.get("enabled")).lower() == "true"):
+        qcfg = (cfg.get("t2") or {}).get("quality") or {}
+        mmr_cfg = qcfg.get("mmr") or {}
+        if (str(qcfg.get("enabled")).lower() == "true") and (
+            str(mmr_cfg.get("enabled")).lower() == "true"
+        ):
             if not any(k.startswith("t2q.mmr") for k in ref_metrics.keys()):
                 return False, "mmr enabled but 't2q.mmr.*' metrics not found under gate"
 
     # Optional: trace sanity (best-effort)
     if gate_on and check_traces:
-        perf = (cfg.get("perf") or {})
-        metrics = (perf.get("metrics") or {})
-        tdir = metrics.get("trace_dir") or ((cfg.get("t2") or {}).get("quality") or {}).get("trace_dir") or "logs/quality"
+        perf = cfg.get("perf") or {}
+        metrics = perf.get("metrics") or {}
+        tdir = (
+            metrics.get("trace_dir")
+            or ((cfg.get("t2") or {}).get("quality") or {}).get("trace_dir")
+            or "logs/quality"
+        )
         tried = [os.path.join(str(tdir), "rq_traces.jsonl")]
         ok = False
         for candidate in tried:
@@ -190,7 +221,10 @@ def _run_example(path: str, validate_config_verbose, run_t2, queries: Sequence[s
                 except Exception:
                     pass
         if not ok:
-            return False, f"gate on but could not verify traces in {tdir} (set --no-check-traces to ignore)"
+            return (
+                False,
+                f"gate on but could not verify traces in {tdir} (set --no-check-traces to ignore)",
+            )
 
     return True, "ok"
 
@@ -199,12 +233,31 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     validate_config_verbose, run_t2 = _import_or_die()
 
     p = argparse.ArgumentParser(description="Smoke-check example YAMLs for M7")
-    p.add_argument("--examples", nargs="*", help="Specific example YAMLs to run (glob patterns supported)")
-    p.add_argument("--examples-glob", nargs="*", help="Additional glob patterns for examples (e.g., 'examples/quality/*.yaml')")
-    p.add_argument("--all", action="store_true", help="Run the default set of examples/quality/*.yaml")
-    p.add_argument("--repeat", type=int, default=2, help="Repeat runs per example to check determinism (default 2)")
-    p.add_argument("--no-check-traces", action="store_true", help="Do not verify presence of rq_traces.jsonl when gate is on")
-    p.add_argument("--fail-fast", action="store_true", help="Exit immediately on first example failure")
+    p.add_argument(
+        "--examples", nargs="*", help="Specific example YAMLs to run (glob patterns supported)"
+    )
+    p.add_argument(
+        "--examples-glob",
+        nargs="*",
+        help="Additional glob patterns for examples (e.g., 'examples/quality/*.yaml')",
+    )
+    p.add_argument(
+        "--all", action="store_true", help="Run the default set of examples/quality/*.yaml"
+    )
+    p.add_argument(
+        "--repeat",
+        type=int,
+        default=2,
+        help="Repeat runs per example to check determinism (default 2)",
+    )
+    p.add_argument(
+        "--no-check-traces",
+        action="store_true",
+        help="Do not verify presence of rq_traces.jsonl when gate is on",
+    )
+    p.add_argument(
+        "--fail-fast", action="store_true", help="Exit immediately on first example failure"
+    )
 
     args = p.parse_args(argv)
 
@@ -249,7 +302,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     failures: List[Tuple[str, str]] = []
     for path in examples:
-        ok, msg = _run_example(path, validate_config_verbose, run_t2, queries, repeat=args.repeat, check_traces=(not args.no_check_traces))
+        ok, msg = _run_example(
+            path,
+            validate_config_verbose,
+            run_t2,
+            queries,
+            repeat=args.repeat,
+            check_traces=(not args.no_check_traces),
+        )
         status = "PASS" if ok else "FAIL"
         print(f"[{status}] {path}: {msg}")
         if not ok:

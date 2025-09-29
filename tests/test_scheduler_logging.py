@@ -1,5 +1,3 @@
-
-
 # PR26 — Scheduler logging & yield-decision smoke tests
 # These tests avoid full orchestrator wiring and instead validate:
 # 1) _should_yield precedence logic (WALL_MS > BUDGET_* > QUANTUM_EXCEEDED)
@@ -54,6 +52,7 @@ def test_should_yield_precedence_wall_budget_quantum():
 def test_scheduler_jsonl_written(monkeypatch, tmp_path):
     # Route logs_dir() to a temporary directory
     import clematis.io.paths as paths_module
+
     monkeypatch.setattr(paths_module, "logs_dir", lambda: str(tmp_path), raising=True)
 
     # Use the central JSONL writer

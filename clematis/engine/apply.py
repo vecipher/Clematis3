@@ -8,6 +8,7 @@ from .snapshot import write_snapshot, load_latest_snapshot as _load_latest_snaps
 
 # -------- helpers: state access (dict or attr style) --------
 
+
 def _state_get(obj: Any, key: str, default=None):
     if isinstance(obj, dict):
         return obj.get(key, default)
@@ -74,6 +75,7 @@ def _should_snapshot(ctx, cfg) -> bool:
 
 
 # -------- main API --------
+
 
 def apply_changes(ctx, state, t4: T4Result) -> ApplyResult:
     """
@@ -146,9 +148,17 @@ def apply_changes(ctx, state, t4: T4Result) -> ApplyResult:
     t4_cfg = getattr(getattr(ctx, "config", object()), "t4", {}) or {}
     bust_mode = (t4_cfg.get("cache_bust_mode") if isinstance(t4_cfg, dict) else None) or "none"
     if str(bust_mode) == "on-apply":
-        cm = state["_cache_mgr"] if (isinstance(state, dict) and "_cache_mgr" in state) else getattr(state, "_cache_mgr", None)
+        cm = (
+            state["_cache_mgr"]
+            if (isinstance(state, dict) and "_cache_mgr" in state)
+            else getattr(state, "_cache_mgr", None)
+        )
         cache_cfg = t4_cfg.get("cache", {}) if isinstance(t4_cfg, dict) else {}
-        namespaces = cache_cfg.get("namespaces", ["t2:semantic"]) if isinstance(cache_cfg, dict) else ["t2:semantic"]
+        namespaces = (
+            cache_cfg.get("namespaces", ["t2:semantic"])
+            if isinstance(cache_cfg, dict)
+            else ["t2:semantic"]
+        )
         if cm is not None:
             try:
                 for ns in namespaces:
@@ -178,6 +188,7 @@ def apply_changes(ctx, state, t4: T4Result) -> ApplyResult:
 
 
 # -------- small util --------
+
 
 def _safe_get(maybe_mapping: Any, key: str, default=0):
     try:

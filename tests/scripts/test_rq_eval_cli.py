@@ -1,5 +1,3 @@
-
-
 import importlib
 import importlib.util
 import json
@@ -65,16 +63,26 @@ def test_cli_produces_json_and_csv(tmp_path):
     out_json = tmp_path / "rq_eval.json"
     out_csv = tmp_path / "rq_eval.csv"
 
-    rc = rq.main([
-        "--corpus", str(corpus),
-        "--queries", str(queries),
-        "--truth", str(truth),
-        "--configA", str(configA),
-        "--configB", str(configB),
-        "--k", "5",
-        "--out", str(out_json),
-        "--csv", str(out_csv),
-    ])
+    rc = rq.main(
+        [
+            "--corpus",
+            str(corpus),
+            "--queries",
+            str(queries),
+            "--truth",
+            str(truth),
+            "--configA",
+            str(configA),
+            "--configB",
+            str(configB),
+            "--k",
+            "5",
+            "--out",
+            str(out_json),
+            "--csv",
+            str(out_csv),
+        ]
+    )
     assert rc == 0
 
     # JSON exists and has expected top-level keys

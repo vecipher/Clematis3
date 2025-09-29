@@ -1,0 +1,25 @@
+exclude: |
+  ^(clematis\.egg-info/|\.lancedb/|\.data/|dist/|build/)
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.13.2
+    hooks:
+      - id: ruff-format
+        files: "^clematis/cli/.*\\.py$"
+      - id: ruff
+        files: "^clematis/cli/.*\\.py$"
+        args: ["--fix"]
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.11.2
+    hooks:
+      - id: mypy
+        name: mypy (CLI only)
+        pass_filenames: false
+        additional_dependencies: ["types-PyYAML>=6.0.12.20240808,<7"]
+        args: ["--config-file=pyproject.toml", "--explicit-package-bases", "clematis/cli"]
+        files: "^clematis/cli/.*\\.py$"
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: end-of-file-fixer
+      - id: trailing-whitespace

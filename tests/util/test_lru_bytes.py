@@ -1,5 +1,3 @@
-
-
 import pytest
 
 from clematis.engine.util.lru_bytes import LRUBytes

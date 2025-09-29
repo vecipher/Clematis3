@@ -4,6 +4,7 @@ import json
 import subprocess
 from pathlib import Path
 import pytest
+
 try:
     # Project APIs (as used elsewhere in tests)
     from clematis.io.config import load_config
@@ -47,7 +48,9 @@ def _get(obj, *path, default=None):
     return cur
 
 
-@pytest.mark.skipif(not DISABLED_CFG.exists(), reason="Disabled-path config missing (.ci/disabled_path_config.yaml)")
+@pytest.mark.skipif(
+    not DISABLED_CFG.exists(), reason="Disabled-path config missing (.ci/disabled_path_config.yaml)"
+)
 def test_reader_not_used_when_perf_disabled():
     """
     Gate identity: with perf.enabled=false, the T2 reader must not engage and
@@ -71,4 +74,6 @@ def test_reader_not_used_when_perf_disabled():
     assert "embed_store" not in tier_sequence, f"Reader tier engaged unexpectedly: {tier_sequence}"
 
     # 2) No reader-specific metrics blob should be present
-    assert "reader" not in metrics, f"Reader metrics leaked in disabled mode: {list(metrics.keys())}"
+    assert (
+        "reader" not in metrics
+    ), f"Reader metrics leaked in disabled mode: {list(metrics.keys())}"

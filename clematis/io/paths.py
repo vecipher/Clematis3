@@ -1,7 +1,9 @@
 import os
 
+
 def repo_root() -> str:
     return os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+
 
 def logs_dir() -> str:
     root = repo_root()

@@ -1,5 +1,3 @@
-
-
 #!/usr/bin/env python3
 """
 Deterministic size-based rotation for JSONL (or any) log files.
@@ -84,12 +82,21 @@ def iter_targets(directory: str, pattern: str) -> Iterable[str]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(description="Rotate log files by size (deterministic numeric suffixes)")
+    ap = argparse.ArgumentParser(
+        description="Rotate log files by size (deterministic numeric suffixes)"
+    )
     ap.add_argument("--dir", default="./logs", help="Directory to scan for logs (no recursion)")
     ap.add_argument("--pattern", default="*.jsonl", help="Glob pattern to match under --dir")
-    ap.add_argument("--max-bytes", type=int, default=10_000_000, help="Rotate files with size >= this many bytes")
+    ap.add_argument(
+        "--max-bytes",
+        type=int,
+        default=10_000_000,
+        help="Rotate files with size >= this many bytes",
+    )
     ap.add_argument("--backups", type=int, default=5, help="How many backup generations to keep")
-    ap.add_argument("--dry-run", action="store_true", help="Print planned actions without changing files")
+    ap.add_argument(
+        "--dry-run", action="store_true", help="Print planned actions without changing files"
+    )
 
     args = ap.parse_args(argv)
 

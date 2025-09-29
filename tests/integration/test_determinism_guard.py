@@ -1,5 +1,3 @@
-
-
 import copy
 import json
 import os
@@ -11,13 +9,14 @@ import pytest
 # Ensure project root is on sys.path when tests are invoked from subdirs
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 if ROOT not in sys.path:
-  sys.path.insert(0, ROOT)
+    sys.path.insert(0, ROOT)
 
 # Import the T2 runner
 try:
     from clematis.engine.stages.t2 import run_t2  # type: ignore
 except Exception as e:  # pragma: no cover
     pytest.skip(f"Cannot import run_t2: {e}")
+
 
 # Config loading: prefer configs.validate.load_config if available, else use {} (defaults-only)
 def _load_cfg() -> dict:
@@ -39,10 +38,12 @@ def _load_cfg() -> dict:
     # Fallback: parse YAML directly if available
     try:
         import yaml  # type: ignore
+
         with open(os.path.join(ROOT, "configs", "config.yaml"), "r", encoding="utf-8") as fh:
             return yaml.safe_load(fh) or {}
     except Exception:
         return {}
+
 
 def _extract_ids(res: Any) -> List[str]:
     seq = getattr(res, "items", None)
@@ -58,12 +59,14 @@ def _extract_ids(res: Any) -> List[str]:
             ids.append("")
     return ids
 
+
 def _metric_keys(res: Any) -> List[str]:
     m = getattr(res, "metrics", {}) or {}
     try:
         return sorted(str(k) for k in m.keys())
     except Exception:
         return []
+
 
 @pytest.mark.integration
 def test_run_t2_is_deterministic_for_ids_and_metric_keys():

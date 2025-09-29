@@ -12,6 +12,7 @@ from clematis.scripts.inspect_snapshot import main as _impl_main
 
 essage = None
 
+
 def main(argv=None) -> int:
     hint_once()  # stderr-only; deterministic single line; no stdout changes
     return int(_impl_main(argv) or 0)

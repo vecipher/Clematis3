@@ -97,7 +97,7 @@ def _dcg_at_k(gains: Mapping[str, float], ranked: Sequence[str], k: int) -> floa
         g = float(gains.get(did, 0.0))
         if g <= 0.0:
             continue
-        s += (2.0 ** g - 1.0) / math.log2(i + 1.0)
+        s += (2.0**g - 1.0) / math.log2(i + 1.0)
     return s
 
 
@@ -105,7 +105,9 @@ def ndcg_at_k(gains: Mapping[str, float], ranked: Sequence[str], k: int) -> floa
     k = max(0, int(k))
     dcg = _dcg_at_k(gains, ranked, k)
     # Ideal DCG: sort by gain desc, tie-break lex(id) for determinism
-    ideal_ids = sorted((did for did, g in gains.items() if g > 0.0), key=lambda d: (-gains[d], d))[:k]
+    ideal_ids = sorted((did for did, g in gains.items() if g > 0.0), key=lambda d: (-gains[d], d))[
+        :k
+    ]
     idcg = _dcg_at_k(gains, ideal_ids, k)
     return 0.0 if idcg <= 0.0 else dcg / idcg
 
@@ -189,8 +191,15 @@ class SystemEval:
     per_query: List[Mapping[str, object]]
 
 
-def _run_system(name: str, cfg_path: str, queries: List[Tuple[str, str]], qrels: Mapping[str, Mapping[str, float]], k: int,
-                emit_traces: bool, trace_dir: Optional[str]) -> SystemEval:
+def _run_system(
+    name: str,
+    cfg_path: str,
+    queries: List[Tuple[str, str]],
+    qrels: Mapping[str, Mapping[str, float]],
+    k: int,
+    emit_traces: bool,
+    trace_dir: Optional[str],
+) -> SystemEval:
     run_t2 = _import_run_t2()
     cfg = _load_yaml(cfg_path)
 
@@ -217,13 +226,15 @@ def _run_system(name: str, cfg_path: str, queries: List[Tuple[str, str]], qrels:
         mrrs.append(m)
         ndcgs.append(n)
 
-        per_rows.append({
-            "qid": qid,
-            "hits": [did for did in ranked_ids if did in gains],
-            "recall": r,
-            "mrr": m,
-            "ndcg": n,
-        })
+        per_rows.append(
+            {
+                "qid": qid,
+                "hits": [did for did in ranked_ids if did in gains],
+                "recall": r,
+                "mrr": m,
+                "ndcg": n,
+            }
+        )
 
     macro = {
         "recall": float(sum(recalls) / (len(recalls) or 1)),
@@ -233,7 +244,9 @@ def _run_system(name: str, cfg_path: str, queries: List[Tuple[str, str]], qrels:
 
     # Behavioral config digest (best-effort): hash of JSON dump with sorted keys
     try:
-        cfg_digest = hashlib.sha256(json.dumps(cfg, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+        cfg_digest = hashlib.sha256(
+            json.dumps(cfg, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
     except Exception:
         cfg_digest = "unknown"
 
@@ -252,7 +265,9 @@ def _run_system(name: str, cfg_path: str, queries: List[Tuple[str, str]], qrels:
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
     p = argparse.ArgumentParser(description="Deterministic A/B retrieval quality evaluator (PR41)")
-    p.add_argument("--corpus", required=False, help="Path to corpus JSONL (id,text). Used for digests only.")
+    p.add_argument(
+        "--corpus", required=False, help="Path to corpus JSONL (id,text). Used for digests only."
+    )
     p.add_argument("--queries", required=True, help="Path to queries TSV: qid\tquery_text")
     p.add_argument("--truth", required=True, help="Path to qrels TSV: qid\tdoc_id\trel")
     p.add_argument("--configA", required=True, help="Path to baseline config YAML")
@@ -260,8 +275,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     p.add_argument("--k", type=int, default=10, help="Top-k cutoff (default 10)")
     p.add_argument("--out", required=True, help="Path to write JSON results")
     p.add_argument("--csv", required=False, help="Optional path to write CSV results")
-    p.add_argument("--emit-traces", action="store_true", help="Request trace emission (triple gate must be satisfied by configs)")
-    p.add_argument("--trace-dir", required=False, help="Trace directory hint when --emit-traces (not enforced here)")
+    p.add_argument(
+        "--emit-traces",
+        action="store_true",
+        help="Request trace emission (triple gate must be satisfied by configs)",
+    )
+    p.add_argument(
+        "--trace-dir",
+        required=False,
+        help="Trace directory hint when --emit-traces (not enforced here)",
+    )
 
     args = p.parse_args(argv)
 
@@ -287,8 +310,24 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         qrels.setdefault(qid, {})[did] = rv
 
     # Evaluate both systems
-    sysA = _run_system("A", args.configA, queries, qrels, k=args.k, emit_traces=args.emit_traces, trace_dir=args.trace_dir)
-    sysB = _run_system("B", args.configB, queries, qrels, k=args.k, emit_traces=args.emit_traces, trace_dir=args.trace_dir)
+    sysA = _run_system(
+        "A",
+        args.configA,
+        queries,
+        qrels,
+        k=args.k,
+        emit_traces=args.emit_traces,
+        trace_dir=args.trace_dir,
+    )
+    sysB = _run_system(
+        "B",
+        args.configB,
+        queries,
+        qrels,
+        k=args.k,
+        emit_traces=args.emit_traces,
+        trace_dir=args.trace_dir,
+    )
 
     # Macro deltas (B - A)
     delta_macro = {
@@ -322,12 +361,20 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 "A": next((r for r in sysA.per_query if r["qid"] == qid), {}),
                 "B": next((r for r in sysB.per_query if r["qid"] == qid), {}),
                 "delta": {
-                    "recall": float(next((r for r in sysB.per_query if r["qid"] == qid), {}).get("recall", 0.0)
-                                      - next((r for r in sysA.per_query if r["qid"] == qid), {}).get("recall", 0.0)),
-                    "mrr": float(next((r for r in sysB.per_query if r["qid"] == qid), {}).get("mrr", 0.0)
-                                   - next((r for r in sysA.per_query if r["qid"] == qid), {}).get("mrr", 0.0)),
-                    "ndcg": float(next((r for r in sysB.per_query if r["qid"] == qid), {}).get("ndcg", 0.0)
-                                    - next((r for r in sysA.per_query if r["qid"] == qid), {}).get("ndcg", 0.0)),
+                    "recall": float(
+                        next((r for r in sysB.per_query if r["qid"] == qid), {}).get("recall", 0.0)
+                        - next((r for r in sysA.per_query if r["qid"] == qid), {}).get(
+                            "recall", 0.0
+                        )
+                    ),
+                    "mrr": float(
+                        next((r for r in sysB.per_query if r["qid"] == qid), {}).get("mrr", 0.0)
+                        - next((r for r in sysA.per_query if r["qid"] == qid), {}).get("mrr", 0.0)
+                    ),
+                    "ndcg": float(
+                        next((r for r in sysB.per_query if r["qid"] == qid), {}).get("ndcg", 0.0)
+                        - next((r for r in sysA.per_query if r["qid"] == qid), {}).get("ndcg", 0.0)
+                    ),
                 },
             }
             for qid, _ in queries
@@ -349,9 +396,27 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 arow = next((r for r in sysA.per_query if r["qid"] == qid), None)
                 brow = next((r for r in sysB.per_query if r["qid"] == qid), None)
                 if arow:
-                    w.writerow([qid, "A", f"{arow['recall']:.6f}", f"{arow['mrr']:.6f}", f"{arow['ndcg']:.6f}", ",".join(arow.get("hits", []))])
+                    w.writerow(
+                        [
+                            qid,
+                            "A",
+                            f"{arow['recall']:.6f}",
+                            f"{arow['mrr']:.6f}",
+                            f"{arow['ndcg']:.6f}",
+                            ",".join(arow.get("hits", [])),
+                        ]
+                    )
                 if brow:
-                    w.writerow([qid, "B", f"{brow['recall']:.6f}", f"{brow['mrr']:.6f}", f"{brow['ndcg']:.6f}", ",".join(brow.get("hits", []))])
+                    w.writerow(
+                        [
+                            qid,
+                            "B",
+                            f"{brow['recall']:.6f}",
+                            f"{brow['mrr']:.6f}",
+                            f"{brow['ndcg']:.6f}",
+                            ",".join(brow.get("hits", [])),
+                        ]
+                    )
 
     print(f"Wrote JSON to {args.out}" + (f" and CSV to {args.csv}" if args.csv else ""))
     return 0

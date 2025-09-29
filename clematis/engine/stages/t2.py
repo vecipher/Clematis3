@@ -20,6 +20,7 @@ except Exception:
     LancePartitionSpec = None  # type: ignore
     PartitionedReader = None  # type: ignore
 
+
 def _metrics_gate_on(cfg) -> bool:
     """True only when perf.enabled && perf.metrics.report_memory."""
     perf = (cfg.get("perf") or {}) if isinstance(cfg, dict) else (getattr(cfg, "perf", {}) or {})
@@ -30,6 +31,7 @@ def _metrics_gate_on(cfg) -> bool:
 
 
 # Helper for minimal config snapshot for quality trace emitter
+
 
 def _quality_cfg_snapshot(cfg_obj) -> Dict[str, Any]:
     """Build a minimal config dict with only the parts used by the quality trace emitter."""
@@ -50,13 +52,16 @@ def _quality_cfg_snapshot(cfg_obj) -> Dict[str, Any]:
 
     return {
         "perf": {"enabled": perf_enabled, "metrics": metrics},
-        "t2": {"quality": {
-            "enabled": q_enabled,
-            "shadow": q_shadow,
-            "trace_dir": q_trace_dir,
-            "redact": q_redact,
-        }},
+        "t2": {
+            "quality": {
+                "enabled": q_enabled,
+                "shadow": q_shadow,
+                "trace_dir": q_trace_dir,
+                "redact": q_redact,
+            }
+        },
     }
+
 
 # Helper: build a deterministic items list for quality fusion based on current ordering
 def _items_for_fusion(retrieved_list: list) -> list[dict]:
@@ -70,18 +75,25 @@ def _items_for_fusion(retrieved_list: list) -> list[dict]:
     for idx, ref in enumerate(retrieved_list):
         # Higher surrogate score for earlier items to preserve the current rank in fusion
         sem_rank_surrogate = float(n - idx)
-        out.append({
-            "id": getattr(ref, "id", None),
-            "score": sem_rank_surrogate,
-            "text": getattr(ref, "text", ""),
-        })
+        out.append(
+            {
+                "id": getattr(ref, "id", None),
+                "score": sem_rank_surrogate,
+                "text": getattr(ref, "text", ""),
+            }
+        )
     return out
 
 
-def _emit_t2_metrics(evt: dict, cfg, *, reader_engaged: bool,
-                     shard_count: int | None = None,
-                     partition_layout: str | None = None,
-                     tier_sequence: list[str] | None = None) -> None:
+def _emit_t2_metrics(
+    evt: dict,
+    cfg,
+    *,
+    reader_engaged: bool,
+    shard_count: int | None = None,
+    partition_layout: str | None = None,
+    tier_sequence: list[str] | None = None,
+) -> None:
     """
     Gate all T2 metrics emission. Never emit top-level tier_sequence.
     Only emit metrics.* when the gate is ON; strip empty metrics otherwise.
@@ -98,6 +110,8 @@ def _emit_t2_metrics(evt: dict, cfg, *, reader_engaged: bool,
         # Ensure nothing leaked: remove top-level tier_sequence; drop empty metrics
         if "metrics" in evt and (not evt["metrics"]):
             del evt["metrics"]
+
+
 def _cfg_get(obj, path, default=None):
     cur = obj
     for i, key in enumerate(path):
@@ -109,6 +123,7 @@ def _cfg_get(obj, path, default=None):
         except Exception:
             return default
     return cur
+
 
 def _estimate_result_cost(retrieved, metrics):
     """Deterministic, conservative byte estimate for caching a T2Result."""
@@ -124,10 +139,12 @@ def _estimate_result_cost(retrieved, metrics):
     except Exception:
         return 1024
 
+
 # Config-driven cache (constructed lazily per cfg)
 _T2_CACHE = None
 _T2_CACHE_CFG = None
 _T2_CACHE_KIND = None
+
 
 def _get_cache(ctx, cfg_t2: dict):
     """PR32-aware cache selection.
@@ -166,6 +183,7 @@ def _get_cache(ctx, cfg_t2: dict):
         _T2_CACHE_KIND = "lru"
     return _T2_CACHE, _T2_CACHE_KIND
 
+
 def _gather_changed_labels(state: dict, t1) -> List[str]:
     """Collect labels for nodes touched by T1 across active graphs, deterministically sorted."""
     store = state.get("store")
@@ -190,6 +208,7 @@ def _gather_changed_labels(state: dict, t1) -> List[str]:
             out.append(lb)
     return out
 
+
 def _build_label_map(state: dict) -> Dict[str, str]:
     """label(lower) -> node_id across active graphs (last one wins but we sort anyway later)."""
     store = state.get("store")
@@ -204,22 +223,28 @@ def _build_label_map(state: dict) -> Dict[str, str]:
                 m[n.label.lower()] = n.id
     return m
 
+
 def _parse_iso(ts: str) -> dt.datetime:
-  try:
-      return dt.datetime.fromisoformat((ts or "").replace("Z", "+00:00")).astimezone(dt.timezone.utc)
-  except Exception:
-      return dt.datetime.now(dt.timezone.utc)
+    try:
+        return dt.datetime.fromisoformat((ts or "").replace("Z", "+00:00")).astimezone(
+            dt.timezone.utc
+        )
+    except Exception:
+        return dt.datetime.now(dt.timezone.utc)
+
 
 def _owner_for_query(ctx, cfg_t2: dict):
-  scope = str(cfg_t2.get("owner_scope", "any")).lower()
-  if scope == "agent":
-      return getattr(ctx, "agent_id", None)
-  if scope == "world":
-      return "world"
-  return None  # any
+    scope = str(cfg_t2.get("owner_scope", "any")).lower()
+    if scope == "agent":
+        return getattr(ctx, "agent_id", None)
+    if scope == "world":
+        return "world"
+    return None  # any
+
 
 class _EpRefShim:
     __slots__ = ("id", "text", "score")
+
     def __init__(self, d: Dict[str, Any]):
         self.id = str(d.get("id"))
         self.text = d.get("text", "")
@@ -236,7 +261,11 @@ def _init_index_from_cfg(state: dict, cfg_t2: dict):
     """
     idx = state.get("mem_index")
     if idx is not None:
-        return idx, state.get("mem_backend", str(cfg_t2.get("backend", "inmemory")).lower()), state.get("mem_backend_fallback_reason")
+        return (
+            idx,
+            state.get("mem_backend", str(cfg_t2.get("backend", "inmemory")).lower()),
+            state.get("mem_backend_fallback_reason"),
+        )
 
     backend = str(cfg_t2.get("backend", "inmemory")).lower()
     fallback_reason = None
@@ -244,6 +273,7 @@ def _init_index_from_cfg(state: dict, cfg_t2: dict):
     if backend == "lancedb":
         try:
             from ...memory.lance_index import LanceIndex  # deferred import; adapter defers lancedb
+
             lcfg = cfg_t2.get("lancedb", {}) or {}
             idx = LanceIndex(
                 uri=str(lcfg.get("uri", "./.data/lancedb")),
@@ -265,14 +295,17 @@ def _init_index_from_cfg(state: dict, cfg_t2: dict):
         state["mem_backend_fallback_reason"] = fallback_reason
     return idx, backend, fallback_reason
 
+
 import hashlib, json
 
+
 def _quality_digest(qcfg: dict) -> str:
-    keys = ["enabled","lexical","fusion","mmr"]
+    keys = ["enabled", "lexical", "fusion", "mmr"]
     # keep it slim but stable; omit heavy nested stuff if absent
     slim = {k: qcfg.get(k) for k in keys if k in qcfg}
-    js = json.dumps(slim, sort_keys=True, separators=(",",":"))
+    js = json.dumps(slim, sort_keys=True, separators=(",", ":"))
     return hashlib.sha1(js.encode("utf-8")).hexdigest()[:12]
+
 
 def t2_semantic(ctx, state, text: str, t1) -> T2Result:
     cfg = ctx.cfg
@@ -281,7 +314,9 @@ def t2_semantic(ctx, state, text: str, t1) -> T2Result:
         cfg = NS(**cfg)
     cfg_t2 = cfg.t2
     # PR33 config (identity-safe; metrics only unless explicitly wired)
-    embed_store_dtype_cfg = str(_cfg_get(ctx, ["cfg", "perf", "t2", "embed_store_dtype"], "fp32") or "fp32").lower()
+    embed_store_dtype_cfg = str(
+        _cfg_get(ctx, ["cfg", "perf", "t2", "embed_store_dtype"], "fp32") or "fp32"
+    ).lower()
     precompute_norms_cfg = bool(_cfg_get(ctx, ["cfg", "perf", "t2", "precompute_norms"], False))
     partitions_cfg = _cfg_get(ctx, ["cfg", "perf", "t2", "reader", "partitions"], {}) or {}
     embed_root = str(getattr(cfg_t2, "embed_root", "./.data/t2"))
@@ -290,7 +325,11 @@ def t2_semantic(ctx, state, text: str, t1) -> T2Result:
     reader_mode_sel = "flat"
     # Check availability of a partitioned fixture if requested/auto
     _p_avail = False
-    if reader_mode_req in ("partition", "auto") and PartitionedReader is not None and LancePartitionSpec is not None:
+    if (
+        reader_mode_req in ("partition", "auto")
+        and PartitionedReader is not None
+        and LancePartitionSpec is not None
+    ):
         try:
             # Use embed_root as a conservative root; partition keys (if any) come from perf.t2.reader.partitions
             by = None
@@ -319,7 +358,7 @@ def t2_semantic(ctx, state, text: str, t1) -> T2Result:
     # Deterministic embedding
     enc = BGEAdapter(dim=int(cfg.k_surface) if hasattr(cfg, 'k_surface') else 32)
     enc_obj = getattr(ctx, "enc", None) or enc
-    q_vec = enc_obj.encode([q_text])[0] 
+    q_vec = enc_obj.encode([q_text])[0]
     # PR33: discover shards (for metrics only; retrieval path remains unchanged)
     pr33_reader = None
     pr33_layout = "none"
@@ -331,13 +370,22 @@ def t2_semantic(ctx, state, text: str, t1) -> T2Result:
             pr33_reader = open_reader(embed_root, partitions=partitions_cfg)
             pr33_layout = pr33_reader.meta.get("partition_layout", "none")
             pr33_shards = int(pr33_reader.meta.get("shards", 0))
-            pr33_store_dtype = str(pr33_reader.meta.get("embed_store_dtype", pr33_store_dtype)).lower()
+            pr33_store_dtype = str(
+                pr33_reader.meta.get("embed_store_dtype", pr33_store_dtype)
+            ).lower()
         except Exception:
             pr33_reader = None
     # PR33: gate for reader-backed retrieval
-    use_reader = bool(perf_on_tmp and pr33_reader is not None and isinstance(partitions_cfg, dict) and partitions_cfg.get("enabled", False))
+    use_reader = bool(
+        perf_on_tmp
+        and pr33_reader is not None
+        and isinstance(partitions_cfg, dict)
+        and partitions_cfg.get("enabled", False)
+    )
     # Tiered retrieval
-    tiers_all: List[str] = list(cfg_t2.get("tiers", ["exact_semantic", "cluster_semantic", "archive"]))
+    tiers_all: List[str] = list(
+        cfg_t2.get("tiers", ["exact_semantic", "cluster_semantic", "archive"])
+    )
     tiers: List[str] = ["embed_store"] if use_reader else tiers_all
     k_retrieval: int = int(cfg_t2.get("k_retrieval", 64))
     exact_recent_days: int = int(cfg_t2.get("exact_recent_days", 30))
@@ -362,7 +410,7 @@ def t2_semantic(ctx, state, text: str, t1) -> T2Result:
         "sim_threshold": sim_threshold,
         "clusters_top_m": clusters_top_m,
     }
-    qcfg = _cfg_get(cfg, ["t2","quality"], {}) or {}
+    qcfg = _cfg_get(cfg, ["t2", "quality"], {}) or {}
     if bool(qcfg.get("enabled", False)):
         ckey_payload["q_digest"] = _quality_digest(qcfg)
     if use_reader:
@@ -458,7 +506,9 @@ def t2_semantic(ctx, state, text: str, t1) -> T2Result:
             owner_query = _owner_for_query(ctx, cfg_t2)
             if now_str:
                 hints["now"] = now_str
-            hits = index.search_tiered(owner=owner_query, q_vec=q_vec, k=k_retrieval, tier=tier, hints=hints)
+            hits = index.search_tiered(
+                owner=owner_query, q_vec=q_vec, k=k_retrieval, tier=tier, hints=hints
+            )
             for h in hits:
                 if isinstance(h, dict):
                     hid = str(h.get("id"))
@@ -569,7 +619,9 @@ def t2_semantic(ctx, state, text: str, t1) -> T2Result:
                 # Build optional maps for enabled-path traces
                 try:
                     sem_rank_map = {d["id"]: i + 1 for i, d in enumerate(items_for_fusion)}
-                    score_fused_map = {d.get("id"): float(d.get("score_fused", 0.0)) for d in (fused_items or [])}
+                    score_fused_map = {
+                        d.get("id"): float(d.get("score_fused", 0.0)) for d in (fused_items or [])
+                    }
                     if isinstance(q_fusion_meta, dict):
                         q_fusion_meta.setdefault("sem_rank_map", sem_rank_map)
                         q_fusion_meta.setdefault("score_fused_map", score_fused_map)
@@ -602,7 +654,7 @@ def t2_semantic(ctx, state, text: str, t1) -> T2Result:
                     # Reorder EpisodeRefs according to MMR output (when any ids are returned)
                     id_to_ref = {r.id: r for r in retrieved}
                     mmr_order = []
-                    for it in (mmr_items or []):
+                    for it in mmr_items or []:
                         iid = it.get("id")
                         if iid in id_to_ref:
                             mmr_order.append(id_to_ref[iid])
@@ -629,7 +681,7 @@ def t2_semantic(ctx, state, text: str, t1) -> T2Result:
                 q_mmr_used = True
                 id_to_ref_fb = {r.id: r for r in retrieved}
                 _mmr_order_fb = []
-                for it in (_mmr_items_fb or []):
+                for it in _mmr_items_fb or []:
                     _iid = it.get("id")
                     if _iid in id_to_ref_fb:
                         _mmr_order_fb.append(id_to_ref_fb[_iid])
@@ -750,7 +802,9 @@ def t2_semantic(ctx, state, text: str, t1) -> T2Result:
         # PR37: emit quality fusion metrics only when enabled and fusion executed
         if bool(_cfg_get(cfg, ["t2", "quality", "enabled"], False)) and q_fusion_used:
             metrics["t2q.fusion_mode"] = "score_interp"
-            metrics["t2q.alpha_semantic"] = float(_cfg_get(cfg, ["t2", "quality", "fusion", "alpha_semantic"], 0.6))
+            metrics["t2q.alpha_semantic"] = float(
+                _cfg_get(cfg, ["t2", "quality", "fusion", "alpha_semantic"], 0.6)
+            )
             # If the fuser provided additional meta (e.g., lex_hits), forward selected fields
             if isinstance(q_fusion_meta, dict) and "t2q.lex_hits" in q_fusion_meta:
                 try:
@@ -782,27 +836,33 @@ def t2_semantic(ctx, state, text: str, t1) -> T2Result:
                 trace_items = []
                 for idx, r in enumerate(retrieved, start=1):
                     sid = getattr(r, "id", None)
-                    trace_items.append({
-                        "id": sid,
-                        "rank_sem": int(sem_rank_map.get(sid, 0)),
-                        "rank_fused": int(idx),
-                        "score_fused": float(score_fused_map.get(sid, 0.0)),
-                    })
+                    trace_items.append(
+                        {
+                            "id": sid,
+                            "rank_sem": int(sem_rank_map.get(sid, 0)),
+                            "rank_fused": int(idx),
+                            "score_fused": float(score_fused_map.get(sid, 0.0)),
+                        }
+                    )
                 meta = {
                     "k": len(retrieved),
                     "reason": str(_reason_en) if _reason_en else "enabled",
                     "note": "PR37 enabled trace; fused ordering active",
-                    "alpha": float(_cfg_get(cfg, ["t2", "quality", "fusion", "alpha_semantic"], 0.6)),
-                    "lex_hits": int(q_fusion_meta.get("t2q.lex_hits", 0)) if isinstance(q_fusion_meta, dict) else 0,
+                    "alpha": float(
+                        _cfg_get(cfg, ["t2", "quality", "fusion", "alpha_semantic"], 0.6)
+                    ),
+                    "lex_hits": int(q_fusion_meta.get("t2q.lex_hits", 0))
+                    if isinstance(q_fusion_meta, dict)
+                    else 0,
                 }
                 emit_quality_trace(cfg_snap, q_text, trace_items, meta)
             except Exception:
                 # Never fail the request due to tracing issues
                 pass
         # PR38: emit MMR metrics only when quality+MMR are enabled and MMR ran
-        if bool(_cfg_get(cfg, ["t2","quality","enabled"], False)):
+        if bool(_cfg_get(cfg, ["t2", "quality", "enabled"], False)):
             try:
-                lam = float(_cfg_get(cfg, ["t2","quality","mmr","lambda"], 0.5))
+                lam = float(_cfg_get(cfg, ["t2", "quality", "mmr", "lambda"], 0.5))
                 metrics["t2q.mmr.lambda"] = lam
                 selected_n = int(q_mmr_selected_n or 0) if q_mmr_used else 0
                 metrics["t2q.mmr.selected"] = selected_n
@@ -810,12 +870,18 @@ def t2_semantic(ctx, state, text: str, t1) -> T2Result:
                 head_refs = retrieved[:selected_n] if selected_n > 0 else []
                 mmr_items_head = []
                 import unicodedata, re
+
                 for r in head_refs:
                     s = unicodedata.normalize("NFKC", getattr(r, "text", "") or "").lower()
                     toks = [t for t in re.split(r"[^0-9a-zA-Z]+", s) if t]
                     from .t2_quality_mmr import MMRItem, avg_pairwise_distance
-                    mmr_items_head.append(MMRItem(id=str(getattr(r, "id", "")), rel=0.0, toks=frozenset(toks)))
-                metrics["t2q.diversity_avg_pairwise"] = float(avg_pairwise_distance(mmr_items_head)) if mmr_items_head else 0.0
+
+                    mmr_items_head.append(
+                        MMRItem(id=str(getattr(r, "id", "")), rel=0.0, toks=frozenset(toks))
+                    )
+                metrics["t2q.diversity_avg_pairwise"] = (
+                    float(avg_pairwise_distance(mmr_items_head)) if mmr_items_head else 0.0
+                )
             except Exception:
                 pass
         # PR33: gated perf counters (namespaced)
@@ -825,7 +891,9 @@ def t2_semantic(ctx, state, text: str, t1) -> T2Result:
         if pr33_reader is not None:
             metrics["t2.reader_shards"] = pr33_shards
             metrics["t2.partition_layout"] = pr33_layout
-    result = T2Result(retrieved=retrieved, graph_deltas_residual=graph_deltas_residual, metrics=metrics)
+    result = T2Result(
+        retrieved=retrieved, graph_deltas_residual=graph_deltas_residual, metrics=metrics
+    )
     if cache is not None:
         if cache_kind == "bytes":
             cost = _estimate_result_cost(retrieved, metrics)
@@ -840,8 +908,12 @@ def t2_semantic(ctx, state, text: str, t1) -> T2Result:
             result.metrics["cache_used"] = True
             result.metrics["cache_misses"] = result.metrics.get("cache_misses", 0) + 1
             if cache_kind == "bytes":
-                result.metrics["t2.cache_evictions"] = result.metrics.get("t2.cache_evictions", 0) + cache_evicted_n
-                result.metrics["t2.cache_bytes"] = result.metrics.get("t2.cache_bytes", 0) + cache_evicted_b
+                result.metrics["t2.cache_evictions"] = (
+                    result.metrics.get("t2.cache_evictions", 0) + cache_evicted_n
+                )
+                result.metrics["t2.cache_bytes"] = (
+                    result.metrics.get("t2.cache_bytes", 0) + cache_evicted_b
+                )
 
     # --- PR36: Shadow tracing (no-op) — triple-gated; does not mutate rankings or metrics ---
     try:
@@ -863,7 +935,9 @@ def t2_semantic(ctx, state, text: str, t1) -> T2Result:
                     _reason_sh = None
             cfg_snap = _quality_cfg_snapshot(cfg)
             # serialize only id+score for trace; keep ordering identical to returned list
-            trace_items = [{"id": h.id, "score": float(getattr(h, "score", 0.0))} for h in retrieved]
+            trace_items = [
+                {"id": h.id, "score": float(getattr(h, "score", 0.0))} for h in retrieved
+            ]
             meta = {
                 "k": len(retrieved),
                 "reason": str(_reason_sh) if _reason_sh else "shadow",
@@ -876,6 +950,7 @@ def t2_semantic(ctx, state, text: str, t1) -> T2Result:
 
     return result
 
+
 # --- Compatibility entrypoint for tests & CI (Gate C) ---
 def run_t2(cfg, corpus_dir: str | None = None, query: str = "", **kwargs):
     """
@@ -885,6 +960,7 @@ def run_t2(cfg, corpus_dir: str | None = None, query: str = "", **kwargs):
     - `query`: text query forwarded to T2.
     Returns a T2Result.
     """
+
     class _Ctx:
         def __init__(self, cfg_obj):
             self.cfg = cfg_obj
@@ -903,6 +979,7 @@ def run_t2(cfg, corpus_dir: str | None = None, query: str = "", **kwargs):
 
     q = str(query or "").strip()
     return t2_semantic(_Ctx(cfg), state, q, _T1())
+
 
 def t2_pipeline(cfg, query: str, emit_metric=None, ctx=None):
     # Propagate trace_reason into cfg so deeper stages (which see engine ctx) can still read it deterministically

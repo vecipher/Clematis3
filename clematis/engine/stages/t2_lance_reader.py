@@ -1,5 +1,3 @@
-
-
 from __future__ import annotations
 
 """
@@ -35,10 +33,22 @@ Notes
 """
 
 from dataclasses import dataclass
-from typing import Callable, Dict, Iterable, Iterator, List, Mapping, MutableMapping, Optional, Sequence, Tuple
+from typing import (
+    Callable,
+    Dict,
+    Iterable,
+    Iterator,
+    List,
+    Mapping,
+    MutableMapping,
+    Optional,
+    Sequence,
+    Tuple,
+)
 import os
 import numpy as np
 import logging
+
 _logger = logging.getLogger(__name__)
 __WARNED_PARTITION_UNAVAILABLE = False
 __WARNED_NO_METADATA = False
@@ -83,7 +93,9 @@ class PartitionedReader:
     def __init__(
         self,
         spec: LancePartitionSpec,
-        flat_iter: Optional[Callable[[], Iterable[Tuple[List[str], np.ndarray, np.ndarray]]]] = None,
+        flat_iter: Optional[
+            Callable[[], Iterable[Tuple[List[str], np.ndarray, np.ndarray]]]
+        ] = None,
         id_to_meta: Optional[Mapping[str, Mapping[str, object]]] = None,
     ) -> None:
         self._spec = spec

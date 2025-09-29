@@ -92,6 +92,7 @@ def _norm_logs_dir(p: str) -> str:
 
 # --- optional demo runner -----------------------------------------------------
 
+
 def _maybe_run_demo(logs_dir: str) -> None:
     """
     Try to run the disabled-identity demo that writes JSONL files into logs_dir.
@@ -121,21 +122,38 @@ def _maybe_run_demo(logs_dir: str) -> None:
 
 # --- main ---------------------------------------------------------------------
 
+
 def main(argv: List[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         description="Compare normalized actual logs against golden fixtures (scheduler.enabled=false).",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    ap.add_argument("--logs-dir", default="./.logs", help="Directory where the demo wrote t*.jsonl and turn.jsonl.")
-    ap.add_argument("--golden-dir", default="tests/golden/pre_m5_disabled", help="Directory containing golden JSONL files.")
-    ap.add_argument("--update", action="store_true", help="Update goldens in-place with current normalized output.")
+    ap.add_argument(
+        "--logs-dir",
+        default="./.logs",
+        help="Directory where the demo wrote t*.jsonl and turn.jsonl.",
+    )
+    ap.add_argument(
+        "--golden-dir",
+        default="tests/golden/pre_m5_disabled",
+        help="Directory containing golden JSONL files.",
+    )
+    ap.add_argument(
+        "--update",
+        action="store_true",
+        help="Update goldens in-place with current normalized output.",
+    )
     ap.add_argument(
         "--files",
         nargs="*",
         default=["t1.jsonl", "t2.jsonl", "t3.jsonl", "t4.jsonl", "turn.jsonl"],
         help="Subset of files to compare.",
     )
-    ap.add_argument("--skip-run", action="store_true", help="Skip running the demo; compare whatever is already in logs-dir.")
+    ap.add_argument(
+        "--skip-run",
+        action="store_true",
+        help="Skip running the demo; compare whatever is already in logs-dir.",
+    )
     args = ap.parse_args(argv)
 
     print("Running golden comparison (scheduler.enabled=false)…")

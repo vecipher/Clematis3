@@ -1,5 +1,3 @@
-
-
 # PR27 — Ready-Set hook tests
 # We validate the existence, default behavior, and simple monkeypatching of
 # the orchestrator-level `agent_ready(ctx, state, agent_id)` hook.

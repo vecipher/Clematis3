@@ -1,5 +1,3 @@
-
-
 import math
 from pathlib import Path
 
@@ -33,7 +31,7 @@ def _topk(ids, vecs_fp32, norms_fp32, q_fp32, k: int, *, cosine=True):
     if cosine:
         qn = float(np.linalg.norm(q, ord=2))
         # Safe guard against zero norm (unlikely with our grid)
-        denom = (norms_fp32 * (qn if qn != 0.0 else 1.0))
+        denom = norms_fp32 * (qn if qn != 0.0 else 1.0)
         scores = (vecs_fp32 @ q) / np.where(denom == 0.0, 1.0, denom)
     else:
         scores = vecs_fp32 @ q
@@ -73,9 +71,13 @@ def test_fp16_store_fp32_math_parity(tmp_path: Path, precompute_norms: bool):
         for qi, q in enumerate(qs):
             base_ids_k, base_scores_k = _topk(ids, base_vecs, base_norms, q, k)
             read_ids_k, read_scores_k = _topk(r_ids, r_vecs, r_norms, q, k)
-            assert read_ids_k == base_ids_k, f"Top-{k} mismatch for query {qi}:\nbase={base_ids_k}\nread={read_ids_k}"
+            assert (
+                read_ids_k == base_ids_k
+            ), f"Top-{k} mismatch for query {qi}:\nbase={base_ids_k}\nread={read_ids_k}"
             # Scores should match to within 1e-6 due to fp16-aligned grid
-            max_delta = float(np.max(np.abs(read_scores_k - base_scores_k))) if len(base_scores_k) else 0.0
+            max_delta = (
+                float(np.max(np.abs(read_scores_k - base_scores_k))) if len(base_scores_k) else 0.0
+            )
             assert max_delta <= 1e-6, f"Score drift {max_delta} exceeds 1e-6 for Top-{k} query {qi}"
 
 
@@ -98,5 +100,7 @@ def test_fp32_store_sanity(tmp_path: Path):
             base_ids_k, base_scores_k = _topk(ids, base_vecs, base_norms, q, k)
             read_ids_k, read_scores_k = _topk(r_ids, r_vecs, r_norms, q, k)
             assert read_ids_k == base_ids_k
-            max_delta = float(np.max(np.abs(read_scores_k - base_scores_k))) if len(base_scores_k) else 0.0
+            max_delta = (
+                float(np.max(np.abs(read_scores_k - base_scores_k))) if len(base_scores_k) else 0.0
+            )
             assert max_delta == 0.0

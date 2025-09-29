@@ -1,10 +1,16 @@
-import argparse, importlib, importlib.util, inspect, sys
-from ._io import set_verbosity, eprint_once
-from ._exit import OK, USER_ERR, IO_ERR
-from ._wrapper_common import maybe_debug
+import argparse
+import importlib
+import importlib.util
+import inspect
+import sys
 from pathlib import Path
 
-_CANDIDATES = ( "clematis.scripts.seed_lance_demo", "scripts.seed_lance_demo")
+from ._exit import IO_ERR, OK, USER_ERR
+from ._io import eprint_once, set_verbosity
+from ._wrapper_common import maybe_debug
+
+_CANDIDATES = ("clematis.scripts.seed_lance_demo", "scripts.seed_lance_demo")
+
 
 def _import_script():
     last = None
@@ -17,12 +23,16 @@ def _import_script():
     path = root / "scripts" / "seed_lance_demo.py"
     if path.exists():
         spec = importlib.util.spec_from_file_location("scripts.seed_lance_demo", path)
-        mod = importlib.util.module_from_spec(spec)  # type: ignore[arg-type]
+        mod = importlib.util.module_from_spec(spec)
         assert spec and spec.loader
-        spec.loader.exec_module(mod)  # type: ignore[union-attr]
+        spec.loader.exec_module(mod)
         return mod
-    print(f"[clematis] seed-lance-demo: cannot locate {path.name}. Last error: {last}", file=sys.stderr)
+    print(
+        f"[clematis] seed-lance-demo: cannot locate {path.name}. Last error: {last}",
+        file=sys.stderr,
+    )
     return None
+
 
 def _delegate(argv):
     mod = _import_script()
@@ -37,6 +47,7 @@ def _delegate(argv):
         return main(argv) if len(sig.parameters) >= 1 else main()
     except SystemExit as e:
         return int(getattr(e, "code", 0) or 0)
+
 
 def _entrypoint(ns: argparse.Namespace) -> int:
     argv = list(getattr(ns, "args", []) or [])
@@ -106,7 +117,9 @@ def _entrypoint(ns: argparse.Namespace) -> int:
         msg = str(e)
         if "already exists" in msg and "Table" in msg:
             if not quiet:
-                eprint_once("`seed-lance-demo`: table already exists. Use --overwrite or pass --table <new_name>.")
+                eprint_once(
+                    "`seed-lance-demo`: table already exists. Use --overwrite or pass --table <new_name>."
+                )
             return IO_ERR
         if not quiet:
             eprint_once(f"`seed-lance-demo`: {msg}")
@@ -115,6 +128,7 @@ def _entrypoint(ns: argparse.Namespace) -> int:
         if not quiet:
             eprint_once(f"`seed-lance-demo`: unexpected error: {e.__class__.__name__}")
         return IO_ERR
+
 
 def register(subparsers: argparse._SubParsersAction) -> None:
     p = subparsers.add_parser(
@@ -130,7 +144,12 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     fmt.add_argument("--table", action="store_true", help="Plain table output (no color)")
     p.add_argument("--quiet", action="store_true", help="suppress non-essential stderr")
     p.add_argument("--verbose", action="store_true", help="increase stderr verbosity")
-    p.add_argument("args", nargs=argparse.REMAINDER, help="Pass-through arguments for scripts/seed_lance_demo.py.")
+    p.add_argument(
+        "args",
+        nargs=argparse.REMAINDER,
+        help="Pass-through arguments for scripts/seed_lance_demo.py.",
+    )
     p.set_defaults(func=_entrypoint, _parser=p)
+
 
 # note for getting up on saturday - fucking did it, it works, i just forgot to do parser shit, just need to do documentation

@@ -1,7 +1,7 @@
 # M3 — LLM Adapter (Scaffolding & Fixtures)
 
-**Status:** M3‑07 shipped (adapter scaffolding).  
-**Default posture:** OFF (`t3.backend=rulebased`).  
+**Status:** M3‑07 shipped (adapter scaffolding).
+**Default posture:** OFF (`t3.backend=rulebased`).
 **Goal:** Provide a pluggable, deterministic LLM layer with fixtures for CI. Runtime wiring and prompt contract arrive in M3‑08/M3‑10.
 
 ---
@@ -139,17 +139,17 @@ pytest -q
 
 ## Troubleshooting
 
-- **`LLMAdapterError: Fixture file not found`**  
+- **`LLMAdapterError: Fixture file not found`**
   Check `t3.llm.fixtures.path` or ensure the JSONL exists.
-- **`LLMAdapterError: Bad fixture JSONL at line N`**  
+- **`LLMAdapterError: Bad fixture JSONL at line N`**
   Ensure each line is valid JSON; no trailing commas; UTF‑8 encoding.
-- **`LLMAdapterError: No fixture for prompt hash`**  
+- **`LLMAdapterError: No fixture for prompt hash`**
   The prompt string used at runtime must match the one hashed in the JSONL (after newline normalization).
-- **Config validation failures (ValueError)**  
-  - `t3.llm.provider` must be one of `{fixture, ollama}`  
-  - `t3.llm.temp` in `[0, 1]`  
-  - `t3.llm.max_tokens ≥ 1`  
-  - `t3.llm.timeout_ms ≥ 1`  
+- **Config validation failures (ValueError)**
+  - `t3.llm.provider` must be one of `{fixture, ollama}`
+  - `t3.llm.temp` in `[0, 1]`
+  - `t3.llm.max_tokens ≥ 1`
+  - `t3.llm.timeout_ms ≥ 1`
   - `t3.llm.fixtures.path` non‑empty
 
 ---

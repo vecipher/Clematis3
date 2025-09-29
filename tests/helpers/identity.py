@@ -8,9 +8,10 @@ import os
 _DROP_KEYS = {
     "now",
     "version_etag",
-    "tier_sequence",      # added to stabilize disabled-path identity
+    "tier_sequence",  # added to stabilize disabled-path identity
 }
 _DROP_SUFFIXES = ("_ms", "ms")  # e.g., duration_ms, total_ms, etc.
+
 
 def _normalize(obj: Any) -> Any:
     if isinstance(obj, dict):
@@ -26,6 +27,7 @@ def _normalize(obj: Any) -> Any:
         return [_normalize(x) for x in obj]
     return obj
 
+
 def normalize_json_line(line: str) -> str:
     try:
         obj = json.loads(line)
@@ -33,8 +35,10 @@ def normalize_json_line(line: str) -> str:
         return line.strip()
     return json.dumps(_normalize(obj), sort_keys=True, separators=(",", ":"))
 
+
 def normalize_json_lines(lines: list[str]) -> list[str]:
     return [normalize_json_line(ln) for ln in lines if ln.strip()]
+
 
 def normalize_logs_dir(p: str, base: str | None = None) -> str:
     """

@@ -82,7 +82,13 @@ def parse_and_validate(text: str, schema: dict) -> Tuple[bool, Any]:
         return False, "plan too long"
 
     # plan items must be non-empty (after strip) strings and within length limits
-    if any((not isinstance(x, str)) or (len(x) == 0) or (len(x.strip()) == 0) or (len(x) > PLAN_ITEM_MAX_LEN) for x in plan):
+    if any(
+        (not isinstance(x, str))
+        or (len(x) == 0)
+        or (len(x.strip()) == 0)
+        or (len(x) > PLAN_ITEM_MAX_LEN)
+        for x in plan
+    ):
         return False, "plan item length/content invalid"
 
     if (not isinstance(rat, str)) or (len(rat) == 0) or (len(rat) > RATIONALE_MAX_LEN):

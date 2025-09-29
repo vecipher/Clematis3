@@ -8,10 +8,7 @@ def test_fixture_roundtrip(tmp_path):
     p = tmp_path / "fx.jsonl"
 
     completion_obj = {"plan": ["a"], "rationale": "r"}
-    line = {
-        "prompt_hash": h,
-        "completion": json.dumps(completion_obj)
-    }
+    line = {"prompt_hash": h, "completion": json.dumps(completion_obj)}
     p.write_text(json.dumps(line) + "\n", encoding="utf-8")
 
     fx = FixtureLLMAdapter(str(p))

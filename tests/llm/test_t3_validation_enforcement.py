@@ -2,7 +2,8 @@ import os, pytest
 from configs.validate import validate_config_api
 from clematis.engine.stages.t3 import plan_with_llm
 
-class _Ctx: 
+
+class _Ctx:
     turn_id = 1
     agent_id = "demo"
 
@@ -45,9 +46,7 @@ def test_invalid_json_falls_back_and_logs(tmp_path):
 
     assert out == {"plan": [], "rationale": "fallback: invalid llm output"}
     assert any(
-        isinstance(x, dict)
-        and "llm_validation_failed" in x
-        and x.get("provider") == "fixture"
+        isinstance(x, dict) and "llm_validation_failed" in x and x.get("provider") == "fixture"
         for x in state.logs
     )
 

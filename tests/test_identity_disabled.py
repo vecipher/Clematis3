@@ -1,5 +1,3 @@
-
-
 # PR26 — Identity when disabled (scheduler.enabled = false)
 # Goal: prove the M5 scaffolding remains inert when the feature flag is off.
 
@@ -29,10 +27,12 @@ def test_no_scheduler_log_when_disabled(monkeypatch, tmp_path):
     """
     # Route logs_dir() to a temporary directory
     import clematis.io.paths as paths_module
+
     monkeypatch.setattr(paths_module, "logs_dir", lambda: str(tmp_path), raising=True)
 
     # Import the central writer and orchestrator helpers
     from clematis.io.log import append_jsonl
+
     orchestrator = pytest.importorskip("clematis.engine.orchestrator")
 
     # Simulate a disabled run: do nothing that would write scheduler logs.

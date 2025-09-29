@@ -1,5 +1,3 @@
-
-
 import os
 import tempfile
 
@@ -15,14 +13,16 @@ from clematis.engine.stages.t2_quality_norm import (
 
 # ----------------------------- Normalization -----------------------------
 
+
 def test_normalize_text_nfkc_case_whitespace():
     # Fullwidth ASCII should fold to ASCII; case lowered; whitespace collapsed
-    s = "ＴＥＳＴ    Foo\t\nBar\u00A0Baz"  # includes NBSP
+    s = "ＴＥＳＴ    Foo\t\nBar\u00a0Baz"  # includes NBSP
     out = normalize_text(s)
     assert out == "test foo bar baz"
 
 
 # ------------------------------ Tokenization -----------------------------
+
 
 def test_tokenize_basic_stopwords_and_minlen():
     text = "The and an bag of Tricks!!!"
@@ -45,6 +45,7 @@ def test_tokenize_with_porter_lite_stemmer():
 
 # -------------------------------- Aliasing --------------------------------
 
+
 def test_apply_aliases_exact_rewrite_and_expansion():
     toks = ["cuda", "install", "llm"]
     amap = {"cuda": "nvidia_cuda", "llm": "large language model"}
@@ -61,6 +62,7 @@ def test_apply_aliases_idempotent_single_pass():
 
 
 # ----------------------------- Alias map I/O ------------------------------
+
 
 def test_load_alias_map_missing_returns_empty():
     assert load_alias_map("/no/such/path/aliases.yaml") == {}

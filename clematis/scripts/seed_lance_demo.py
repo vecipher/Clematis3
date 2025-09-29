@@ -21,6 +21,7 @@ Notes:
   - Keep this dataset small; it’s a smoke/demo only.
   - The main code path will *optionally* use Lance when enabled in config.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -47,6 +48,7 @@ except Exception as e:  # pragma: no cover
 # -----------------------------
 # Deterministic helpers
 # -----------------------------
+
 
 def _hash_seed(s: str) -> int:
     d = hashlib.sha256(s.encode("utf-8")).digest()
@@ -86,12 +88,42 @@ def _owner_quarter(owner: str, ts: str) -> str:
 # -----------------------------
 
 _BASE_ROWS = [
-    {"id": "ep_old",    "text": "about apple and trees",   "owner": "demo", "created_at": "2025-07-01T00:00:00Z"},
-    {"id": "ep_apple",  "text": "fresh apple pie story",   "owner": "demo", "created_at": "2025-08-25T00:00:00Z"},
-    {"id": "ep_banana", "text": "banana split tale",       "owner": "demo", "created_at": "2025-08-26T00:00:00Z"},
-    {"id": "ep_orange", "text": "orange peel facts",       "owner": "bot",  "created_at": "2025-08-25T12:00:00Z"},
-    {"id": "ep_grape",  "text": "grape vineyard notes",    "owner": "demo", "created_at": "2025-08-24T10:00:00Z"},
-    {"id": "ep_pear",   "text": "pear tart tips",          "owner": "bot",  "created_at": "2025-08-23T09:30:00Z"},
+    {
+        "id": "ep_old",
+        "text": "about apple and trees",
+        "owner": "demo",
+        "created_at": "2025-07-01T00:00:00Z",
+    },
+    {
+        "id": "ep_apple",
+        "text": "fresh apple pie story",
+        "owner": "demo",
+        "created_at": "2025-08-25T00:00:00Z",
+    },
+    {
+        "id": "ep_banana",
+        "text": "banana split tale",
+        "owner": "demo",
+        "created_at": "2025-08-26T00:00:00Z",
+    },
+    {
+        "id": "ep_orange",
+        "text": "orange peel facts",
+        "owner": "bot",
+        "created_at": "2025-08-25T12:00:00Z",
+    },
+    {
+        "id": "ep_grape",
+        "text": "grape vineyard notes",
+        "owner": "demo",
+        "created_at": "2025-08-24T10:00:00Z",
+    },
+    {
+        "id": "ep_pear",
+        "text": "pear tart tips",
+        "owner": "bot",
+        "created_at": "2025-08-23T09:30:00Z",
+    },
 ]
 
 
@@ -100,8 +132,18 @@ def _expand_rows(n: int) -> List[dict]:
         return _BASE_ROWS[:n]
     out = list(_BASE_ROWS)
     fruits = [
-        "kiwi", "mango", "papaya", "plum", "peach", "cherry", "apricot", "melon",
-        "lime", "lemon", "fig", "date",
+        "kiwi",
+        "mango",
+        "papaya",
+        "plum",
+        "peach",
+        "cherry",
+        "apricot",
+        "melon",
+        "lime",
+        "lemon",
+        "fig",
+        "date",
     ]
     i = 0
     while len(out) < n:
@@ -110,12 +152,14 @@ def _expand_rows(n: int) -> List[dict]:
         owner = "demo" if idx % 2 == 0 else "bot"
         day = 20 - (idx % 10)  # a recent-ish spread
         ts = f"2025-08-{day:02d}T08:00:00Z"
-        out.append({
-            "id": f"ep_{f}_{idx}",
-            "text": f"note about {f}",
-            "owner": owner,
-            "created_at": ts,
-        })
+        out.append(
+            {
+                "id": f"ep_{f}_{idx}",
+                "text": f"note about {f}",
+                "owner": owner,
+                "created_at": ts,
+            }
+        )
         i += 1
     return out
 
@@ -123,6 +167,7 @@ def _expand_rows(n: int) -> List[dict]:
 # -----------------------------
 # Main
 # -----------------------------
+
 
 def main(argv: List[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Seed a tiny LanceDB table for Clematis T2 reader")
@@ -144,7 +189,9 @@ def main(argv: List[str] | None = None) -> int:
     for r in rows:
         r["created_at"] = _iso(r["created_at"])  # validate
         r["importance"] = (hash(r["id"]) % 100) / 100.0
-        r["owner_quarter"] = _owner_quarter(r["owner"], r["created_at"])  # useful for partition-based reads
+        r["owner_quarter"] = _owner_quarter(
+            r["owner"], r["created_at"]
+        )  # useful for partition-based reads
         r["embedding"] = text_to_vec(r["text"], args.dim)
 
     print(f"[seed-lance] connecting to: {args.uri}")
@@ -180,7 +227,12 @@ def main(argv: List[str] | None = None) -> int:
         sample = tbl.search(text_to_vec("apple", args.dim)).limit(3).to_list()
         print("[seed-lance] sample nearest to 'apple':")
         for s in sample:
-            print("  -", json.dumps({k: s.get(k) for k in ("id", "owner", "created_at", "text")}, ensure_ascii=False))
+            print(
+                "  -",
+                json.dumps(
+                    {k: s.get(k) for k in ("id", "owner", "created_at", "text")}, ensure_ascii=False
+                ),
+            )
     except Exception:
         # Older lancedb versions may not support search on lists; ignore
         pass

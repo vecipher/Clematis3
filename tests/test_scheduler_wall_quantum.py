@@ -1,5 +1,3 @@
-
-
 # PR26 — WALL vs QUANTUM precedence tests (and edge cases)
 
 import pytest
@@ -48,9 +46,9 @@ def test_no_yield_when_under_all_thresholds():
 
     budgets = {
         "t1_iters": 10,
-        "t1_pops":  10,
-        "t2_k":     10,
-        "t3_ops":   10,
+        "t1_pops": 10,
+        "t2_k": 10,
+        "t3_ops": 10,
         "quantum_ms": 50,
         "wall_ms": 200,
     }

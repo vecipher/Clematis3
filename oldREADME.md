@@ -19,7 +19,7 @@
 
 See docs/updates/ for progressive notes per PR (lightweight, append-only).
 
-Minimal scaffold matching the Clematis v2 steering capsule. Stages are pure; the orchestrator handles I/O and logging.  
+Minimal scaffold matching the Clematis v2 steering capsule. Stages are pure; the orchestrator handles I/O and logging.
 The demo exercises the canonical turn loop and writes structured JSONL logs for first‑class observability.
 
 ## Quick start
@@ -218,13 +218,13 @@ pytest -q tests/test_scheduler_basic.py tests/test_scheduler_config_validate.py
 
 ## What’s implemented
 
-- **T1 — Keyword propagation (deterministic)**  
+- **T1 — Keyword propagation (deterministic)**
   Wavefront PQ with decay + budgets, cache keyed by graph `version_etag`. Deterministic seeding, tie‑breaking, and delta emission.
-- **T2 — Semantic retrieval + residual (deterministic, tiered, offline)**  
+- **T2 — Semantic retrieval + residual (deterministic, tiered, offline)**
   Deterministic embedding stub (BGEAdapter) + in‑memory index with exact/cluster/archive tiers. Emits small, monotonic residual nudges (never undoes T1). Cached per query.
-- **T3 — Bundle, policy, one‑shot RAG, dialogue (deterministic)**  
+- **T3 — Bundle, policy, one‑shot RAG, dialogue (deterministic)**
   PR4: bundle; PR5: rule‑based policy; PR6: one‑shot RAG refinement; PR7: deterministic dialogue via template. Logs: t3_plan.jsonl, t3_dialogue.jsonl.
-- **T4 — Meta‑filter & apply**  
+- **T4 — Meta‑filter & apply**
   Accepts/filters proposed deltas; Apply persists and logs.
 - **Optional — T3 LLM adapter (behind flag)**  Enable `t3.backend: llm` and inject an adapter; falls back to rule-based if absent.
 
@@ -395,7 +395,7 @@ Deterministic policy that maps the T3 bundle to a `Plan` with a small, whitelist
   - `tau_low ≤ s_max < tau_high` → `assertion` (or `ack` if no labels)
   - `s_max < tau_low` → `question`
 - `topic_labels`: from `text.labels_from_t1`, deduped + sorted (fallback to `t1.touched_nodes[].label`).
-- Optionally add a small `EditGraph` op when `s_max ≥ tau_low`, including a few `upsert_node` edits for nodes with `|delta| ≥ epsilon_edit` (ids sorted asc).  
+- Optionally add a small `EditGraph` op when `s_max ≥ tau_low`, including a few `upsert_node` edits for nodes with `|delta| ≥ epsilon_edit` (ids sorted asc).
 - Optionally add a `RequestRetrieve` op **only** when `s_max < tau_low` (owner/k/tier from `cfg.t2`); it’s emitted but not executed until PR6.
 - Enforce `len(ops) ≤ t3.max_ops_per_turn`.
 
@@ -445,8 +445,8 @@ rag_once(bundle: dict, plan: Plan, retrieve_fn: Callable[[dict], dict], already_
   - `post_s_max ≥ tau_high` → `summary`
   - `tau_low ≤ post_s_max < tau_high` → `assertion` (or `ack` if no labels)
   - `post_s_max < tau_low` → `question`
-- Optionally add **one** `EditGraph` op if evidence ≥ `tau_low` and none exists yet (ids sorted asc; edits capped).  
-- **Never** add a second `RequestRetrieve` op.  
+- Optionally add **one** `EditGraph` op if evidence ≥ `tau_low` and none exists yet (ids sorted asc; edits capped).
+- **Never** add a second `RequestRetrieve` op.
 - Enforce `len(ops) ≤ t3.max_ops_per_turn`.
 
 **Outputs**
@@ -481,7 +481,7 @@ make_dialog_bundle(ctx, state, t1, t2, plan) -> dict
 speak(dialog_bundle: dict, plan: Plan) -> tuple[str, dict]
 ```
 
-**Template variables** (from `t3.dialogue.template`): `{labels}`, `{intent}`, `{snippets}`, `{style_prefix}`.  
+**Template variables** (from `t3.dialogue.template`): `{labels}`, `{intent}`, `{snippets}`, `{style_prefix}`.
 - Labels: deduped + sorted from the Plan’s Speak op (fallback to bundle `labels_from_t1`).
 - Snippets: top‑K retrieved IDs (cap = `t3.dialogue.include_top_k_snippets`).
 - If the template omits `{style_prefix}` but a prefix exists, it is auto‑prefixed as `"{style_prefix}| "`.
@@ -706,12 +706,12 @@ tail -n 1 ./.logs/t2.jsonl | python3 -c 'import sys,json;print(json.loads(sys.st
 
 ### T2 (retrieval + residual)
 - **Query:** `input_text` + labels of nodes touched by T1 (deterministically gathered).
-- **Tiers:**  
-  1) `exact_semantic` → recent window (`exact_recent_days`) + `sim_threshold`  
-  2) `cluster_semantic` → route to `clusters_top_m` clusters by centroid similarity  
-  3) `archive` → older shards (fallback)  
-- **Embeddings:** offline deterministic `BGEAdapter(dim=32)` (stable hash‑based vectors).  
-- **Residuals:** keyword‑match episode text ↔ current graph labels, emit bounded `upsert_node` nudges; **never undo T1**.  
+- **Tiers:**
+  1) `exact_semantic` → recent window (`exact_recent_days`) + `sim_threshold`
+  2) `cluster_semantic` → route to `clusters_top_m` clusters by centroid similarity
+  3) `archive` → older shards (fallback)
+- **Embeddings:** offline deterministic `BGEAdapter(dim=32)` (stable hash‑based vectors).
+- **Residuals:** keyword‑match episode text ↔ current graph labels, emit bounded `upsert_node` nudges; **never undo T1**.
 - **Metrics:** `tier_sequence`, `k_returned`, `k_used`, `sim_stats{mean,max}`, `caps.residual_cap`, `cache_*`.
 
 # Logs
@@ -878,28 +878,28 @@ Documented the JSONL shapes we emit and added a tiny size‑based rotation scrip
 
 All logs live under `.logs/` unless configured otherwise.
 
-- **t1.jsonl** — per‑turn propagation metrics  
+- **t1.jsonl** — per‑turn propagation metrics
   Fields: `turn`, `agent`, `pops`, `iters`, `propagations`, `radius_cap_hits`, `layer_cap_hits`, `node_budget_hits`, `cache_hit`, `cache_size`, `ms`
 
-- **t2.jsonl** — retrieval/residual metrics  
+- **t2.jsonl** — retrieval/residual metrics
   Fields: `turn`, `agent`, `k_retrieved`, `k_used`, `tier_sequence[]`, `sim_stats{mean,max}`, `cache_hit`, `cache_size`, `backend`, `backend_fallback?`, `backend_fallback_reason?`, `ms`
 
-- **t3_plan.jsonl** — plan/policy metrics  
+- **t3_plan.jsonl** — plan/policy metrics
   Fields: `turn`, `agent`, `policy_backend`, `backend`, `ops_counts`, `requested_retrieve`, `rag_used`, `reflection`, `ms_deliberate`, `ms_rag`
 
-- **t3_dialogue.jsonl** — dialogue synthesis metrics  
+- **t3_dialogue.jsonl** — dialogue synthesis metrics
   Fields: `turn`, `agent`, `backend`, `tokens`, `truncated`, `style_prefix_used`, `snippet_count`, `adapter?`, `model?`, `temperature?`, `ms`
 
-- **t4.jsonl** — meta‑filter decisions  
+- **t4.jsonl** — meta‑filter decisions
   Fields: `turn`, `agent`, `approved`, `rejected_ops[]`, `reasons[]`, `metrics{caps,clamps,cooldowns}`, `ms`
 
-- **apply.jsonl** — apply/snapshot summary  
+- **apply.jsonl** — apply/snapshot summary
   Fields: `turn`, `agent`, `applied`, `clamps`, `version_etag`, `snapshot_path`, `cache_invalidations`, `ms`
 
-- **turn.jsonl** — per‑turn roll‑up  
+- **turn.jsonl** — per‑turn roll‑up
   Fields: `turn`, `agent`, `ms_total`, `ms_t1`, `ms_t2`, `ms_t3`, `ms_t4`, `ms_apply`, `health`
 
-- **health.jsonl** — guardrail flags  
+- **health.jsonl** — guardrail flags
   Fields: `turn`, `agent`, `flags[]` (e.g., `GEL_EDGES`, `GEL_MERGES`, `GEL_SPLITS` when GEL is enabled)
 
 > Notes: Field sets are minimal and stable. Additional fields may appear; consumers should ignore unknown keys.
@@ -1195,7 +1195,7 @@ PR28 adds a rotation-aware demo and documentation updates. No core behavior chan
 
 **What’s new**
 - **Queue rotation (RR only, demo/driver level):** after an enforced yield, the selected agent is rotated head→tail. `fair_queue` does **not** rotate.
-- **Pick-reason passthrough:** the demo passes `pick_reason` into the orchestrator so `scheduler.jsonl` includes it.  
+- **Pick-reason passthrough:** the demo passes `pick_reason` into the orchestrator so `scheduler.jsonl` includes it.
 - **Full `queue_before/queue_after` logging** is deferred to **PR29** (driver-authored record).
 
 **Run the demo**
@@ -1219,7 +1219,7 @@ python3 scripts/run_demo.py \
 tail -n 3 ./.logs/scheduler.jsonl | jq .
 tail -n 3 ./.logs/turn.jsonl | jq .
 ```
-You should see `pick_reason` on scheduler records when provided (e.g., `"ROUND_ROBIN"`, `"AGING_BOOST"`, or `"RESET_CONSEC"`).  
+You should see `pick_reason` on scheduler records when provided (e.g., `"ROUND_ROBIN"`, `"AGING_BOOST"`, or `"RESET_CONSEC"`).
 In RR, the demo prints the queue transition like `['A','B','C'] -> ['B','C','A']` whenever a yield happens.
 
 **Examples (configs)**
@@ -1661,7 +1661,7 @@ python3 scripts/mem_inspect.py \
 Typical JSON keys:
 ```json
 {
-  "root": "/abs/path", 
+  "root": "/abs/path",
   "snapshots_dir": "/abs/path/.data/snapshots",
   "files": [
     {"name":"snapshot-aaaa.full.json","kind":"full","compressed":false,"level":0,"size_bytes":1234,"etag_to":"aaaa","delta_of":null,"codec":"none"}
@@ -1695,7 +1695,7 @@ Notes:
 
 ## M7 — Retrieval Quality: shadow tracing (PR36, defaults OFF)
 
-**Scope (no-op by default)**  
+**Scope (no-op by default)**
 Adds the `t2.quality.*` surface and a shadow tracing path that **does not change rankings or metrics**. When the **triple gate** is ON:
 - `perf.enabled: true`
 - `perf.metrics.report_memory: true`
@@ -1724,7 +1724,7 @@ Each trace record includes deterministic headers:
 - `query_id` (Unicode **NFKC**, collapsed whitespace, lowercased; SHA1)
 - `clock=0`, `seed=0`
 
-**CI guard — Gate D (“shadow is a no‑op”)**  
+**CI guard — Gate D (“shadow is a no‑op”)**
 Required check that asserts **no diffs** between baseline and shadow runs **except** for `rq_traces.jsonl`. Comparator script: `scripts/validate_noop_shadow.py`.
 
 **Try it locally**
@@ -1740,7 +1740,7 @@ python3 scripts/rq_trace_dump.py --trace_dir logs/quality --limit 5
 
 ## M7 — Retrieval Quality: Lexical BM25 + Fusion (PR37, opt-in, gated)
 
-**Scope (opt-in; defaults OFF)**  
+**Scope (opt-in; defaults OFF)**
 Adds a deterministic lexical BM25 scorer over the current candidate set and a rank-based fusion step that combines semantic and lexical signals. When **enabled** and the **triple gate** is ON, we emit both **metrics** and **traces** for the enabled path. Disabled path remains byte-for-byte identical to pre-M7.
 
 **Config (example)** — see [`examples/quality/lexical_fusion.yaml`](examples/quality/lexical_fusion.yaml):
@@ -1768,4 +1768,3 @@ t2:
 ## Changelog & Releases
 - See the [CHANGELOG](./CHANGELOG.md) for notable changes.
 - Binary / source packages and release notes are on the [Releases] page.
-

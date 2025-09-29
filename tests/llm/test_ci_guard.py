@@ -61,7 +61,15 @@ def test_ci_env_asserts_network_ban_present():
 
 
 def test_ci_requires_fixtures_enabled_when_fixture_provider():
-    cfg = {"t3": {"backend": "llm", "llm": {"provider": "fixture", "fixtures": {"enabled": False, "path": "fixtures/llm/qwen_small.jsonl"}}}}
+    cfg = {
+        "t3": {
+            "backend": "llm",
+            "llm": {
+                "provider": "fixture",
+                "fixtures": {"enabled": False, "path": "fixtures/llm/qwen_small.jsonl"},
+            },
+        }
+    }
     ok, errs, cfg = validate_config_api(cfg)
     assert ok, f"unexpected config errors: {errs}"
 

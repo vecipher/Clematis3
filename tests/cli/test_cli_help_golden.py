@@ -1,5 +1,3 @@
-
-
 import os
 import sys
 import pathlib
@@ -13,11 +11,13 @@ def _discover_subs():
     """Prefer clematis.cli.main.SUBS; fall back to introspecting the parser."""
     try:
         from clematis.cli.main import SUBS  # type: ignore[attr-defined]
+
         return list(SUBS)
     except Exception:
         # Fallback: walk argparse subparsers to list available subcommands
         import argparse  # local import to avoid test import side effects
         from clematis.cli.main import build_parser  # type: ignore
+
         parser = build_parser()
         subs = []
         for action in parser._actions:

@@ -1,5 +1,3 @@
-
-
 import subprocess
 import sys
 import textwrap
@@ -13,8 +11,9 @@ SCRIPT = Path("scripts/validate_config.py")
 @pytest.mark.skipif(not SCRIPT.exists(), reason="validator CLI not found")
 def test_cli_validator_accepts_perf_t2_cache_strict(tmp_path: Path):
     cfg = tmp_path / "good.yaml"
-    cfg.write_text(textwrap.dedent(
-        """
+    cfg.write_text(
+        textwrap.dedent(
+            """
         perf:
           enabled: true
           metrics:
@@ -34,17 +33,23 @@ def test_cli_validator_accepts_perf_t2_cache_strict(tmp_path: Path):
             enabled: false
             namespaces: []
         """
-    ).strip() + "\n", encoding="utf-8")
+        ).strip()
+        + "\n",
+        encoding="utf-8",
+    )
 
-    res = subprocess.run([sys.executable, str(SCRIPT), str(cfg), "--strict"], capture_output=True, text=True)
+    res = subprocess.run(
+        [sys.executable, str(SCRIPT), str(cfg), "--strict"], capture_output=True, text=True
+    )
     assert res.returncode == 0, f"STDOUT:\n{res.stdout}\nSTDERR:\n{res.stderr}"
 
 
 @pytest.mark.skipif(not SCRIPT.exists(), reason="validator CLI not found")
 def test_cli_validator_warns_when_perf_disabled(tmp_path: Path):
     cfg = tmp_path / "warn.yaml"
-    cfg.write_text(textwrap.dedent(
-        """
+    cfg.write_text(
+        textwrap.dedent(
+            """
         perf:
           enabled: false
           t2:
@@ -62,7 +67,10 @@ def test_cli_validator_warns_when_perf_disabled(tmp_path: Path):
             enabled: false
             namespaces: []
         """
-    ).strip() + "\n", encoding="utf-8")
+        ).strip()
+        + "\n",
+        encoding="utf-8",
+    )
 
     res = subprocess.run([sys.executable, str(SCRIPT), str(cfg)], capture_output=True, text=True)
     # Non-strict run should succeed, and we expect a perf.t2.cache warning in stdout
@@ -73,8 +81,9 @@ def test_cli_validator_warns_when_perf_disabled(tmp_path: Path):
 @pytest.mark.skipif(not SCRIPT.exists(), reason="validator CLI not found")
 def test_cli_validator_accepts_zero_caps_as_disabled(tmp_path: Path):
     cfg = tmp_path / "zero.yaml"
-    cfg.write_text(textwrap.dedent(
-        """
+    cfg.write_text(
+        textwrap.dedent(
+            """
         perf:
           enabled: true
           t2:
@@ -92,9 +101,14 @@ def test_cli_validator_accepts_zero_caps_as_disabled(tmp_path: Path):
             enabled: false
             namespaces: []
         """
-    ).strip() + "\n", encoding="utf-8")
+        ).strip()
+        + "\n",
+        encoding="utf-8",
+    )
 
-    res = subprocess.run([sys.executable, str(SCRIPT), str(cfg), "--strict"], capture_output=True, text=True)
+    res = subprocess.run(
+        [sys.executable, str(SCRIPT), str(cfg), "--strict"], capture_output=True, text=True
+    )
     # Zero caps mean "disabled"; strict should pass and there should be no perf cache warnings
     assert res.returncode == 0, f"STDOUT:\n{res.stdout}\nSTDERR:\n{res.stderr}"
     assert "W[perf.t2.cache]" not in res.stdout

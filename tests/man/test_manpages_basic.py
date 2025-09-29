@@ -4,19 +4,26 @@ import pytest
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 GOLD_DIR = ROOT / "tests" / "golden" / "man"
 
+
 def _read(p: pathlib.Path) -> str:
     return p.read_text(encoding="utf-8").replace("\r\n", "\n")
+
 
 def _assert_minimal_stanzas(txt: str):
     for tok in (".TH ", ".SH NAME", ".SH SYNOPSIS", ".SH OPTIONS"):
         assert tok in txt, f"missing stanza {tok!r}"
 
+
 def test_gen_manpages_minimal():
     env = dict(os.environ)
     env["SOURCE_DATE_EPOCH"] = "1704067200"  # 2024-01-01 UTC
     # generate
-    subprocess.run([sys.executable, "scripts/gen_manpages.py", "--outdir", "man"],
-                   cwd=ROOT, env=env, check=True)
+    subprocess.run(
+        [sys.executable, "scripts/gen_manpages.py", "--outdir", "man"],
+        cwd=ROOT,
+        env=env,
+        check=True,
+    )
     # root page
     root = ROOT / "man" / "clematis.1"
     assert root.exists()

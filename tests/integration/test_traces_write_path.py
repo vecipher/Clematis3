@@ -10,6 +10,7 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+
 @pytest.mark.integration
 def test_traces_written_to_custom_dir_and_first_line_parses(tmp_path):
     """

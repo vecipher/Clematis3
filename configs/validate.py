@@ -8,6 +8,7 @@ Public API:
 - Returns a **new** normalized dict; the input is not mutated.
 - No external dependencies.
 """
+
 from __future__ import annotations
 from typing import Any, Dict, List
 
@@ -17,6 +18,7 @@ __all__ = ["validate_config", "validate_config_verbose", "validate_config_api"]
 # ------------------------------
 # Utilities
 # ------------------------------
+
 
 def _ensure_dict(x: Any) -> Dict[str, Any]:
     if isinstance(x, dict):
@@ -86,13 +88,13 @@ DEFAULTS: Dict[str, Any] = {
             "enabled": False,
             "use_graph": True,
             "anchor_top_m": 8,
-            "walk_hops": 1,                 # 1 or 2
-            "edge_threshold": 0.10,         # [0,1]
-            "lambda_graph": 0.25,           # [0,1]
-            "damping": 0.50,                # [0,1], used when walk_hops=2
-            "degree_norm": "none",          # none | invdeg
-            "max_bonus": 0.50,              # >= 0
-            "k_max": 128,                   # >= 1 (cap work)
+            "walk_hops": 1,  # 1 or 2
+            "edge_threshold": 0.10,  # [0,1]
+            "lambda_graph": 0.25,  # [0,1]
+            "damping": 0.50,  # [0,1], used when walk_hops=2
+            "degree_norm": "none",  # none | invdeg
+            "max_bonus": 0.50,  # >= 0
+            "k_max": 128,  # >= 1 (cap work)
         },
     },
     "t3": {
@@ -140,7 +142,7 @@ DEFAULTS: Dict[str, Any] = {
         "observe_top_k": 64,
         "pair_cap_per_obs": 2048,
         "update": {
-            "mode": "additive",          # additive | proportional
+            "mode": "additive",  # additive | proportional
             "alpha": 0.02,
             "clamp_min": -1.0,
             "clamp_max": 1.0,
@@ -165,26 +167,26 @@ DEFAULTS: Dict[str, Any] = {
         },
         "promotion": {
             "enabled": False,
-            "label_mode": "lexmin",     # lexmin | concat_k
+            "label_mode": "lexmin",  # lexmin | concat_k
             "topk_label_ids": 3,
-            "attach_weight": 0.5,        # [-1,1]
+            "attach_weight": 0.5,  # [-1,1]
             "cap_per_turn": 2,
         },
     },
     "scheduler": {
         "enabled": False,
-        "policy": "round_robin",      # or "fair_queue"
-        "quantum_ms": 20,             # used in PR26
+        "policy": "round_robin",  # or "fair_queue"
+        "quantum_ms": 20,  # used in PR26
         "budgets": {
-            "t1_pops": None,          # int or None
+            "t1_pops": None,  # int or None
             "t1_iters": 50,
-            "t2_k": 64,               # cap on results USED (not fetched)
+            "t2_k": 64,  # cap on results USED (not fetched)
             "t3_ops": 3,
-            "wall_ms": 200,           # hard per-slice wall (PR26)
+            "wall_ms": 200,  # hard per-slice wall (PR26)
         },
         "fairness": {
             "max_consecutive_turns": 1,  # enforced in PR27
-            "aging_ms": 200,             # bucket size for fair-queue priority
+            "aging_ms": 200,  # bucket size for fair-queue priority
         },
     },
 }
@@ -198,37 +200,114 @@ DEFAULTS: Dict[str, Any] = {
 KNOWN_CACHE_NAMESPACES = {"t2:semantic"}
 
 # Allowed key sets per section
-ALLOWED_TOP = {"t1", "t2", "t3", "t4", "graph", "k_surface", "surface_method", "budgets", "flags", "scheduler", "perf"}
-ALLOWED_T1 = {"cache", "iter_cap", "queue_budget", "node_budget", "decay", "edge_type_mult", "radius_cap"}
-ALLOWED_T2 = {"backend", "k_retrieval", "sim_threshold", "cache", "ranking", "hybrid",
-              "tiers", "exact_recent_days", "clusters_top_m", "owner_scope",
-              "residual_cap_per_turn", "lancedb", "archive", "quality", "embed_root", "reader_batch", "reader"}
-ALLOWED_T3 = {"max_rag_loops", "max_ops_per_turn", "backend",
-              "tokens", "temp", "allow_reflection", "dialogue", "policy", "llm"}
+ALLOWED_TOP = {
+    "t1",
+    "t2",
+    "t3",
+    "t4",
+    "graph",
+    "k_surface",
+    "surface_method",
+    "budgets",
+    "flags",
+    "scheduler",
+    "perf",
+}
+ALLOWED_T1 = {
+    "cache",
+    "iter_cap",
+    "queue_budget",
+    "node_budget",
+    "decay",
+    "edge_type_mult",
+    "radius_cap",
+}
+ALLOWED_T2 = {
+    "backend",
+    "k_retrieval",
+    "sim_threshold",
+    "cache",
+    "ranking",
+    "hybrid",
+    "tiers",
+    "exact_recent_days",
+    "clusters_top_m",
+    "owner_scope",
+    "residual_cap_per_turn",
+    "lancedb",
+    "archive",
+    "quality",
+    "embed_root",
+    "reader_batch",
+    "reader",
+}
+ALLOWED_T3 = {
+    "max_rag_loops",
+    "max_ops_per_turn",
+    "backend",
+    "tokens",
+    "temp",
+    "allow_reflection",
+    "dialogue",
+    "policy",
+    "llm",
+}
 ALLOWED_T3_LLM = {"provider", "model", "endpoint", "max_tokens", "temp", "timeout_ms", "fixtures"}
 ALLOWED_T3_LLM_FIXTURES = {"enabled", "path"}
 ALLOWED_T4 = {
-    "enabled", "delta_norm_cap_l2", "novelty_cap_per_node", "churn_cap_edges",
-    "cooldowns", "weight_min", "weight_max", "snapshot_every_n_turns", "snapshot_dir",
-    "cache_bust_mode", "cache"
+    "enabled",
+    "delta_norm_cap_l2",
+    "novelty_cap_per_node",
+    "churn_cap_edges",
+    "cooldowns",
+    "weight_min",
+    "weight_max",
+    "snapshot_every_n_turns",
+    "snapshot_dir",
+    "cache_bust_mode",
+    "cache",
 }
 ALLOWED_CACHE_FIELDS = {"enabled", "namespaces", "max_entries", "ttl_sec", "ttl_s"}
 ALLOWED_RANKING_FIELDS = {"alpha_sim", "beta_recency", "gamma_importance"}
 
 ALLOWED_T2_HYBRID = {
-    "enabled", "use_graph", "anchor_top_m", "walk_hops", "edge_threshold",
-    "lambda_graph", "damping", "degree_norm", "max_bonus", "k_max",
+    "enabled",
+    "use_graph",
+    "anchor_top_m",
+    "walk_hops",
+    "edge_threshold",
+    "lambda_graph",
+    "damping",
+    "degree_norm",
+    "max_bonus",
+    "k_max",
 }
 
 # PR40: allowed keys for t2.reader
 ALLOWED_T2_READER = {"mode"}
 
-ALLOWED_GRAPH = {"enabled", "coactivation_threshold", "observe_top_k", "pair_cap_per_obs", "update", "decay", "merge", "split", "promotion"}
+ALLOWED_GRAPH = {
+    "enabled",
+    "coactivation_threshold",
+    "observe_top_k",
+    "pair_cap_per_obs",
+    "update",
+    "decay",
+    "merge",
+    "split",
+    "promotion",
+}
 ALLOWED_GRAPH_UPDATE = {"mode", "alpha", "clamp_min", "clamp_max"}
 ALLOWED_GRAPH_DECAY = {"half_life_turns", "floor"}
 ALLOWED_GRAPH_MERGE = {"enabled", "min_size", "min_avg_w", "max_diameter", "cap_per_turn"}
 ALLOWED_GRAPH_SPLIT = {"enabled", "weak_edge_thresh", "min_component_size", "cap_per_turn"}
-ALLOWED_GRAPH_PROMOTION = {"enabled", "label_mode", "topk_label_ids", "attach_weight", "cap_per_turn"}
+ALLOWED_GRAPH_PROMOTION = {
+    "enabled",
+    "label_mode",
+    "topk_label_ids",
+    "attach_weight",
+    "cap_per_turn",
+}
 _ALLOWED_SCHED_POLICIES = {"round_robin", "fair_queue"}
 
 # PERF (M6) allowed keys
@@ -243,16 +322,43 @@ ALLOWED_PERF_T2_READER_PARTITIONS = {"enabled", "layout", "path", "by"}
 ALLOWED_PERF_SNAP = {"compression", "level", "delta_mode", "every_n_turns"}
 ALLOWED_PERF_METRICS = {"report_memory"}
 
-ALLOWED_T2_QUALITY = {"enabled", "shadow", "trace_dir", "redact", "normalizer", "aliasing", "lexical", "fusion", "mmr", "cache"}
-ALLOWED_T2_QUALITY_NORMALIZER = {"enabled", "case", "unicode", "stopwords", "stemmer", "min_token_len"}
+ALLOWED_T2_QUALITY = {
+    "enabled",
+    "shadow",
+    "trace_dir",
+    "redact",
+    "normalizer",
+    "aliasing",
+    "lexical",
+    "fusion",
+    "mmr",
+    "cache",
+}
+ALLOWED_T2_QUALITY_NORMALIZER = {
+    "enabled",
+    "case",
+    "unicode",
+    "stopwords",
+    "stemmer",
+    "min_token_len",
+}
 ALLOWED_T2_QUALITY_ALIASING = {"enabled", "map_path", "max_expansions_per_token"}
 # Accept both canonical nested BM25 keys and flat convenience keys used in PR37 examples
 ALLOWED_T2_QUALITY_LEXICAL = {"enabled", "bm25", "bm25_k1", "bm25_b", "stopwords"}
 ALLOWED_T2_QUALITY_BM25 = {"k1", "b", "doclen_floor"}
 # Fusion supports an explicit 'mode' (PR37: only 'score_interp' allowed)
 ALLOWED_T2_QUALITY_FUSION = {"enabled", "mode", "alpha_semantic", "score_norm"}
-ALLOWED_T2_QUALITY_MMR = {"enabled", "lambda", "lambda_relevance", "diversity_by_owner", "diversity_by_token", "k", "k_final"}
+ALLOWED_T2_QUALITY_MMR = {
+    "enabled",
+    "lambda",
+    "lambda_relevance",
+    "diversity_by_owner",
+    "diversity_by_token",
+    "k",
+    "k_final",
+}
 ALLOWED_T2_QUALITY_CACHE = {"salt"}
+
 
 def _lev(a: str, b: str) -> int:
     """Tiny Levenshtein distance (edit distance) for did-you-mean suggestions."""
@@ -268,6 +374,7 @@ def _lev(a: str, b: str) -> int:
             prev, dp[j] = dp[j], min(ins, dele, sub)
     return dp[-1]
 
+
 def _suggest_key(bad: str, allowed: set[str]) -> str | None:
     """Return closest allowed key within distance ≤2, else None."""
     best_key, best_dist = None, 99
@@ -281,6 +388,7 @@ def _suggest_key(bad: str, allowed: set[str]) -> str | None:
 # ------------------------------
 # Validation helpers
 # ------------------------------
+
 
 def _err(errors: List[str], path: str, msg: str) -> None:
     errors.append(f"{path} {msg}")
@@ -296,6 +404,7 @@ def _ensure_subdict(cfg: Dict[str, Any], key: str) -> Dict[str, Any]:
 # ------------------------------
 # Main validator
 # ------------------------------
+
 
 def _validate_config_normalize_impl(cfg: Dict[str, Any]) -> Dict[str, Any]:
     """
@@ -479,74 +588,91 @@ def _validate_config_normalize_impl(cfg: Dict[str, Any]) -> Dict[str, Any]:
                 _err(errors, f"perf.{k}", f"unknown key{hint}")
         for k in raw_perf_t1.keys():
             if k not in ALLOWED_PERF_T1:
-                sug = _suggest_key(k, ALLOWED_PERF_T1); hint = f" (did you mean '{sug}')" if sug else ""
+                sug = _suggest_key(k, ALLOWED_PERF_T1)
+                hint = f" (did you mean '{sug}')" if sug else ""
                 _err(errors, f"perf.t1.{k}", f"unknown key{hint}")
         for k in raw_perf_t1_cache.keys():
             if k not in ALLOWED_PERF_T1_CACHE:
-                sug = _suggest_key(k, ALLOWED_PERF_T1_CACHE); hint = f" (did you mean '{sug}')" if sug else ""
+                sug = _suggest_key(k, ALLOWED_PERF_T1_CACHE)
+                hint = f" (did you mean '{sug}')" if sug else ""
                 _err(errors, f"perf.t1.cache.{k}", f"unknown key{hint}")
         for k in raw_perf_t1_caps.keys():
             if k not in ALLOWED_PERF_T1_CAPS:
-                sug = _suggest_key(k, ALLOWED_PERF_T1_CAPS); hint = f" (did you mean '{sug}')" if sug else ""
+                sug = _suggest_key(k, ALLOWED_PERF_T1_CAPS)
+                hint = f" (did you mean '{sug}')" if sug else ""
                 _err(errors, f"perf.t1.caps.{k}", f"unknown key{hint}")
         for k in raw_perf_t2.keys():
             if k not in ALLOWED_PERF_T2:
-                sug = _suggest_key(k, ALLOWED_PERF_T2); hint = f" (did you mean '{sug}')" if sug else ""
+                sug = _suggest_key(k, ALLOWED_PERF_T2)
+                hint = f" (did you mean '{sug}')" if sug else ""
                 _err(errors, f"perf.t2.{k}", f"unknown key{hint}")
         for k in raw_perf_t2_cache.keys():
             if k not in ALLOWED_PERF_T2_CACHE:
-                sug = _suggest_key(k, ALLOWED_PERF_T2_CACHE); hint = f" (did you mean '{sug}')" if sug else ""
+                sug = _suggest_key(k, ALLOWED_PERF_T2_CACHE)
+                hint = f" (did you mean '{sug}')" if sug else ""
                 _err(errors, f"perf.t2.cache.{k}", f"unknown key{hint}")
         for k in raw_perf_t2_reader.keys():
             if k not in ALLOWED_PERF_T2_READER:
-                sug = _suggest_key(k, ALLOWED_PERF_T2_READER); hint = f" (did you mean '{sug}')" if sug else ""
+                sug = _suggest_key(k, ALLOWED_PERF_T2_READER)
+                hint = f" (did you mean '{sug}')" if sug else ""
                 _err(errors, f"perf.t2.reader.{k}", f"unknown key{hint}")
         for k in raw_perf_t2_reader_partitions.keys():
             if k not in ALLOWED_PERF_T2_READER_PARTITIONS:
-                sug = _suggest_key(k, ALLOWED_PERF_T2_READER_PARTITIONS); hint = f" (did you mean '{sug}')" if sug else ""
+                sug = _suggest_key(k, ALLOWED_PERF_T2_READER_PARTITIONS)
+                hint = f" (did you mean '{sug}')" if sug else ""
                 _err(errors, f"perf.t2.reader.partitions.{k}", f"unknown key{hint}")
         for k in raw_perf_snap.keys():
             if k not in ALLOWED_PERF_SNAP:
-                sug = _suggest_key(k, ALLOWED_PERF_SNAP); hint = f" (did you mean '{sug}')" if sug else ""
+                sug = _suggest_key(k, ALLOWED_PERF_SNAP)
+                hint = f" (did you mean '{sug}')" if sug else ""
                 _err(errors, f"perf.snapshots.{k}", f"unknown key{hint}")
         for k in raw_perf_metrics.keys():
             if k not in ALLOWED_PERF_METRICS:
-                sug = _suggest_key(k, ALLOWED_PERF_METRICS); hint = f" (did you mean '{sug}')" if sug else ""
+                sug = _suggest_key(k, ALLOWED_PERF_METRICS)
+                hint = f" (did you mean '{sug}')" if sug else ""
                 _err(errors, f"perf.metrics.{k}", f"unknown key{hint}")
 
     # T2.quality unknown key checks (RQ prep only)
     if raw_t2_quality:
         for k in raw_t2_quality.keys():
             if k not in ALLOWED_T2_QUALITY:
-                sug = _suggest_key(k, ALLOWED_T2_QUALITY); hint = f" (did you mean '{sug}')" if sug else ""
+                sug = _suggest_key(k, ALLOWED_T2_QUALITY)
+                hint = f" (did you mean '{sug}')" if sug else ""
                 _err(errors, f"t2.quality.{k}", f"unknown key{hint}")
         for k in raw_q_norm.keys():
             if k not in ALLOWED_T2_QUALITY_NORMALIZER:
-                sug = _suggest_key(k, ALLOWED_T2_QUALITY_NORMALIZER); hint = f" (did you mean '{sug}')" if sug else ""
+                sug = _suggest_key(k, ALLOWED_T2_QUALITY_NORMALIZER)
+                hint = f" (did you mean '{sug}')" if sug else ""
                 _err(errors, f"t2.quality.normalizer.{k}", f"unknown key{hint}")
         for k in raw_q_alias.keys():
             if k not in ALLOWED_T2_QUALITY_ALIASING:
-                sug = _suggest_key(k, ALLOWED_T2_QUALITY_ALIASING); hint = f" (did you mean '{sug}')" if sug else ""
+                sug = _suggest_key(k, ALLOWED_T2_QUALITY_ALIASING)
+                hint = f" (did you mean '{sug}')" if sug else ""
                 _err(errors, f"t2.quality.aliasing.{k}", f"unknown key{hint}")
         for k in raw_q_lex.keys():
             if k not in ALLOWED_T2_QUALITY_LEXICAL:
-                sug = _suggest_key(k, ALLOWED_T2_QUALITY_LEXICAL); hint = f" (did you mean '{sug}')" if sug else ""
+                sug = _suggest_key(k, ALLOWED_T2_QUALITY_LEXICAL)
+                hint = f" (did you mean '{sug}')" if sug else ""
                 _err(errors, f"t2.quality.lexical.{k}", f"unknown key{hint}")
         for k in raw_q_bm25.keys():
             if k not in ALLOWED_T2_QUALITY_BM25:
-                sug = _suggest_key(k, ALLOWED_T2_QUALITY_BM25); hint = f" (did you mean '{sug}')" if sug else ""
+                sug = _suggest_key(k, ALLOWED_T2_QUALITY_BM25)
+                hint = f" (did you mean '{sug}')" if sug else ""
                 _err(errors, f"t2.quality.lexical.bm25.{k}", f"unknown key{hint}")
         for k in raw_q_fusion.keys():
             if k not in ALLOWED_T2_QUALITY_FUSION:
-                sug = _suggest_key(k, ALLOWED_T2_QUALITY_FUSION); hint = f" (did you mean '{sug}')" if sug else ""
+                sug = _suggest_key(k, ALLOWED_T2_QUALITY_FUSION)
+                hint = f" (did you mean '{sug}')" if sug else ""
                 _err(errors, f"t2.quality.fusion.{k}", f"unknown key{hint}")
         for k in raw_q_mmr.keys():
             if k not in ALLOWED_T2_QUALITY_MMR:
-                sug = _suggest_key(k, ALLOWED_T2_QUALITY_MMR); hint = f" (did you mean '{sug}')" if sug else ""
+                sug = _suggest_key(k, ALLOWED_T2_QUALITY_MMR)
+                hint = f" (did you mean '{sug}')" if sug else ""
                 _err(errors, f"t2.quality.mmr.{k}", f"unknown key{hint}")
         for k in raw_q_cache.keys():
             if k not in ALLOWED_T2_QUALITY_CACHE:
-                sug = _suggest_key(k, ALLOWED_T2_QUALITY_CACHE); hint = f" (did you mean '{sug}')" if sug else ""
+                sug = _suggest_key(k, ALLOWED_T2_QUALITY_CACHE)
+                hint = f" (did you mean '{sug}')" if sug else ""
                 _err(errors, f"t2.quality.cache.{k}", f"unknown key{hint}")
 
     merged = _deep_merge(cfg_in, DEFAULTS)
@@ -676,7 +802,11 @@ def _validate_config_normalize_impl(cfg: Dict[str, Any]) -> Dict[str, Any]:
     # PR40: reader mode normalization
     # reader mode (PR40): flat | partition | auto
     r2_reader = _ensure_subdict(t2, "reader")
-    mode_raw = str(raw_t2_reader.get("mode", "flat")).lower() if raw_t2_reader else str(r2_reader.get("mode", "flat")).lower()
+    mode_raw = (
+        str(raw_t2_reader.get("mode", "flat")).lower()
+        if raw_t2_reader
+        else str(r2_reader.get("mode", "flat")).lower()
+    )
     if mode_raw not in {"flat", "partition", "auto"}:
         _err(errors, "t2.reader.mode", "must be one of {flat,partition,auto}")
         mode_raw = "flat"
@@ -699,7 +829,11 @@ def _validate_config_normalize_impl(cfg: Dict[str, Any]) -> Dict[str, Any]:
             if "by" in raw_parts:
                 by = raw_parts.get("by")
                 if not (isinstance(by, list) and all(isinstance(x, str) for x in by)):
-                    _err(errors, "t2.lancedb.partitions.by", "must be a list of strings (e.g., ['owner','quarter'])")
+                    _err(
+                        errors,
+                        "t2.lancedb.partitions.by",
+                        "must be a list of strings (e.g., ['owner','quarter'])",
+                    )
                 else:
                     pp["by"] = list(by)
             if "shard_order" in raw_parts:
@@ -842,10 +976,13 @@ def _validate_config_normalize_impl(cfg: Dict[str, Any]) -> Dict[str, Any]:
     # Validate namespaces against the known set
     for ns in c4["namespaces"]:
         if ns not in KNOWN_CACHE_NAMESPACES:
-            _err(errors, f"t4.cache.namespaces[{ns}]", f"unknown namespace (allowed: {sorted(KNOWN_CACHE_NAMESPACES)})")
+            _err(
+                errors,
+                f"t4.cache.namespaces[{ns}]",
+                f"unknown namespace (allowed: {sorted(KNOWN_CACHE_NAMESPACES)})",
+            )
     # write-back: ensure normalized cache is attached
     t4["cache"] = c4
-
 
     # ---- GRAPH (GEL) ----
     g = _ensure_subdict(merged, "graph")
@@ -948,7 +1085,11 @@ def _validate_config_normalize_impl(cfg: Dict[str, Any]) -> Dict[str, Any]:
     # Cross-field sanity: if both thresholds present, weak_edge_thresh should not exceed merge.min_avg_w
     try:
         if gs["weak_edge_thresh"] > gm["min_avg_w"]:
-            _err(errors, "graph.split.weak_edge_thresh", "should be <= graph.merge.min_avg_w for consistency")
+            _err(
+                errors,
+                "graph.split.weak_edge_thresh",
+                "should be <= graph.merge.min_avg_w for consistency",
+            )
     except Exception:
         pass
     g["split"] = gs
@@ -988,6 +1129,7 @@ def _validate_config_normalize_impl(cfg: Dict[str, Any]) -> Dict[str, Any]:
 
     # budgets block
     sb = _ensure_subdict(s, "budgets")
+
     def _budget_int_or_none(name: str, min_val: int) -> None:
         v = sb.get(name, None)
         if v is None:
@@ -1031,16 +1173,19 @@ def _validate_config_normalize_impl(cfg: Dict[str, Any]) -> Dict[str, Any]:
             if raw_perf_t1_caps:
                 if "frontier" in raw_perf_t1_caps:
                     qc = _coerce_int(raw_perf_t1_caps.get("frontier"))
-                    if qc < 1: _err(errors, "perf.t1.caps.frontier", "must be >= 1")
+                    if qc < 1:
+                        _err(errors, "perf.t1.caps.frontier", "must be >= 1")
                     caps_out["frontier"] = qc
                 if "visited" in raw_perf_t1_caps:
                     vc = _coerce_int(raw_perf_t1_caps.get("visited"))
-                    if vc < 1: _err(errors, "perf.t1.caps.visited", "must be >= 1")
+                    if vc < 1:
+                        _err(errors, "perf.t1.caps.visited", "must be >= 1")
                     caps_out["visited"] = vc
             # legacy queue_cap → caps.frontier (if caps.frontier not provided)
             if "queue_cap" in raw_perf_t1:
                 qc_legacy = _coerce_int(raw_perf_t1.get("queue_cap"))
-                if qc_legacy < 1: _err(errors, "perf.t1.queue_cap", "must be >= 1")
+                if qc_legacy < 1:
+                    _err(errors, "perf.t1.queue_cap", "must be >= 1")
                 # keep legacy key in normalized output (for transparency)
                 pt1["queue_cap"] = qc_legacy
                 if "frontier" not in caps_out:
@@ -1050,21 +1195,26 @@ def _validate_config_normalize_impl(cfg: Dict[str, Any]) -> Dict[str, Any]:
             # dedupe window
             if "dedupe_window" in raw_perf_t1:
                 dw = _coerce_int(raw_perf_t1.get("dedupe_window"))
-                if dw < 1: _err(errors, "perf.t1.dedupe_window", "must be >= 1")
+                if dw < 1:
+                    _err(errors, "perf.t1.dedupe_window", "must be >= 1")
                 pt1["dedupe_window"] = dw
             # optional local cache fields under perf.t1
             if raw_perf_t1_cache:
                 pc: Dict[str, Any] = {}
                 if "max_entries" in raw_perf_t1_cache:
                     me = _coerce_int(raw_perf_t1_cache.get("max_entries"))
-                    if me < 0: _err(errors, "perf.t1.cache.max_entries", "must be >= 0")
+                    if me < 0:
+                        _err(errors, "perf.t1.cache.max_entries", "must be >= 0")
                     pc["max_entries"] = me
                 if "max_bytes" in raw_perf_t1_cache:
                     mb = _coerce_int(raw_perf_t1_cache.get("max_bytes"))
-                    if mb < 0: _err(errors, "perf.t1.cache.max_bytes", "must be >= 0")
+                    if mb < 0:
+                        _err(errors, "perf.t1.cache.max_bytes", "must be >= 0")
                     pc["max_bytes"] = mb
-                if pc: pt1["cache"] = pc
-            if pt1: p["t1"] = pt1
+                if pc:
+                    pt1["cache"] = pc
+            if pt1:
+                p["t1"] = pt1
 
         # perf.t2
         if raw_perf_t2:
@@ -1085,13 +1235,16 @@ def _validate_config_normalize_impl(cfg: Dict[str, Any]) -> Dict[str, Any]:
                 pc2: Dict[str, Any] = {}
                 if "max_entries" in raw_perf_t2_cache:
                     me2 = _coerce_int(raw_perf_t2_cache.get("max_entries"))
-                    if me2 < 0: _err(errors, "perf.t2.cache.max_entries", "must be >= 0")
+                    if me2 < 0:
+                        _err(errors, "perf.t2.cache.max_entries", "must be >= 0")
                     pc2["max_entries"] = me2
                 if "max_bytes" in raw_perf_t2_cache:
                     mb2 = _coerce_int(raw_perf_t2_cache.get("max_bytes"))
-                    if mb2 < 0: _err(errors, "perf.t2.cache.max_bytes", "must be >= 0")
+                    if mb2 < 0:
+                        _err(errors, "perf.t2.cache.max_bytes", "must be >= 0")
                     pc2["max_bytes"] = mb2
-                if pc2: pt2["cache"] = pc2
+                if pc2:
+                    pt2["cache"] = pc2
             # reader (PR33): partitions config
             raw_perf_t2_reader = _ensure_dict(raw_perf_t2.get("reader"))
             if raw_perf_t2_reader:
@@ -1104,29 +1257,50 @@ def _validate_config_normalize_impl(cfg: Dict[str, Any]) -> Dict[str, Any]:
                     if "layout" in prt:
                         lay = str(prt.get("layout")).lower()
                         if lay not in {"owner_quarter", "none"}:
-                            _err(errors, "perf.t2.reader.partitions.layout", "must be one of {owner_quarter,none}")
+                            _err(
+                                errors,
+                                "perf.t2.reader.partitions.layout",
+                                "must be one of {owner_quarter,none}",
+                            )
                         pp_out["layout"] = lay
                     if "path" in prt:
                         pth = prt.get("path")
                         if not isinstance(pth, str) or not pth.strip():
-                            _err(errors, "perf.t2.reader.partitions.path", "must be a non-empty string")
+                            _err(
+                                errors,
+                                "perf.t2.reader.partitions.path",
+                                "must be a non-empty string",
+                            )
                         pp_out["path"] = pth
                     if "by" in prt:
                         byv = prt.get("by")
-                        if not isinstance(byv, (list, tuple)) or not byv or not all(isinstance(x, str) and x.strip() for x in byv):
-                            _err(errors, "perf.t2.reader.partitions.by", "must be a non-empty list of strings")
+                        if (
+                            not isinstance(byv, (list, tuple))
+                            or not byv
+                            or not all(isinstance(x, str) and x.strip() for x in byv)
+                        ):
+                            _err(
+                                errors,
+                                "perf.t2.reader.partitions.by",
+                                "must be a non-empty list of strings",
+                            )
                         else:
                             # Restrict to known partition fields for PR33.5
                             allowed_fields = {"owner", "quarter"}
                             for fld in byv:
                                 if fld not in allowed_fields:
-                                    _err(errors, f"perf.t2.reader.partitions.by[{fld}]", f"unknown partition field (allowed: {sorted(allowed_fields)})")
+                                    _err(
+                                        errors,
+                                        f"perf.t2.reader.partitions.by[{fld}]",
+                                        f"unknown partition field (allowed: {sorted(allowed_fields)})",
+                                    )
                             pp_out["by"] = list(byv)
                     if pp_out:
                         rd_out["partitions"] = pp_out
                 if rd_out:
                     pt2["reader"] = rd_out
-            if pt2: p["t2"] = pt2
+            if pt2:
+                p["t2"] = pt2
 
         # perf.snapshots
         if raw_perf_snap:
@@ -1145,16 +1319,19 @@ def _validate_config_normalize_impl(cfg: Dict[str, Any]) -> Dict[str, Any]:
                 ps["delta_mode"] = _coerce_bool(raw_perf_snap.get("delta_mode"))
             if "every_n_turns" in raw_perf_snap:
                 ent = _coerce_int(raw_perf_snap.get("every_n_turns"))
-                if ent < 1: _err(errors, "perf.snapshots.every_n_turns", "must be >= 1")
+                if ent < 1:
+                    _err(errors, "perf.snapshots.every_n_turns", "must be >= 1")
                 ps["every_n_turns"] = ent
-            if ps: p["snapshots"] = ps
+            if ps:
+                p["snapshots"] = ps
 
         # perf.metrics
         if raw_perf_metrics:
             pm: Dict[str, Any] = {}
             if "report_memory" in raw_perf_metrics:
                 pm["report_memory"] = _coerce_bool(raw_perf_metrics.get("report_memory"))
-            if pm: p["metrics"] = pm
+            if pm:
+                p["metrics"] = pm
 
         merged["perf"] = p
 
@@ -1266,9 +1443,11 @@ def _validate_config_normalize_impl(cfg: Dict[str, Any]) -> Dict[str, Any]:
                 qa["map_path"] = mp
             if "max_expansions_per_token" in raw_q_alias:
                 mep = _coerce_int(raw_q_alias.get("max_expansions_per_token"))
-                if mep < 0: _err(errors, "t2.quality.aliasing.max_expansions_per_token", "must be >= 0")
+                if mep < 0:
+                    _err(errors, "t2.quality.aliasing.max_expansions_per_token", "must be >= 0")
                 qa["max_expansions_per_token"] = mep
-            if qa: q["aliasing"] = qa
+            if qa:
+                q["aliasing"] = qa
 
         # lexical
         if raw_q_lex:
@@ -1277,16 +1456,20 @@ def _validate_config_normalize_impl(cfg: Dict[str, Any]) -> Dict[str, Any]:
                 ql["enabled"] = _coerce_bool(raw_q_lex.get("enabled"))
             if raw_q_bm25:
                 qb: Dict[str, Any] = {}
-                if "k1" in raw_q_bm25: qb["k1"] = _coerce_float(raw_q_bm25.get("k1"))
+                if "k1" in raw_q_bm25:
+                    qb["k1"] = _coerce_float(raw_q_bm25.get("k1"))
                 if "b" in raw_q_bm25:
                     bval = _coerce_float(raw_q_bm25.get("b"))
                     qb["b"] = bval
                 if "doclen_floor" in raw_q_bm25:
                     dlf = _coerce_int(raw_q_bm25.get("doclen_floor"))
-                    if dlf < 0: _err(errors, "t2.quality.lexical.bm25.doclen_floor", "must be >= 0")
+                    if dlf < 0:
+                        _err(errors, "t2.quality.lexical.bm25.doclen_floor", "must be >= 0")
                     qb["doclen_floor"] = dlf
-                if qb: ql["bm25"] = qb
-            if ql: q["lexical"] = ql
+                if qb:
+                    ql["bm25"] = qb
+            if ql:
+                q["lexical"] = ql
 
         # fusion
         if raw_q_fusion:
@@ -1300,7 +1483,8 @@ def _validate_config_normalize_impl(cfg: Dict[str, Any]) -> Dict[str, Any]:
                 if sn not in {"zscore", "minmax"}:
                     _err(errors, "t2.quality.fusion.score_norm", "must be one of {zscore,minmax}")
                 qf["score_norm"] = sn
-            if qf: q["fusion"] = qf
+            if qf:
+                q["fusion"] = qf
 
         # mmr (PR38): accept canonical keys (lambda, k) and legacy aliases (lambda_relevance, k_final)
         if raw_q_mmr:
@@ -1355,7 +1539,8 @@ def _validate_config_normalize_impl(cfg: Dict[str, Any]) -> Dict[str, Any]:
             qc: Dict[str, Any] = {}
             if "salt" in raw_q_cache:
                 qc["salt"] = str(raw_q_cache.get("salt"))
-            if qc: q["cache"] = qc
+            if qc:
+                q["cache"] = qc
 
         # attach normalized quality only if provided
         t2["quality"] = q
@@ -1374,11 +1559,11 @@ def _validate_config_normalize_impl(cfg: Dict[str, Any]) -> Dict[str, Any]:
     return merged
 
 
-
 # ------------------------------
 # Verbose API: return warnings as a second value
 # ------------------------------
 from typing import Tuple
+
 
 def validate_config_verbose(cfg: Dict[str, Any]) -> Tuple[Dict[str, Any], List[str]]:
     """
@@ -1393,8 +1578,12 @@ def validate_config_verbose(cfg: Dict[str, Any]) -> Tuple[Dict[str, Any], List[s
     try:
         t2c = _ensure_dict(_ensure_dict(normalized.get("t2")).get("cache"))
         t4c = _ensure_dict(_ensure_dict(normalized.get("t4")).get("cache"))
-        if _coerce_bool(t2c.get("enabled", True)) and "t2:semantic" in (t4c.get("namespaces") or []):
-            warnings.append("W[t4.cache.namespaces]: duplicate-cache-namespace 't2:semantic' overlaps with stage cache (t2.cache.enabled=true); deterministic but TTLs may be confusing.")
+        if _coerce_bool(t2c.get("enabled", True)) and "t2:semantic" in (
+            t4c.get("namespaces") or []
+        ):
+            warnings.append(
+                "W[t4.cache.namespaces]: duplicate-cache-namespace 't2:semantic' overlaps with stage cache (t2.cache.enabled=true); deterministic but TTLs may be confusing."
+            )
     except Exception:
         # Be conservative: never crash on warning collection
         pass
@@ -1409,11 +1598,15 @@ def validate_config_verbose(cfg: Dict[str, Any]) -> Tuple[Dict[str, Any], List[s
 
         # Both zero can stall T1 when the scheduler is enabled
         if t1_iters == 0 and t1_pops == 0:
-            warnings.append("W[scheduler]: both t1_iters and t1_pops are 0; T1 may not progress when scheduler is enabled.")
+            warnings.append(
+                "W[scheduler]: both t1_iters and t1_pops are 0; T1 may not progress when scheduler is enabled."
+            )
 
         aging = _coerce_int(fairness.get("aging_ms", 200))
         if aging < qms:
-            warnings.append("W[scheduler]: fairness.aging_ms < quantum_ms; aging tiers may be too fine-grained to have effect.")
+            warnings.append(
+                "W[scheduler]: fairness.aging_ms < quantum_ms; aging tiers may be too fine-grained to have effect."
+            )
     except Exception:
         pass
     try:
@@ -1424,52 +1617,82 @@ def validate_config_verbose(cfg: Dict[str, Any]) -> Tuple[Dict[str, Any], List[s
             perf_on = _coerce_bool(perf.get("enabled", False))
             # Warn if caps/dedupe configured while perf is disabled
             if not perf_on:
-                if (_coerce_int(pt1v.get("queue_cap", 0)) > 0 or
-                    _coerce_int(pt1v.get("dedupe_window", 0)) > 0 or
-                    _coerce_int(capsv.get("frontier", 0)) > 0 or
-                    _coerce_int(capsv.get("visited", 0)) > 0):
-                    warnings.append("W[perf.t1]: caps/dedupe configured while perf.enabled=false; features remain disabled (identity path).")
+                if (
+                    _coerce_int(pt1v.get("queue_cap", 0)) > 0
+                    or _coerce_int(pt1v.get("dedupe_window", 0)) > 0
+                    or _coerce_int(capsv.get("frontier", 0)) > 0
+                    or _coerce_int(capsv.get("visited", 0)) > 0
+                ):
+                    warnings.append(
+                        "W[perf.t1]: caps/dedupe configured while perf.enabled=false; features remain disabled (identity path)."
+                    )
                 # PR32: caches configured while perf is disabled → identity path (no effect)
                 pt1c = _ensure_dict(pt1v.get("cache"))
                 pt2 = _ensure_dict(perf.get("t2"))
                 pt2c = _ensure_dict(pt2.get("cache"))
-                if (_coerce_int(pt1c.get("max_entries", 0)) > 0 or _coerce_int(pt1c.get("max_bytes", 0)) > 0):
-                    warnings.append("W[perf.t1.cache]: cache configured while perf.enabled=false; cache remains disabled (identity path).")
-                if (_coerce_int(pt2c.get("max_entries", 0)) > 0 or _coerce_int(pt2c.get("max_bytes", 0)) > 0):
-                    warnings.append("W[perf.t2.cache]: cache configured while perf.enabled=false; cache remains disabled (identity path).")
+                if (
+                    _coerce_int(pt1c.get("max_entries", 0)) > 0
+                    or _coerce_int(pt1c.get("max_bytes", 0)) > 0
+                ):
+                    warnings.append(
+                        "W[perf.t1.cache]: cache configured while perf.enabled=false; cache remains disabled (identity path)."
+                    )
+                if (
+                    _coerce_int(pt2c.get("max_entries", 0)) > 0
+                    or _coerce_int(pt2c.get("max_bytes", 0)) > 0
+                ):
+                    warnings.append(
+                        "W[perf.t2.cache]: cache configured while perf.enabled=false; cache remains disabled (identity path)."
+                    )
                 # PR33: reader partitions configured while perf is disabled → identity path (no effect)
                 pt2r = _ensure_dict(pt2.get("reader"))
                 prt = _ensure_dict(pt2r.get("partitions"))
-                if (_coerce_bool(prt.get("enabled", False))
-                    or ("by" in prt) or ("layout" in prt) or ("path" in prt)):
-                    warnings.append("W[perf.t2.reader]: partitions configured while perf.enabled=false; reader remains disabled (identity path).")
+                if (
+                    _coerce_bool(prt.get("enabled", False))
+                    or ("by" in prt)
+                    or ("layout" in prt)
+                    or ("path" in prt)
+                ):
+                    warnings.append(
+                        "W[perf.t2.reader]: partitions configured while perf.enabled=false; reader remains disabled (identity path)."
+                    )
                 # PR34: snapshots configured while perf is disabled → identity path (no effect)
                 ps = _ensure_dict(perf.get("snapshots"))
                 if ps:
                     comp = str(ps.get("compression", "none")).lower()
-                    lvl_present = ("level" in ps)
+                    lvl_present = "level" in ps
                     delta_set = _coerce_bool(ps.get("delta_mode", False))
-                    every_present = ("every_n_turns" in ps)
+                    every_present = "every_n_turns" in ps
                     if (comp != "none") or lvl_present or delta_set or every_present:
-                        warnings.append("W[perf.snapshots]: snapshots configured while perf.enabled=false; features remain disabled (identity path).")
+                        warnings.append(
+                            "W[perf.snapshots]: snapshots configured while perf.enabled=false; features remain disabled (identity path)."
+                        )
             # Warn if both legacy and new frontier caps are present
             if "queue_cap" in pt1v and "frontier" in capsv:
-                warnings.append("W[perf.t1]: both queue_cap and caps.frontier set; caps.frontier will be used by runtime.")
+                warnings.append(
+                    "W[perf.t1]: both queue_cap and caps.frontier set; caps.frontier will be used by runtime."
+                )
             pt2 = _ensure_dict(perf.get("t2"))
             esd = str(pt2.get("embed_store_dtype", "")).lower()
             pre = _coerce_bool(pt2.get("precompute_norms", False))
             if esd == "fp16" and not pre:
-                warnings.append("W[perf.t2]: embed_store_dtype=fp16 without precompute_norms=true; fp32 norms recommended for score parity.")
+                warnings.append(
+                    "W[perf.t2]: embed_store_dtype=fp16 without precompute_norms=true; fp32 norms recommended for score parity."
+                )
             ps = _ensure_dict(perf.get("snapshots"))
             if _coerce_bool(ps.get("delta_mode", False)):
-                warnings.append("W[perf.snapshots]: delta_mode=true may fallback to full snapshot when baseline/etag is missing.")
+                warnings.append(
+                    "W[perf.snapshots]: delta_mode=true may fallback to full snapshot when baseline/etag is missing."
+                )
         # LanceDB partitions configured while perf is OFF → ignored in disabled path
         try:
             t2n = _ensure_dict(normalized.get("t2"))
             ldb = _ensure_dict(t2n.get("lancedb"))
             parts = _ensure_dict(ldb.get("partitions"))
             if parts and not perf_on:
-                warnings.append("W[t2.lancedb.partitions]: configured while perf.enabled=false; ignored in disabled path.")
+                warnings.append(
+                    "W[t2.lancedb.partitions]: configured while perf.enabled=false; ignored in disabled path."
+                )
         except Exception:
             pass
         # PR40: t2.reader.mode warnings
@@ -1479,7 +1702,9 @@ def validate_config_verbose(cfg: Dict[str, Any]) -> Tuple[Dict[str, Any], List[s
             perf = _ensure_dict(normalized.get("perf"))
             perf_on = _coerce_bool(perf.get("enabled", False))
             if rmode in {"partition", "auto"} and not perf_on:
-                warnings.append("W[t2.reader.mode]: partition/auto configured while perf.enabled=false; reader parity path & metrics are disabled (flat behavior).")
+                warnings.append(
+                    "W[t2.reader.mode]: partition/auto configured while perf.enabled=false; reader parity path & metrics are disabled (flat behavior)."
+                )
         except Exception:
             pass
         q = _ensure_dict(_ensure_dict(normalized.get("t2")).get("quality"))
@@ -1487,24 +1712,37 @@ def validate_config_verbose(cfg: Dict[str, Any]) -> Tuple[Dict[str, Any], List[s
             # PR39: normalizer & aliasing warnings
             qn = _ensure_dict(q.get("normalizer"))
             if qn:
-                if _coerce_bool(qn.get("enabled", False)) and not _coerce_bool(q.get("enabled", False)):
-                    warnings.append("W[t2.quality.normalizer]: normalizer.enabled=true while t2.quality.enabled=false; no effect.")
+                if _coerce_bool(qn.get("enabled", False)) and not _coerce_bool(
+                    q.get("enabled", False)
+                ):
+                    warnings.append(
+                        "W[t2.quality.normalizer]: normalizer.enabled=true while t2.quality.enabled=false; no effect."
+                    )
                 case = str(qn.get("case", "lower"))
                 if case != "lower":
-                    warnings.append("W[t2.quality.normalizer.case]: only 'lower' is supported; using 'lower'.")
+                    warnings.append(
+                        "W[t2.quality.normalizer.case]: only 'lower' is supported; using 'lower'."
+                    )
                 uni = str(qn.get("unicode", "NFKC"))
                 if uni != "NFKC":
-                    warnings.append("W[t2.quality.normalizer.unicode]: only 'NFKC' is supported; using 'NFKC'.")
+                    warnings.append(
+                        "W[t2.quality.normalizer.unicode]: only 'NFKC' is supported; using 'NFKC'."
+                    )
             qa = _ensure_dict(q.get("aliasing"))
             if qa:
                 if not _coerce_bool(q.get("enabled", False)):
-                    warnings.append("W[t2.quality.aliasing]: configured while t2.quality.enabled=false; no effect.")
+                    warnings.append(
+                        "W[t2.quality.aliasing]: configured while t2.quality.enabled=false; no effect."
+                    )
                 mp = qa.get("map_path")
                 if isinstance(mp, str) and mp:
                     try:
                         import os
+
                         if not os.path.isfile(mp):
-                            warnings.append("W[t2.quality.aliasing.map_path]: file not found or unreadable; aliasing will be a no-op.")
+                            warnings.append(
+                                "W[t2.quality.aliasing.map_path]: file not found or unreadable; aliasing will be a no-op."
+                            )
                     except Exception:
                         pass
             # Shadow triple-gate reminder: traces only emit when perf.enabled && perf.metrics.report_memory && shadow==true && enabled==false
@@ -1515,7 +1753,9 @@ def validate_config_verbose(cfg: Dict[str, Any]) -> Tuple[Dict[str, Any], List[s
                 report_mem = _coerce_bool(perf_metrics.get("report_memory", False))
                 if _coerce_bool(q.get("shadow", False)):
                     if not (perf_on and report_mem and not _coerce_bool(q.get("enabled", False))):
-                        warnings.append("W[t2.quality.shadow]: requires perf.enabled=true AND perf.metrics.report_memory=true AND t2.quality.enabled=false; traces will not emit otherwise.")
+                        warnings.append(
+                            "W[t2.quality.shadow]: requires perf.enabled=true AND perf.metrics.report_memory=true AND t2.quality.enabled=false; traces will not emit otherwise."
+                        )
             except Exception:
                 pass
             # PR37: enabled-path warnings
@@ -1525,9 +1765,13 @@ def validate_config_verbose(cfg: Dict[str, Any]) -> Tuple[Dict[str, Any], List[s
                 perf_metrics = _ensure_dict(perf.get("metrics"))
                 report_mem = _coerce_bool(perf_metrics.get("report_memory", False))
                 if _coerce_bool(q.get("enabled", False)) and not perf_on:
-                    warnings.append("W[t2.quality.enabled]: perf.enabled=false; quality fusion will not execute.")
+                    warnings.append(
+                        "W[t2.quality.enabled]: perf.enabled=false; quality fusion will not execute."
+                    )
                 if _coerce_bool(q.get("enabled", False)) and perf_on and not report_mem:
-                    warnings.append("W[t2.quality.metrics]: perf.metrics.report_memory=false; quality metrics/traces will not emit under Gate B.")
+                    warnings.append(
+                        "W[t2.quality.metrics]: perf.metrics.report_memory=false; quality metrics/traces will not emit under Gate B."
+                    )
             except Exception:
                 pass
             qf = _ensure_dict(q.get("fusion"))
@@ -1538,8 +1782,12 @@ def validate_config_verbose(cfg: Dict[str, Any]) -> Tuple[Dict[str, Any], List[s
             qm = _ensure_subdict(q, "mmr")
             if qm:
                 # enabled-without-quality: no effect
-                if _coerce_bool(qm.get("enabled", False)) and not _coerce_bool(q.get("enabled", False)):
-                    warnings.append("W[t2.quality.mmr]: mmr.enabled=true while t2.quality.enabled=false; MMR has no effect.")
+                if _coerce_bool(qm.get("enabled", False)) and not _coerce_bool(
+                    q.get("enabled", False)
+                ):
+                    warnings.append(
+                        "W[t2.quality.mmr]: mmr.enabled=true while t2.quality.enabled=false; MMR has no effect."
+                    )
                 # lambda checks (canonical + legacy)
                 lam = None
                 if "lambda" in qm:
@@ -1562,7 +1810,9 @@ def validate_config_verbose(cfg: Dict[str, Any]) -> Tuple[Dict[str, Any], List[s
                         warnings.append("W[t2.quality.mmr.k_final]: expected >= 1.")
                 if k_val is not None:
                     try:
-                        kret = _coerce_int(_ensure_dict(normalized.get("t2")).get("k_retrieval", 10))
+                        kret = _coerce_int(
+                            _ensure_dict(normalized.get("t2")).get("k_retrieval", 10)
+                        )
                         if k_val > kret:
                             # Choose label based on raw cfg to preserve legacy expectation
                             raw_t2 = _ensure_dict(cfg.get("t2")) if isinstance(cfg, dict) else {}
@@ -1581,9 +1831,13 @@ def validate_config_verbose(cfg: Dict[str, Any]) -> Tuple[Dict[str, Any], List[s
                         pass
                 # PR38 scope: owner-diversity is ignored; token-diversity is implicit
                 if _coerce_bool(qm.get("diversity_by_owner", False)):
-                    warnings.append("W[t2.quality.mmr.diversity_by_owner]: ignored in PR38; token-based diversity only.")
+                    warnings.append(
+                        "W[t2.quality.mmr.diversity_by_owner]: ignored in PR38; token-based diversity only."
+                    )
                 if "diversity_by_token" in qm:
-                    warnings.append("W[t2.quality.mmr.diversity_by_token]: flag is accepted but PR38 always uses token-based diversity.")
+                    warnings.append(
+                        "W[t2.quality.mmr.diversity_by_token]: flag is accepted but PR38 always uses token-based diversity."
+                    )
     except Exception:
         pass
     return normalized, warnings
@@ -1592,6 +1846,7 @@ def validate_config_verbose(cfg: Dict[str, Any]) -> Tuple[Dict[str, Any], List[s
 # Public API (unified):
 # - validate_config(cfg) -> dict (normalized)  [primary path]
 # - validate_config(cfg, strict=..., verbose=...) -> (errors, warnings)  [compat path for a few tests]
+
 
 def validate_config_api(cfg: Dict[str, Any]):
     """Stable, test-friendly API for M3-07.
@@ -1608,6 +1863,7 @@ def validate_config_api(cfg: Dict[str, Any]):
         msg = str(e).strip()
         errs = msg.split("\n") if msg else ["invalid configuration"]
         return False, errs, None
+
 
 def validate_config(cfg: Dict[str, Any], **kwargs):
     """Validate configuration.
@@ -1629,4 +1885,3 @@ def validate_config(cfg: Dict[str, Any], **kwargs):
             return errs, []
     # No kwargs: return normalized dict or raise on error
     return _validate_config_normalize_impl(cfg)
-    

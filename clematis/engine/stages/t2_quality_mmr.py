@@ -118,7 +118,11 @@ def mmr_select(
             else:
                 # first pick purely by relevance (stable against id tie‑break below)
                 score = rel
-            if best_val is None or score > best_val or (score == best_val and items[i].id < items[best_i].id):
+            if (
+                best_val is None
+                or score > best_val
+                or (score == best_val and items[i].id < items[best_i].id)
+            ):
                 best_val = score
                 best_i = i
         selected.append(best_i)

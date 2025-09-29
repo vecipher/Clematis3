@@ -77,7 +77,9 @@ def write_shard(
         "dim": d,
         "count": n,
     }
-    (shard / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+    (shard / "meta.json").write_text(
+        json.dumps(meta, ensure_ascii=False, sort_keys=True, indent=2) + "\n", encoding="utf-8"
+    )
 
 
 # ------------------------------- Reader ------------------------------------
@@ -117,7 +119,9 @@ class EmbedReader:
         }
 
     # Deterministic iterator over blocks across shards
-    def iter_blocks(self, batch: int) -> Iterator[Tuple[List[str], np.ndarray, Optional[np.ndarray]]]:
+    def iter_blocks(
+        self, batch: int
+    ) -> Iterator[Tuple[List[str], np.ndarray, Optional[np.ndarray]]]:
         if batch <= 0:
             raise ValueError("batch must be >= 1")
         for sh in self._shards:  # already sorted by path
@@ -181,7 +185,11 @@ def open_reader(root: str | Path, *, partitions: Optional[dict] = None) -> Embed
     subdirectories containing `meta.json`.
     """
     root = Path((partitions or {}).get("path", root))
-    layout = (partitions or {}).get("layout", "none") if (partitions or {}).get("enabled", False) else "none"
+    layout = (
+        (partitions or {}).get("layout", "none")
+        if (partitions or {}).get("enabled", False)
+        else "none"
+    )
 
     shard_dirs: List[Path] = _discover_shards(root, layout)
     shards: List[_ShardInfo] = []

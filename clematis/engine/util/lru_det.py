@@ -1,9 +1,18 @@
-
-
 from __future__ import annotations
 
 from collections import deque
-from typing import Deque, Dict, Generic, Iterable, Iterator, MutableMapping, Optional, Tuple, TypeVar, Callable
+from typing import (
+    Deque,
+    Dict,
+    Generic,
+    Iterable,
+    Iterator,
+    MutableMapping,
+    Optional,
+    Tuple,
+    TypeVar,
+    Callable,
+)
 
 __all__ = ["DeterministicLRUSet", "DeterministicLRU"]
 
@@ -91,7 +100,7 @@ class DeterministicLRU(Generic[K, V]):
         self.update_on_get = bool(update_on_get)
         self.update_on_put = bool(update_on_put)
         self.on_evict = on_evict
-        self._q: Deque[K] = deque()   # LRU (left) → MRU (right)
+        self._q: Deque[K] = deque()  # LRU (left) → MRU (right)
         self._map: Dict[K, V] = {}
 
     def __contains__(self, key: K) -> bool:

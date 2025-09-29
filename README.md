@@ -17,8 +17,8 @@ Clematis is a deterministic, turn‑based scaffold for agential AI. It models ag
 ## Architecture (high level)
 - **Memories:** LanceDB vector store (BGE small); tiered retrieval; deterministic scoring.
 - **Concept graph:** nodes/edges with decay and relations; surface views for I/O.
-- **Stages:**  
-  T1 keyword/seeded propagation → T2 semantic retrieval (+ residual) → T3 bounded policy (rule‑based now; LLM adapter gated) → T4 meta‑filter & apply/persist.  
+- **Stages:**
+  T1 keyword/seeded propagation → T2 semantic retrieval (+ residual) → T3 bounded policy (rule‑based now; LLM adapter gated) → T4 meta‑filter & apply/persist.
   Reflection and scheduler features are gated for determinism.
 - **Determinism:** golden logs, identity path when gates are OFF; shadow/quality traces never affect results.
 
@@ -49,7 +49,7 @@ CLI details, delegation rules, and recipes live in **[docs/m8/cli.md](docs/m8/cl
 
 ## Environment flags
 - `CLEMATIS_NETWORK_BAN=1` — enforce no network (recommended in CI).
-- `CLEMATIS_DEBUG=1` — enable a single stderr breadcrumb for wrapper delegation.  
+- `CLEMATIS_DEBUG=1` — enable a single stderr breadcrumb for wrapper delegation.
   Exit codes and stdout remain identical.
 
 ## Milestones snapshot
@@ -57,16 +57,16 @@ CLI details, delegation rules, and recipes live in **[docs/m8/cli.md](docs/m8/cl
 - **M5:** scheduler config and groundwork (feature‑gated; identity path when disabled).
 - **M6:** memory/perf scaffolding; caches and snapshot hygiene (default‑off quality toggles).
 - **M7:** observability/dev‑ex; shadow quality traces; golden tests; gate hardening.
-- **M8 (current):** packaging & CLI docs/CI polish.  
-  – README trimmed; canonical CLI doc split to `docs/m8/cli.md`.  
+- **M8 (current):** packaging & CLI docs/CI polish.
+  – README trimmed; canonical CLI doc split to `docs/m8/cli.md`.
   – Add fast CLI smokes to CI (help phrase, arg‑order, sentinel strip, shim hint).
 
-Pre‑M8 hardening notes: **`Changelog/PreM8Hardening.txt`**.  
+Pre‑M8 hardening notes: **`Changelog/PreM8Hardening.txt`**.
 LLM adapter + fixtures: **`docs/m3/llm_adapter.md`**.
 
 ## Contributing
-- Keep changes deterministic. If a gate is OFF, results must be byte‑for‑byte identical.  
-- Tests should run offline; prefer fixtures and golden logs.  
+- Keep changes deterministic. If a gate is OFF, results must be byte‑for‑byte identical.
+- Tests should run offline; prefer fixtures and golden logs.
 - Include small, focused PRs with a clear scope and a short DoD checklist.
 
 ---

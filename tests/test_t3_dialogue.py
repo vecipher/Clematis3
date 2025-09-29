@@ -18,7 +18,8 @@ class Ctx:
                 "max_rag_loops": 1,
                 "temp": 0.7,
                 "dialogue": {
-                    "template": template or "style:{style_prefix} labels:{labels} intent:{intent} snippets:{snippets}",
+                    "template": template
+                    or "style:{style_prefix} labels:{labels} intent:{intent} snippets:{snippets}",
                     "include_top_k_snippets": include_k,
                 },
             },
@@ -51,7 +52,12 @@ def _t2_hits():
             {"id": "e3", "score": 0.70},  # missing owner/quarter OK
             {"id": "e4", "score": 0.60},
         ],
-        metrics={"sim_stats": {"mean": 0.75, "max": 0.90}, "tier_sequence": ["exact_semantic"], "k_returned": 4, "cache_used": False},
+        metrics={
+            "sim_stats": {"mean": 0.75, "max": 0.90},
+            "tier_sequence": ["exact_semantic"],
+            "k_returned": 4,
+            "cache_used": False,
+        },
     )
 
 

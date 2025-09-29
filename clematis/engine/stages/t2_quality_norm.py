@@ -1,5 +1,3 @@
-
-
 from __future__ import annotations
 
 """
@@ -59,6 +57,7 @@ def normalize_text(s: str) -> str:
 
 # ------------------------------ Tokenization -----------------------------
 
+
 def _apply_stemmer(tok: str, stemmer: str) -> str:
     """Very small, deterministic stemmer hook.
 
@@ -68,7 +67,17 @@ def _apply_stemmer(tok: str, stemmer: str) -> str:
     """
     if stemmer == "porter-lite":
         # Order matters; check longest first. Deterministic, ASCII‑only.
-        for suf in ("ingly", "edly", "ing", "ness", "ment", "tion", "es", "s", "ed"):  # pragma: no branch
+        for suf in (
+            "ingly",
+            "edly",
+            "ing",
+            "ness",
+            "ment",
+            "tion",
+            "es",
+            "s",
+            "ed",
+        ):  # pragma: no branch
             if tok.endswith(suf) and len(tok) > len(suf) + 2:
                 return tok[: -len(suf)]
     return tok
@@ -150,7 +159,11 @@ def load_alias_map(path: str) -> Dict[str, str]:
 
             data = yaml.safe_load(buf)
             if isinstance(data, dict):
-                amap = {str(k): str(v) for k, v in data.items() if isinstance(k, (str, int)) and isinstance(v, (str, int))}
+                amap = {
+                    str(k): str(v)
+                    for k, v in data.items()
+                    if isinstance(k, (str, int)) and isinstance(v, (str, int))
+                }
             else:
                 amap = _parse_simple_kv(buf)
         except Exception:

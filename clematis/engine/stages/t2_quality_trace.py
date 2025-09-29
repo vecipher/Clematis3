@@ -5,8 +5,10 @@ import json, os, hashlib
 from typing import Any, Dict, List, Optional
 import unicodedata
 import logging
+
 _logger = logging.getLogger(__name__)
 __TRACE_WRITE_ERROR_WARNED = False
+
 
 def _norm_query(q: str) -> str:
     # Unicode normalize, trim, collapse internal whitespace, lowercase
@@ -14,19 +16,25 @@ def _norm_query(q: str) -> str:
     q = " ".join(q.split())  # splits on any whitespace and rejoins with single space
     return q.lower()
 
+
 def _query_id(q: str) -> str:
     return _sha1(_norm_query(q))
 
+
 TRACE_SCHEMA_VERSION = 1
+
 
 def _stable_json(obj: Any) -> str:
     return json.dumps(obj, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
 
+
 def _sha256(s: str) -> str:
     return hashlib.sha256(s.encode("utf-8")).hexdigest()
 
+
 def _sha1(s: str) -> str:
     return hashlib.sha1(s.encode("utf-8")).hexdigest()
+
 
 def _config_digest(cfg: Dict[str, Any]) -> str:
     """
@@ -54,8 +62,10 @@ def _config_digest(cfg: Dict[str, Any]) -> str:
     }
     return _sha256(_stable_json(sub))
 
+
 def _git_sha() -> str:
     return os.environ.get("CLEMATIS_GIT_SHA", "unknown")
+
 
 def _redact_items(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     # Minimal, conservative redaction for shadow mode.
@@ -69,14 +79,15 @@ def _redact_items(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         redacted.append(r)
     return redacted
 
+
 def _derive_trace_dir(cfg: Dict[str, Any]) -> Path:
     """
     Prefer perf.metrics.trace_dir if set, otherwise t2.quality.trace_dir,
     otherwise default to logs/quality.
     """
     try:
-        perf = (cfg.get("perf") or {})
-        metrics = (perf.get("metrics") or {})
+        perf = cfg.get("perf") or {}
+        metrics = perf.get("metrics") or {}
         td = metrics.get("trace_dir")
         if isinstance(td, str) and td.strip():
             return Path(td)
@@ -91,7 +102,10 @@ def _derive_trace_dir(cfg: Dict[str, Any]) -> Path:
         pass
     return Path("logs/quality")
 
-def emit_trace(cfg: Dict[str, Any], query: str, items: List[Dict[str, Any]], meta: Dict[str, Any]) -> None:
+
+def emit_trace(
+    cfg: Dict[str, Any], query: str, items: List[Dict[str, Any]], meta: Dict[str, Any]
+) -> None:
     """
     Write a single JSONL record to trace_dir/rq_traces.jsonl.
     Must be called only when triple-gate is satisfied.
@@ -103,7 +117,8 @@ def emit_trace(cfg: Dict[str, Any], query: str, items: List[Dict[str, Any]], met
         "trace_schema_version": TRACE_SCHEMA_VERSION,
         "git_sha": _git_sha(),
         "config_digest": _config_digest(cfg),
-        "clock": 0, "seed": 0,
+        "clock": 0,
+        "seed": 0,
         "query": "[REDACTED]" if redact else query,
         "query_id": _query_id(query),
         "meta": meta or {},
@@ -124,6 +139,12 @@ def emit_trace(cfg: Dict[str, Any], query: str, items: List[Dict[str, Any]], met
         # swallow to keep pipeline non-fatal
         return
 
+
 # Back-compat/alias for callers expecting emit_quality_trace(...)
-def emit_quality_trace(cfg: Dict[str, Any], query: str, items: List[Dict[str, Any]], meta: Optional[Dict[str, Any]] = None) -> None:
+def emit_quality_trace(
+    cfg: Dict[str, Any],
+    query: str,
+    items: List[Dict[str, Any]],
+    meta: Optional[Dict[str, Any]] = None,
+) -> None:
     emit_trace(cfg, query, items, meta or {})

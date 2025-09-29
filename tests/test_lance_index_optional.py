@@ -1,5 +1,3 @@
-
-
 import pytest
 import numpy as np
 from datetime import datetime, timezone
@@ -47,7 +45,7 @@ def test_exact_semantic_owner_and_recent_window(tmp_path):
     idx = LanceIndex(uri=str(tmp_path / "db2"))
     now_iso = "2025-09-19T00:00:00Z"
     recent_ts = "2025-09-10T00:00:00Z"  # within 30 days
-    old_ts = "2025-06-01T00:00:00Z"     # outside 30-day window
+    old_ts = "2025-06-01T00:00:00Z"  # outside 30-day window
 
     # Owner A (recent + old), Owner B (recent)
     idx.add(mk_ep("r1", [1, 0, 0, 0], owner="A", ts=recent_ts))
@@ -72,7 +70,9 @@ def test_tie_breaks_by_id_on_equal_scores(tmp_path):
     idx.add(mk_ep("a2", [1, 0, 0, 0]))
 
     q = np.array([1, 0, 0, 0], dtype=np.float32)
-    hits = idx.search_tiered(owner=None, q_vec=q, k=2, tier="exact_semantic", hints={"sim_threshold": -1.0})
+    hits = idx.search_tiered(
+        owner=None, q_vec=q, k=2, tier="exact_semantic", hints={"sim_threshold": -1.0}
+    )
     assert _ids(hits) == ["a1", "a2"], f"tie-break failed: {_ids(hits)}"
 
 

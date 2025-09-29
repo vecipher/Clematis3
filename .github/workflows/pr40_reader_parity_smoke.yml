@@ -62,5 +62,5 @@ jobs:
           name: pr40-smoke-${{ matrix.mode }}
           path: |
             logs/quality/**
-            .pytest_cache/** 
+            .pytest_cache/**
           if-no-files-found: ignore

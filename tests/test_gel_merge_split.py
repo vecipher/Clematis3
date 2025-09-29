@@ -1,5 +1,3 @@
-
-
 import pytest
 
 from clematis.engine.gel import (
@@ -14,10 +12,18 @@ from clematis.engine.gel import (
 # Helpers
 # ------------------------------
 
+
 def _edge(a: str, b: str, w: float, rel: str = "coact"):
     # Canonical undirected key; store endpoints explicitly
     s, d = (a, b) if a <= b else (b, a)
-    return f"{s}→{d}", {"id": f"{s}→{d}", "src": s, "dst": d, "rel": rel, "weight": float(w), "attrs": {}}
+    return f"{s}→{d}", {
+        "id": f"{s}→{d}",
+        "src": s,
+        "dst": d,
+        "rel": rel,
+        "weight": float(w),
+        "attrs": {},
+    }
 
 
 class _State:
@@ -25,7 +31,13 @@ class _State:
         self.graph = {
             "nodes": {},
             "edges": dict(edges or {}),
-            "meta": {"schema": "v1.1", "merges": [], "splits": [], "promotions": [], "concept_nodes_count": 0},
+            "meta": {
+                "schema": "v1.1",
+                "merges": [],
+                "splits": [],
+                "promotions": [],
+                "concept_nodes_count": 0,
+            },
         }
 
 
@@ -34,19 +46,25 @@ def _ctx_ms(merge=None, split=None):
     return {
         "graph": {
             "enabled": True,
-            "merge": ({
-                "enabled": True,
-                "min_size": 2,
-                "min_avg_w": 0.5,
-                "max_diameter": 2,
-                "cap_per_turn": 4,
-            } | (merge or {})),
-            "split": ({
-                "enabled": True,
-                "weak_edge_thresh": 0.05,
-                "min_component_size": 2,
-                "cap_per_turn": 4,
-            } | (split or {})),
+            "merge": (
+                {
+                    "enabled": True,
+                    "min_size": 2,
+                    "min_avg_w": 0.5,
+                    "max_diameter": 2,
+                    "cap_per_turn": 4,
+                }
+                | (merge or {})
+            ),
+            "split": (
+                {
+                    "enabled": True,
+                    "weak_edge_thresh": 0.05,
+                    "min_component_size": 2,
+                    "cap_per_turn": 4,
+                }
+                | (split or {})
+            ),
         }
     }
 
@@ -54,6 +72,7 @@ def _ctx_ms(merge=None, split=None):
 # ------------------------------
 # Tests
 # ------------------------------
+
 
 def test_merge_candidates_order_and_determinism():
     # Graph: a—b (0.9), b—c (0.8) → one 3-node strong component

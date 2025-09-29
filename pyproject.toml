@@ -8,7 +8,7 @@ requires-python = ">=3.11,<3.14"
 license = { file = "LICENSE" }
 authors = [{ name = "vecipher" }]
 
-dependencies = ["pyyaml>=6.0.1"]
+dependencies = ["pyyaml>=6.0.1","numpy>=1.26,<2"]
 
 classifiers = [
   "Programming Language :: Python :: 3 :: Only",
@@ -32,8 +32,10 @@ dev = [
   "wheel>=0.43,<1",
   "pytest>=8,<9",
   "hypothesis>=6,<7",
-  "ruff>=0.6,<1",
-  "pyright>=1.1,<2",
+  "ruff==0.13.2",
+  "mypy>=1.11,<2",
+  "types-PyYAML>=6.0.12.20240808,<7",
+  "pre-commit>=3.8,<4",
   "numpy>=1.26,<2",
   "shtab==1.7.1",
   "pyyaml>=6.0"
@@ -91,3 +93,52 @@ clematis = ["fixtures/**/*", "examples/**/*", "VERSION"]
 
 [project.scripts]
 clematis = "clematis.cli.main:main"
+
+# ----------------------------
+# Lint & Type-checker settings
+# ----------------------------
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+extend-exclude = ["dist", "build", ".venv", ".v", ".eggs", "clematis.egg-info", ".lancedb", ".data"]
+
+[tool.ruff.lint]
+# Keep it useful but low-pain: core error/warn sets + import sort
+select = ["E", "F", "W", "I"]
+ignore = [
+  "E501",            # line length handled by formatter; don't fail CI on it
+]
+
+[tool.ruff.lint.per-file-ignores]
+"clematis/__init__.py" = ["F401"]
+"clematis/cli/__init__.py" = ["F401"]
+"tests/**" = ["F401", "E402", "I"]
+"clematis/engine/**" = ["F401", "I"]
+"clematis/world/**"  = ["F401", "I"]
+"clematis/memory/**" = ["F401", "I"]
+"clematis/graph/**"  = ["F401", "I"]
+"clematis/adapters/**" = ["F401", "I"]
+"clematis/io/**"     = ["F401", "I"]
+"scripts/**"         = ["F401", "I"]
+
+[tool.ruff.format]
+quote-style = "preserve"
+indent-style = "space"
+skip-magic-trailing-comma = false
+
+[tool.mypy]
+python_version = "3.11"
+strict = false
+warn_unused_ignores = true
+warn_redundant_casts = true
+warn_unreachable = true
+no_implicit_optional = true
+ignore_missing_imports = true
+follow_imports = "skip"
+show_error_codes = true
+pretty = true
+# Narrow initial scope to CLI only (per PR62)
+files = ["clematis/cli"]
+# Helpful, not painful at this stage
+disallow_untyped_defs = false
+check_untyped_defs = false

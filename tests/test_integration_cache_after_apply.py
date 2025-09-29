@@ -9,6 +9,7 @@ from clematis.engine.types import ProposedDelta, T4Result
 
 class FakeStore:
     """Minimal store that supports apply_deltas and holds weights in .w"""
+
     def __init__(self, wmin=-1.0, wmax=1.0):
         self.w = {}
         self.wmin = float(wmin)
@@ -41,42 +42,58 @@ def test_cache_miss_after_apply_invalidation(monkeypatch, tmp_path):
     def fake_append_jsonl(name, payload):
         if name == "apply.jsonl":
             apply_logs.append(payload)
+
     monkeypatch.setattr(orch, "append_jsonl", fake_append_jsonl, raising=True)
 
     # Minimal T1
-    monkeypatch.setattr(orch, "t1_propagate", lambda ctx, state, text: SimpleNamespace(metrics={"t1": True}), raising=True)
+    monkeypatch.setattr(
+        orch,
+        "t1_propagate",
+        lambda ctx, state, text: SimpleNamespace(metrics={"t1": True}),
+        raising=True,
+    )
 
     # T2 we care about: count calls and return a simple object
     def fake_t2(ctx, state, text, t1):
         calls["t2"] += 1
         return SimpleNamespace(metrics={"t2": True}, retrieved=[])
+
     monkeypatch.setattr(orch, "t2_semantic", fake_t2, raising=True)
 
     # T3 helpers
     def fake_t3_deliberate(ctx, state, bundle):
-        return SimpleNamespace(version="plan-v1", ops=[SimpleNamespace(kind="EditGraph")], deltas=[], reflection=False)
+        return SimpleNamespace(
+            version="plan-v1", ops=[SimpleNamespace(kind="EditGraph")], deltas=[], reflection=False
+        )
+
     def fake_t3_dialogue(dialog_bundle, plan):
         return "OK"
+
     monkeypatch.setattr(orch, "t3_deliberate", fake_t3_deliberate, raising=False)
     monkeypatch.setattr(orch, "t3_dialogue", fake_t3_dialogue, raising=False)
 
     # Force T4 to approve a delta when enabled, bypassing internal policy
     def fake_t4_filter(ctx, state, t1, t2, plan, utter):
-        deltas = [ProposedDelta(target_kind="node", target_id="n:a", attr="weight", delta=0.2, op_idx=0)]
+        deltas = [
+            ProposedDelta(target_kind="node", target_id="n:a", attr="weight", delta=0.2, op_idx=0)
+        ]
         return T4Result(approved_deltas=deltas, rejected_ops=[], reasons=[], metrics={})
+
     monkeypatch.setattr(orch, "t4_filter", fake_t4_filter, raising=False)
 
     # Build ctx/state: cache enabled; start with T4 disabled to warm cache without bumping version.
     ctx = SimpleNamespace(
         turn_id=1,
         agent_id="Cohere",
-        config=SimpleNamespace(t4={
-            "enabled": False,                       # start disabled for warmup
-            "cache_bust_mode": "on-apply",
-            "cache": {"enabled": True, "max_entries": 16, "ttl_sec": 600},
-            "snapshot_every_n_turns": 1000,        # avoid snapshot churn in test
-            "snapshot_dir": str(tmp_path / "snaps"),
-        }),
+        config=SimpleNamespace(
+            t4={
+                "enabled": False,  # start disabled for warmup
+                "cache_bust_mode": "on-apply",
+                "cache": {"enabled": True, "max_entries": 16, "ttl_sec": 600},
+                "snapshot_every_n_turns": 1000,  # avoid snapshot churn in test
+                "snapshot_dir": str(tmp_path / "snaps"),
+            }
+        ),
     )
     state = {"version_etag": None, "store": FakeStore(), "active_graphs": ["g:surface"]}
 

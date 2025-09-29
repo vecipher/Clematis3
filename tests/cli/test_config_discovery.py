@@ -1,5 +1,3 @@
-
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -76,7 +74,9 @@ def test_precedence_env_over_cwd_over_xdg(tmp_path):
     xdgc = _touch(xdg / "clematis" / "config.yaml")
 
     # env wins
-    p, src = discover_config_path(None, tmp_path, {"CLEMATIS_CONFIG": str(envdir), "XDG_CONFIG_HOME": str(xdg)})
+    p, src = discover_config_path(
+        None, tmp_path, {"CLEMATIS_CONFIG": str(envdir), "XDG_CONFIG_HOME": str(xdg)}
+    )
     assert p == envcfg and src == "env:CLEMATIS_CONFIG"
 
     # remove env, cwd wins

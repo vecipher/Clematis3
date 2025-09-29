@@ -1,5 +1,3 @@
-
-
 #!/usr/bin/env python3
 """
 Generate minimal man(1) pages for Clematis CLI from argparse --help output.
@@ -19,6 +17,7 @@ Outputs:
   man/clematis.1
   man/clematis-<sub>.1 for every discovered subcommand
 """
+
 from __future__ import annotations
 
 import argparse
@@ -56,8 +55,7 @@ def _version(module: str) -> str:
     code = (
         "import importlib,sys;"
         "m=importlib.import_module('%s');"
-        "sys.stdout.write(getattr(m,'__version__','unknown'))"
-        % module
+        "sys.stdout.write(getattr(m,'__version__','unknown'))" % module
     )
     try:
         out = _run([sys.executable, "-c", code])
@@ -83,12 +81,17 @@ def _escape_roff_block(text: str) -> str:
     return "\n".join(_escape_roff_line(l) for l in text.splitlines())
 
 
-def _emit_page(cmd_name: str, title: str, help_text: str, out_path: Path, section: str, module: str) -> None:
+def _emit_page(
+    cmd_name: str, title: str, help_text: str, out_path: Path, section: str, module: str
+) -> None:
     ver = _version(module)
     date = _date_str()
 
     # SYNOPSIS: prefer the first line containing 'usage:'; fall back to a generic synopsis
-    synopsis = next((ln.strip() for ln in help_text.splitlines() if ln.strip().startswith("usage:")), f"{cmd_name} [options]")
+    synopsis = next(
+        (ln.strip() for ln in help_text.splitlines() if ln.strip().startswith("usage:")),
+        f"{cmd_name} [options]",
+    )
 
     name_line = f"{cmd_name} \\- {title}"  # hyphen escaped for roff NAME section
 
@@ -134,12 +137,27 @@ def _discover_subcommands(module: str) -> List[str]:
 
 
 def main(argv: List[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(description="Generate man pages for Clematis CLI deterministically (offline)")
-    ap.add_argument("--outdir", default="man", help="Output directory for generated .1 pages (default: man)")
+    ap = argparse.ArgumentParser(
+        description="Generate man pages for Clematis CLI deterministically (offline)"
+    )
+    ap.add_argument(
+        "--outdir", default="man", help="Output directory for generated .1 pages (default: man)"
+    )
     ap.add_argument("--section", default="1", help="Man section (default: 1)")
-    ap.add_argument("--module", default="clematis", help="Top-level package providing __version__ (default: clematis)")
-    ap.add_argument("--root-title", default="umbrella CLI for Clematis", help="Title line for root page")
-    ap.add_argument("--only", nargs="*", default=None, help="Optional list of subcommands to restrict generation")
+    ap.add_argument(
+        "--module",
+        default="clematis",
+        help="Top-level package providing __version__ (default: clematis)",
+    )
+    ap.add_argument(
+        "--root-title", default="umbrella CLI for Clematis", help="Title line for root page"
+    )
+    ap.add_argument(
+        "--only",
+        nargs="*",
+        default=None,
+        help="Optional list of subcommands to restrict generation",
+    )
 
     ns = ap.parse_args(argv)
 
@@ -161,7 +179,9 @@ def main(argv: List[str] | None = None) -> int:
     # Subcommands
     subs = ns.only or _discover_subcommands(module)
     for sub in subs:
-        sub_help = _run([sys.executable, "-m", module, sub, "--help"])  # capture wrappers' stable phrase
+        sub_help = _run(
+            [sys.executable, "-m", module, sub, "--help"]
+        )  # capture wrappers' stable phrase
         title = f"Delegates to scripts/ for '{sub}'"
         safe = sub.replace("/", "-")
         _emit_page(

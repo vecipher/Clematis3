@@ -4,7 +4,8 @@ import os
 import sys
 from pathlib import Path
 from typing import List
-from . import rotate_logs, inspect_snapshot, bench_t4, seed_lance_demo, validate, demo
+
+from . import bench_t4, demo, inspect_snapshot, rotate_logs, seed_lance_demo, validate
 from ._config import discover_config_path, maybe_log_selected
 
 
@@ -32,7 +33,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     # Hidden explicit config override; consumed at umbrella, not forwarded
     parser.add_argument(
-        "-c", "--config",
+        "-c",
+        "--config",
         dest="config",
         help=argparse.SUPPRESS,
     )
@@ -57,10 +59,7 @@ def main(argv: List[str] | None = None) -> int:
     # Prefer parsing from the first subcommand onward to tolerate unknown
     # top-level flags (which should be treated as extras for the subcommand).
     try:
-        sub_actions = [
-            a for a in parser._actions
-            if isinstance(a, argparse._SubParsersAction)
-        ]
+        sub_actions = [a for a in parser._actions if isinstance(a, argparse._SubParsersAction)]
         choices = sub_actions[0].choices if sub_actions else {}
     except Exception:
         choices = {}
@@ -93,7 +92,7 @@ def main(argv: List[str] | None = None) -> int:
         if "--debug" in argv[:idx]:
             setattr(ns, "debug", True)
         # Everything after the subcommand is the sub-argv for the wrapper
-        sub_args = list(argv[idx + 1:])
+        sub_args = list(argv[idx + 1 :])
         if sub_args and sub_args[0] == "--":
             sub_args = sub_args[1:]
         merged = pre + sub_args

@@ -12,9 +12,9 @@ def test_accepts_snapshots_bounds():
         "perf": {
             "enabled": True,
             "snapshots": {
-                "compression": "zstd",   # allowed: "none" | "zstd"
-                "level": 5,              # int in [1..19]
-                "delta_mode": True,      # boolean
+                "compression": "zstd",  # allowed: "none" | "zstd"
+                "level": 5,  # int in [1..19]
+                "delta_mode": True,  # boolean
             },
             "metrics": {"report_memory": False},
         }
@@ -29,9 +29,9 @@ def test_rejects_bad_level_and_codec():
         "perf": {
             "enabled": True,
             "snapshots": {
-                "compression": "gzip",   # invalid
-                "level": 42,             # invalid
-            }
+                "compression": "gzip",  # invalid
+                "level": 42,  # invalid
+            },
         }
     }
     with pytest.raises(ValueError) as e:
@@ -51,7 +51,7 @@ def test_warns_when_perf_off_and_delta_mode_set():
                 "compression": "zstd",
                 "level": 3,
                 "delta_mode": True,
-            }
+            },
         }
     }
     _, warns = validate_config_verbose(cfg)

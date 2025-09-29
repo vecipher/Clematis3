@@ -1,5 +1,3 @@
-
-
 from pathlib import Path
 import yaml
 from configs.validate import validate_config_verbose
@@ -8,6 +6,7 @@ from configs.validate import validate_config_verbose
 def _repo_root() -> Path:
     # tests/examples/test_examples_quality_shadow_yaml.py -> tests/examples -> tests -> repo root
     return Path(__file__).resolve().parents[2]
+
 
 def _example_path() -> Path:
     return _repo_root() / "examples" / "quality" / "shadow.yaml"
@@ -28,8 +27,8 @@ def test_shadow_example_exists_and_validates():
     assert metrics.get("report_memory") is True
 
     q = norm.get("t2", {}).get("quality", {})
-    assert q.get("enabled") is False   # PR36 forbids enabling quality
-    assert q.get("shadow") is True     # shadow-only in the example
+    assert q.get("enabled") is False  # PR36 forbids enabling quality
+    assert q.get("shadow") is True  # shadow-only in the example
     assert isinstance(q.get("trace_dir"), str) and q.get("trace_dir")
     assert q.get("redact") is True
 

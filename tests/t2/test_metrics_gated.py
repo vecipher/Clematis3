@@ -1,5 +1,3 @@
-
-
 import pytest
 
 import clematis.engine.stages.t2 as t2mod

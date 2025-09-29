@@ -1,5 +1,3 @@
-
-
 from types import SimpleNamespace
 import json
 import os
@@ -11,6 +9,7 @@ from clematis.engine.types import T4Result, ProposedDelta
 
 
 # ------------- helpers -------------
+
 
 def mk_ctx(t4_overrides=None, turn=0, agent="Ambrose"):
     base = {
@@ -57,8 +56,9 @@ class FakeStore:
     - Returns dict with {"edits": <num actually changed>, "clamps": <num clamped>}
     - Is idempotent: re-applying same deltas that do not change weights returns edits=0
     """
+
     def __init__(self, wmin=-1.0, wmax=1.0):
-        self.w = {}   # key: (kind,id,attr) -> weight
+        self.w = {}  # key: (kind,id,attr) -> weight
         self.wmin = float(wmin)
         self.wmax = float(wmax)
 
@@ -84,6 +84,7 @@ class FakeStore:
 
 # ------------- tests -------------
 
+
 def test_apply_clamps_and_increments_version(tmp_path):
     # Configure tight bounds so one delta clamps; set turn=1 so cadence does not fire at turn 0
     ctx = mk_ctx({"weight_min": -0.2, "weight_max": 0.2}, turn=1)
@@ -91,7 +92,7 @@ def test_apply_clamps_and_increments_version(tmp_path):
     state = mk_state(store=store, version=None)
 
     deltas = [
-        mk_delta("n:a", 0.5),   # will clamp from 0.0+0.5 -> 0.2
+        mk_delta("n:a", 0.5),  # will clamp from 0.0+0.5 -> 0.2
         mk_delta("n:b", -0.1),  # within range
     ]
     res = apply_changes(ctx, state, mk_t4(deltas))
@@ -127,7 +128,9 @@ def test_apply_additive_semantics_second_apply_edits_again():
 
 def test_snapshot_written_when_cadence_hits(tmp_path):
     snap_dir = tmp_path / "snaps"
-    ctx = mk_ctx({"snapshot_every_n_turns": 1, "snapshot_dir": str(snap_dir)}, turn=5, agent="Kafka")
+    ctx = mk_ctx(
+        {"snapshot_every_n_turns": 1, "snapshot_dir": str(snap_dir)}, turn=5, agent="Kafka"
+    )
     store = FakeStore()
     state = mk_state(store=store, version=None)
 

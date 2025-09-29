@@ -1,5 +1,3 @@
-
-
 import json
 from pathlib import Path
 import yaml
@@ -8,6 +6,7 @@ import pytest
 
 def _repo_root() -> Path:
     return Path(__file__).resolve().parents[2]
+
 
 def _load_example_enabled_cfg(trace_dir: Path) -> dict:
     p = _repo_root() / "examples" / "quality" / "lexical_fusion.yaml"
@@ -20,12 +19,15 @@ def _load_example_enabled_cfg(trace_dir: Path) -> dict:
     raw["perf"].setdefault("metrics", {})["report_memory"] = True
     return raw
 
+
 def _try_import_t2():
     try:
         from clematis.engine.stages import t2 as t2mod  # type: ignore
+
         return t2mod
     except Exception:
         return None
+
 
 def _call_t2_semantic(t2mod, query: str, cfg: dict):
     """
@@ -61,6 +63,7 @@ def _call_t2_semantic(t2mod, query: str, cfg: dict):
             return None, False
     return None, False
 
+
 def _extract_items(result):
     """Normalize various possible return types to a list of dicts with 'id' and 'score' keys."""
     if result is None:
@@ -70,7 +73,10 @@ def _extract_items(result):
         if hasattr(result, attr):
             seq = getattr(result, attr)
             return [
-                {"id": getattr(it, "id", it.get("id")), "score": float(getattr(it, "score", it.get("score", 0.0)))}
+                {
+                    "id": getattr(it, "id", it.get("id")),
+                    "score": float(getattr(it, "score", it.get("score", 0.0))),
+                }
                 if not isinstance(it, dict)
                 else {"id": it.get("id"), "score": float(it.get("score", 0.0))}
                 for it in list(seq)
@@ -88,14 +94,21 @@ def _extract_items(result):
         return items
     return None
 
+
 def _emit_trace_enabled_fallback(query: str, cfg: dict):
     """Fallback: emit an enabled-path trace directly (honors triple gate) if t2_semantic isn't callable."""
     from clematis.engine.stages.t2_quality_trace import emit_trace
+
     items = [{"id": "A", "score": 0.9}, {"id": "B", "score": 0.8}, {"id": "C", "score": 0.7}]
     perf = cfg.get("perf", {})
     metrics = perf.get("metrics", {})
     q = cfg.get("t2", {}).get("quality", {})
-    triple_gate = perf.get("enabled") and metrics.get("report_memory") and q.get("enabled") and not q.get("shadow", False)
+    triple_gate = (
+        perf.get("enabled")
+        and metrics.get("report_memory")
+        and q.get("enabled")
+        and not q.get("shadow", False)
+    )
     if triple_gate:
         meta = {
             "k": len(items),
@@ -106,11 +119,13 @@ def _emit_trace_enabled_fallback(query: str, cfg: dict):
         emit_trace(cfg, query, items, meta)
     return items
 
+
 def _read_trace_last(trace_dir: Path):
     p = Path(trace_dir) / "rq_traces.jsonl"
     if not p.exists():
         return None
     return json.loads(p.read_text(encoding="utf-8").splitlines()[-1])
+
 
 @pytest.mark.integration
 def test_enabled_traces_exist_and_marked_enabled(tmp_path):

@@ -1,5 +1,3 @@
-
-
 #!/usr/bin/env python3
 """
 Inspect the latest snapshot.
@@ -11,6 +9,7 @@ Exit codes:
   0 => snapshot found and printed
   2 => no snapshot found or unreadable
 """
+
 import argparse
 import json
 import os
@@ -119,9 +118,7 @@ def main(argv=None) -> int:
     print(f"version_etag  :{info['version_etag']}")
     print(f"nodes/edges   :{info['nodes']} / {info['edges']}")
     if info.get("gel_nodes") is not None or info.get("gel_edges") is not None:
-        print(
-            f"gel nodes/edges:{info.get('gel_nodes')} / {info.get('gel_edges')}"
-        )
+        print(f"gel nodes/edges:{info.get('gel_nodes')} / {info.get('gel_edges')}")
     if (
         info.get("gel_merges") is not None
         or info.get("gel_splits") is not None

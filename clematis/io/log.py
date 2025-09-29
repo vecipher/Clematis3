@@ -1,6 +1,7 @@
 import json, os
 from . import paths
 
+
 def append_jsonl(filename: str, record: dict) -> None:
     base = paths.logs_dir()
     os.makedirs(base, exist_ok=True)

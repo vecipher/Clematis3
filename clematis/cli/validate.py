@@ -6,13 +6,13 @@ Parses no custom flags here; captures passthrough via REMAINDER and forwards to
 the packaged shim (`clematis.scripts.validate`), which locates the real script
 and adapts main(argv)/main().
 """
+
 from __future__ import annotations
 
 import argparse
 
-from ._io import set_verbosity, eprint_once
 from ._exit import OK, USER_ERR
-
+from ._io import eprint_once, set_verbosity
 from ._util import add_passthrough_subparser
 
 _HELP = "Delegates to scripts/"
@@ -82,5 +82,6 @@ def _run(ns: argparse.Namespace) -> int:
         rest = ["--json", *rest]
 
     # Delegate via packaged shim (which falls back to repo-layout if needed)
-    from clematis.scripts.validate import main as _main  # type: ignore
+    from clematis.scripts.validate import main as _main
+
     return _main(rest)

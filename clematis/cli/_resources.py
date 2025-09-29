@@ -1,10 +1,10 @@
 from __future__ import annotations
+
 from contextlib import contextmanager
 from importlib import resources
 from importlib.resources.abc import Traversable
 from pathlib import Path
 from typing import Iterator, Optional
-
 
 PKG = "clematis"
 
@@ -25,7 +25,7 @@ def pkg_traversable(*parts: str) -> Optional[Traversable]:
     """
     try:
         ref = _files().joinpath(*parts)
-        return ref if ref.exists() else None
+        return ref if ref.exists() else None  # type: ignore[attr-defined]
     except Exception:
         return None
 

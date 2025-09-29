@@ -1,5 +1,3 @@
-
-
 import json
 import os
 import subprocess
@@ -56,13 +54,17 @@ def test_structured_formats_contract_track_b():
     assert len(rest) >= 0  # may be empty if no items, but path is valid
 
     # rotate-logs: JSON summary (Track B) — must be valid JSON
-    code, out, err = run_cli(["rotate-logs", "--", "--dry-run", "--json"])  # flags after --, hoisted
+    code, out, err = run_cli(
+        ["rotate-logs", "--", "--dry-run", "--json"]
+    )  # flags after --, hoisted
     assert code == 0, err
     payload = json.loads(out)
     assert isinstance(payload, dict) and "dry_run" in payload
 
     # rotate-logs: TABLE summary (Track B) — ASCII header + dashes
-    code, out, err = run_cli(["rotate-logs", "--", "--dry-run", "--table"])  # flags after --, hoisted
+    code, out, err = run_cli(
+        ["rotate-logs", "--", "--dry-run", "--table"]
+    )  # flags after --, hoisted
     assert code == 0, err
     header, sep, *rest = out.splitlines()
     assert "  " in header
@@ -78,13 +80,17 @@ def test_mutual_exclusion_exit_one():
 
 def test_io_error_exit_two():
     # inspector with nonexistent directory should yield IO_ERR=2
-    code, out, err = run_cli(["inspect-snapshot", "--", "--dir", "does_not_exist_dir_12345"])  # after --
+    code, out, err = run_cli(
+        ["inspect-snapshot", "--", "--dir", "does_not_exist_dir_12345"]
+    )  # after --
     assert code == 2
 
 
 def test_quiet_suppresses_stderr_on_wrapper_errors():
     # Force a wrapper-level validation error, but suppress stderr via --quiet
-    code, out, err = run_cli(["inspect-snapshot", "--quiet", "--", "--json", "--table"])  # conflicting flags
+    code, out, err = run_cli(
+        ["inspect-snapshot", "--quiet", "--", "--json", "--table"]
+    )  # conflicting flags
     assert code == 1
     assert err == ""
 

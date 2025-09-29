@@ -17,6 +17,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 # Helpers to read config & state
 # ---------------------------
 
+
 def _get_cfg(ctx: Any):
     """Return ctx.config or ctx.cfg; may be a dict-like or attribute object."""
     c = getattr(ctx, "config", None)
@@ -83,6 +84,7 @@ def _graph_store(state: Any) -> Dict[str, Any]:
 # Item adapters (ID and score)
 # ---------------------------
 
+
 def _get_id(item: Any) -> str:
     if isinstance(item, tuple) and item:
         return str(item[0])
@@ -127,7 +129,8 @@ _ARROW = "→"  # canonical undirected edge key uses unicode arrow
 
 
 def _edge_key(a: str, b: str) -> str:
-    a = str(a); b = str(b)
+    a = str(a)
+    b = str(b)
     return f"{a}{_ARROW}{b}" if a <= b else f"{b}{_ARROW}{a}"
 
 
@@ -141,7 +144,9 @@ def _edge_weight(edges: Dict[str, Any], a: str, b: str) -> float:
         return 0.0
 
 
-def _degree(edges: Dict[str, Any], vid: str, threshold: float, considered: Optional[set] = None) -> int:
+def _degree(
+    edges: Dict[str, Any], vid: str, threshold: float, considered: Optional[set] = None
+) -> int:
     """Count neighbors with |w| >= threshold. If `considered` set provided, restrict to it."""
     cnt = 0
     if not isinstance(edges, dict) or not edges:
@@ -149,7 +154,8 @@ def _degree(edges: Dict[str, Any], vid: str, threshold: float, considered: Optio
     for key, rec in edges.items():
         if not isinstance(rec, dict):
             continue
-        src = rec.get("src"); dst = rec.get("dst")
+        src = rec.get("src")
+        dst = rec.get("dst")
         if src is None or dst is None:
             # fall back to parse key
             if _ARROW in key:
@@ -173,6 +179,7 @@ def _degree(edges: Dict[str, Any], vid: str, threshold: float, considered: Optio
 # ---------------------------
 # Core reranker
 # ---------------------------
+
 
 def rerank_with_gel(ctx: Any, state: Any, items: List[Any]) -> Tuple[List[Any], Dict[str, Any]]:
     """

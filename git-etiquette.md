@@ -17,7 +17,7 @@ Practical defaults to avoid detached HEAD, lost files, and broken CI. Use this a
    ```bash
    # preferred (uses our alias below)
    git start <feature-name> [base-ref]   # e.g., git start pr57 v0.8.0a2
-   
+
    # regular git if you prefer
    git switch -c <feature-name> [base-ref]
    ```
@@ -91,7 +91,7 @@ chmod +x .git/hooks/pre-commit .git/hooks/pre-push
 
 ### B) Alias: one command to “always branch”
 ```bash
-git config --global alias.start '!f(){ 
+git config --global alias.start '!f(){
   if [ -z "$1" ]; then echo "usage: git start <branch> [base-ref]"; exit 2; fi
   git switch -c "$1" "${2:-@}";
 }; f'

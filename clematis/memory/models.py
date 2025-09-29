@@ -3,6 +3,7 @@ from typing import Any, Dict, List
 from numpy.typing import NDArray
 import numpy as np
 
+
 @dataclass
 class MemoryEpisode:
     id: str

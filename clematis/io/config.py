@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 from dataclasses import asdict
 from typing import Any, Dict, Tuple
@@ -14,11 +13,14 @@ from ..engine.types import Config
 
 # ---- small helpers --------------------------------------------------------
 
+
 def _dict(obj: Any) -> Dict[str, Any]:
     return obj if isinstance(obj, dict) else {}
 
+
 def _parse_bool_env(v: str) -> bool:
     return str(v).strip().lower() in {"1", "true", "yes", "on"}
+
 
 def _apply_perf_env_overrides(cfg: Any) -> Any:
     """
@@ -63,6 +65,7 @@ def _apply_perf_env_overrides(cfg: Any) -> Any:
 
 # ---- loader ---------------------------------------------------------------
 
+
 def load_config(path: str | None = None) -> Config:
     """
     Load YAML config if available; otherwise return defaults.
@@ -81,7 +84,17 @@ def load_config(path: str | None = None) -> Config:
             data: Dict[str, Any] = yaml.safe_load(f) or {}
         cfg = Config()
 
-        recognized = {"k_surface", "surface_method", "t1", "t2", "t3", "t4", "budgets", "flags", "scheduler"}
+        recognized = {
+            "k_surface",
+            "surface_method",
+            "t1",
+            "t2",
+            "t3",
+            "t4",
+            "budgets",
+            "flags",
+            "scheduler",
+        }
         # Set recognized sections (shallow assign to match previous behavior)
         for k in recognized:
             if k in data:

@@ -5,6 +5,7 @@ from pathlib import Path
 # Narrowed ignore: only the canonical quality trace path, not any rq_traces.jsonl anywhere
 IGNORE_SUFFIXES = ("logs/quality/rq_traces.jsonl",)
 
+
 def list_files(root: Path):
     out = []
     for p in root.rglob("*"):
@@ -14,6 +15,7 @@ def list_files(root: Path):
                 continue
             out.append(rel)
     return sorted(out)
+
 
 def main():
     # Expect two directories set by workflow steps
@@ -29,6 +31,7 @@ def main():
         sys.exit(1)
     print("Gate D OK: shadow is a no-op (except traces).")
     sys.exit(0)
+
 
 if __name__ == "__main__":
     main()

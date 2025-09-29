@@ -11,6 +11,7 @@ from clematis.engine.types import ProposedDelta
 # Helper builders
 # -----------------
 
+
 def mk_ctx(t4_overrides=None, turn=0):
     cfg = {
         "enabled": True,
@@ -59,6 +60,7 @@ def mk_plan(ops=None, deltas=None):
 # Tests
 # ---------------
 
+
 def test_determinism_same_inputs_same_result():
     ctx = mk_ctx()
     state = mk_state()
@@ -75,7 +77,10 @@ def test_determinism_same_inputs_same_result():
 
     # Approved deltas must be identical (keys + values)
     def as_map(out):
-        return {f"{d.target_kind}:{d.target_id}:{d.attr}": pytest.approx(d.delta) for d in out.approved_deltas}
+        return {
+            f"{d.target_kind}:{d.target_id}:{d.attr}": pytest.approx(d.delta)
+            for d in out.approved_deltas
+        }
 
     assert as_map(out1) == as_map(out2)
     assert out1.reasons == out2.reasons
@@ -171,9 +176,14 @@ def test_zero_and_empty_inputs():
     ctx = mk_ctx({"churn_cap_edges": 10})
     state = mk_state()
     ops = [{"kind": "EditGraph"}]
-    out1 = t4_filter(ctx, state, None, None,
-                     mk_plan(ops=ops, deltas=[mk_delta("n:a", 0.0, op_idx=0)]),
-                     utter=None)
+    out1 = t4_filter(
+        ctx,
+        state,
+        None,
+        None,
+        mk_plan(ops=ops, deltas=[mk_delta("n:a", 0.0, op_idx=0)]),
+        utter=None,
+    )
     assert out1.metrics["clamps"]["l2_scale"] == pytest.approx(1.0)
     assert len(out1.approved_deltas) == 1
     assert out1.approved_deltas[0].delta == pytest.approx(0.0)

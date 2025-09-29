@@ -1,5 +1,3 @@
-
-
 import numpy as np
 import pytest
 from pathlib import Path
@@ -27,7 +25,7 @@ def _topk(ids, vecs_fp32, norms_fp32, q_fp32, k: int, *, cosine=True):
     q = q_fp32.astype(np.float32, copy=False)
     if cosine:
         qn = float(np.linalg.norm(q, ord=2))
-        denom = (norms_fp32 * (qn if qn != 0.0 else 1.0))
+        denom = norms_fp32 * (qn if qn != 0.0 else 1.0)
         scores = (vecs_fp32 @ q) / np.where(denom == 0.0, 1.0, denom)
     else:
         scores = vecs_fp32 @ q
@@ -73,8 +71,12 @@ def test_partition_owner_quarter_parity_fp16(tmp_path: Path):
         for qi, q in enumerate(qs):
             base_ids_k, base_scores_k = _topk(u_ids, u_vecs, u_norms, q, k)
             part_ids_k, part_scores_k = _topk(p_ids, p_vecs, p_norms, q, k)
-            assert part_ids_k == base_ids_k, f"Top-{k} mismatch for query {qi}:\nunpart={base_ids_k}\npart=  {part_ids_k}"
-            max_delta = float(np.max(np.abs(part_scores_k - base_scores_k))) if len(base_scores_k) else 0.0
+            assert (
+                part_ids_k == base_ids_k
+            ), f"Top-{k} mismatch for query {qi}:\nunpart={base_ids_k}\npart=  {part_ids_k}"
+            max_delta = (
+                float(np.max(np.abs(part_scores_k - base_scores_k))) if len(base_scores_k) else 0.0
+            )
             assert max_delta <= 1e-6, f"Score drift {max_delta} exceeds 1e-6 for Top-{k} query {qi}"
 
 

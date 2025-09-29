@@ -1,5 +1,3 @@
-
-
 import pytest
 from dataclasses import asdict
 from datetime import datetime, timezone
@@ -21,7 +19,8 @@ class Ctx:
                 "max_rag_loops": 1,
                 "temp": 0.7,
                 "dialogue": {
-                    "template": template or "style:{style_prefix} labels:{labels} intent:{intent} snippets:{snippets}",
+                    "template": template
+                    or "style:{style_prefix} labels:{labels} intent:{intent} snippets:{snippets}",
                     "include_top_k_snippets": include_k,
                 },
             },
@@ -52,7 +51,12 @@ def _t2_hits():
             {"id": "e3", "score": 0.70},
             {"id": "e4", "score": 0.60},
         ],
-        metrics={"sim_stats": {"mean": 0.75, "max": 0.90}, "tier_sequence": ["exact_semantic"], "k_returned": 4, "cache_used": False},
+        metrics={
+            "sim_stats": {"mean": 0.75, "max": 0.90},
+            "tier_sequence": ["exact_semantic"],
+            "k_returned": 4,
+            "cache_used": False,
+        },
     )
 
 
@@ -97,7 +101,10 @@ def test_llm_speak_with_deterministic_adapter_is_stable_and_capped():
     # Budget respected (SpeakOp.max_tokens = 8)
     assert m1["tokens"] == 8
     assert len(u1.split()) == 8
-    assert m1.get("backend") == "llm" and m1.get("adapter") in ("DeterministicLLMAdapter", adapter.name)
+    assert m1.get("backend") == "llm" and m1.get("adapter") in (
+        "DeterministicLLMAdapter",
+        adapter.name,
+    )
 
 
 def test_llm_speak_prefixes_style_if_missing():
