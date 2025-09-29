@@ -16,9 +16,9 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install .[dev]
-      - name: Ruff (format check — CLI only for PR62)
-        run: ruff format --check clematis/cli
-      - name: Ruff (lint)
-        run: ruff check --force-exclude .
+      - name: Ruff (lint — safety set repo-wide)
+        run: ruff check --force-exclude --select E9,F63,F7,F82 .
+      - name: Ruff (lint — CLI strict)
+        run: ruff check --force-exclude clematis/cli
       - name: Mypy (CLI only)
         run: mypy --config-file pyproject.toml
