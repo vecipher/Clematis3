@@ -4,6 +4,7 @@ from ..types import T2Result, EpisodeRef
 from ..cache import stable_key, ThreadSafeCache
 from ..util.lru_bytes import LRUBytes
 from ..util.embed_store import open_reader
+from ..util.parallel import run_parallel
 from ...adapters.embeddings import BGEAdapter
 from ...memory.index import InMemoryIndex
 import numpy as np
@@ -12,6 +13,9 @@ from types import SimpleNamespace as NS
 from .hybrid import rerank_with_gel
 from .t2_quality_trace import emit_trace as emit_quality_trace
 from .t2_quality_mmr import MMRItem, avg_pairwise_distance
+
+# Import merged helpers from t2_shard
+from .t2_shard import merge_tier_hits_across_shards_dict as _merge_tier_hits_across_shards, _qscore
 
 # PR40: Safe import for optional Lance partitioned reader
 try:
@@ -138,6 +142,75 @@ def _estimate_result_cost(retrieved, metrics):
         return texts_sum + ids_sum + base + metric_overhead + 8 * (k_used + k_ret)
     except Exception:
         return 1024
+
+
+# PR68: Parallel T2 helpers
+def _t2_parallel_enabled(cfg_obj, backend: str, index) -> bool:
+    """Gate for PR68 parallel T2. Only enable for in-memory backend with shard support."""
+    try:
+        if not _cfg_get(cfg_obj, ["perf", "parallel", "enabled"], False):
+            return False
+        if not _cfg_get(cfg_obj, ["perf", "parallel", "t2"], False):
+            return False
+        mw = int(_cfg_get(cfg_obj, ["perf", "parallel", "max_workers"], 1) or 1)
+        if mw <= 1:
+            return False
+        if str(backend or "inmemory").lower() != "inmemory":
+            return False
+        return hasattr(index, "_iter_shards_for_t2")
+    except Exception:
+        return False
+
+
+def _collect_shard_hits(
+    shard,
+    tiers: List[str],
+    owner_query,
+    q_vec,
+    k_retrieval: int,
+    now_str: str | None,
+    sim_threshold: float,
+    clusters_top_m: int,
+) -> Dict[str, List[Dict[str, Any]]]:
+    """
+    Collect per-tier raw hits from a single shard. Does not de-duplicate or clamp globally.
+    Ensures each hit dict has 'id' (str) and 'score' (float) keys for merge sorting.
+    """
+    out: Dict[str, List[Dict[str, Any]]] = {}
+    for tier in tiers:
+        hints: Dict[str, Any] = {"sim_threshold": sim_threshold}
+        if tier == "exact_semantic":
+            hints.update({"recent_days": None})  # real value unused by shards that don't look at it
+        elif tier == "cluster_semantic":
+            hints.update({"clusters_top_m": int(clusters_top_m)})
+        elif tier == "archive":
+            pass
+        else:
+            continue
+        if now_str:
+            hints["now"] = now_str
+        try:
+            hits = shard.search_tiered(owner=owner_query, q_vec=q_vec, k=k_retrieval, tier=tier, hints=hints)
+        except Exception:
+            hits = []
+        normed: List[Dict[str, Any]] = []
+        for h in hits or []:
+            if isinstance(h, dict):
+                d = dict(h)
+                d["id"] = str(d.get("id"))
+                if "score" not in d:
+                    d["score"] = float(d.get("_score", 0.0))
+                normed.append(d)
+            else:
+                # EpisodeRef-like
+                d = {
+                    "id": str(getattr(h, "id", "")),
+                    "text": getattr(h, "text", ""),
+                    "score": float(getattr(h, "score", 0.0)),
+                }
+                normed.append(d)
+        out[tier] = normed
+    return out
 
 
 # Config-driven cache (constructed lazily per cfg)
@@ -450,6 +523,9 @@ def t2_semantic(ctx, state, text: str, t1) -> T2Result:
         else:
             cache_misses += 1
     raw_hits_by_id: Dict[str, Any] = {}
+    # PR68: counters for optional parallel T2
+    t2_task_count = 0
+    t2_parallel_workers = 0
     # Execute tiers with dedupe
     retrieved = []  # List[EpisodeRef]
     seen_ids = set()
@@ -492,40 +568,119 @@ def t2_semantic(ctx, state, text: str, t1) -> T2Result:
         # Skip legacy tiered retrieval
         pass
     else:
+        owner_query = _owner_for_query(ctx, cfg_t2)
         tier_sequence: List[str] = []
-        for tier in tiers:
-            tier_sequence.append(tier)
-            hints: Dict[str, Any] = {"sim_threshold": sim_threshold}
-            if tier == "exact_semantic":
-                hints.update({"recent_days": exact_recent_days})
-            elif tier == "cluster_semantic":
-                hints.update({"clusters_top_m": clusters_top_m})
-            elif tier == "archive":
-                # no extra hints by default
-                pass
+        # PR68: parallel T2 across in-memory shards, gated
+        if _t2_parallel_enabled(ctx.cfg, backend_selected, index):
+            try:
+                suggested = int(_cfg_get(ctx, ["cfg", "perf", "parallel", "max_workers"], 1) or 1)
+            except Exception:
+                suggested = 1
+            # Enumerate shard views (private API on in-memory index). Fall back gracefully.
+            try:
+                shards_iter = index._iter_shards_for_t2("exact_semantic", suggested=suggested)  # type: ignore[attr-defined]
+                shards = list(shards_iter)
+            except TypeError:
+                shards = list(index._iter_shards_for_t2("exact_semantic"))  # type: ignore[attr-defined]
+            except Exception:
+                shards = []
+            if len(shards) > 1:
+                t2_task_count = len(shards)
+                t2_parallel_workers = min(len(shards), suggested)
+                def _task(sh):
+                    return _collect_shard_hits(
+                        sh, tiers, owner_query, q_vec, k_retrieval, now_str,
+                        float(sim_threshold), int(clusters_top_m)
+                    )
+                tasks = [(i, (lambda S=sh: _task(S))) for i, sh in enumerate(shards)]
+                shard_hits = run_parallel(
+                    tasks,
+                    max_workers=t2_parallel_workers,
+                    merge_fn=None,
+                    order_key=None,  # key is the integer i; ordering is stable by submit index
+                )
+                merged, used_tiers = _merge_tier_hits_across_shards(shard_hits, tiers, k_retrieval)
+                tier_sequence = used_tiers
+                retrieved = []
+                seen_ids = set()
+                for d in merged:
+                    hid = str(d.get("id"))
+                    raw_hits_by_id[hid] = d
+                    ref = _EpRefShim(d)
+                    if ref.id in seen_ids:
+                        continue
+                    retrieved.append(ref)
+                    seen_ids.add(ref.id)
             else:
-                continue
-            owner_query = _owner_for_query(ctx, cfg_t2)
-            if now_str:
-                hints["now"] = now_str
-            hits = index.search_tiered(
-                owner=owner_query, q_vec=q_vec, k=k_retrieval, tier=tier, hints=hints
-            )
-            for h in hits:
-                if isinstance(h, dict):
-                    hid = str(h.get("id"))
-                    raw_hits_by_id[hid] = h
-                    ref = _EpRefShim(h)
+                # Fallback to sequential when no shards are available
+                tier_sequence = []
+                for tier in tiers:
+                    tier_sequence.append(tier)
+                    hints: Dict[str, Any] = {"sim_threshold": sim_threshold}
+                    if tier == "exact_semantic":
+                        hints.update({"recent_days": exact_recent_days})
+                    elif tier == "cluster_semantic":
+                        hints.update({"clusters_top_m": clusters_top_m})
+                    elif tier == "archive":
+                        # no extra hints by default
+                        pass
+                    else:
+                        continue
+                    if now_str:
+                        hints["now"] = now_str
+                    hits = index.search_tiered(
+                        owner=owner_query, q_vec=q_vec, k=k_retrieval, tier=tier, hints=hints
+                    )
+                    for h in hits:
+                        if isinstance(h, dict):
+                            hid = str(h.get("id"))
+                            raw_hits_by_id[hid] = h
+                            ref = _EpRefShim(h)
+                        else:
+                            ref = h
+                        if ref.id in seen_ids:
+                            continue
+                        retrieved.append(ref)
+                        seen_ids.add(ref.id)
+                        if len(retrieved) >= k_retrieval:
+                            break
+                    if len(retrieved) >= k_retrieval:
+                        break
+        else:
+            # Original sequential path (identity)
+            tier_sequence = []
+            for tier in tiers:
+                tier_sequence.append(tier)
+                hints: Dict[str, Any] = {"sim_threshold": sim_threshold}
+                if tier == "exact_semantic":
+                    hints.update({"recent_days": exact_recent_days})
+                elif tier == "cluster_semantic":
+                    hints.update({"clusters_top_m": clusters_top_m})
+                elif tier == "archive":
+                    # no extra hints by default
+                    pass
                 else:
-                    ref = h
-                if ref.id in seen_ids:
                     continue
-                retrieved.append(ref)
-                seen_ids.add(ref.id)
+                if now_str:
+                    hints["now"] = now_str
+                hits = index.search_tiered(
+                    owner=owner_query, q_vec=q_vec, k=k_retrieval, tier=tier, hints=hints
+                )
+                for h in hits:
+                    if isinstance(h, dict):
+                        hid = str(h.get("id"))
+                        raw_hits_by_id[hid] = h
+                        ref = _EpRefShim(h)
+                    else:
+                        ref = h
+                    if ref.id in seen_ids:
+                        continue
+                    retrieved.append(ref)
+                    seen_ids.add(ref.id)
+                    if len(retrieved) >= k_retrieval:
+                        break
                 if len(retrieved) >= k_retrieval:
                     break
-            if len(retrieved) >= k_retrieval:
-                break
     # --- Combined scoring (alpha * cosine + beta * recency + gamma * importance) ---
     ranking = cfg_t2.get("ranking", {})
     alpha = float(ranking.get("alpha_sim", 0.75))
@@ -894,6 +1049,13 @@ def t2_semantic(ctx, state, text: str, t1) -> T2Result:
         if pr33_reader is not None:
             metrics["t2.reader_shards"] = pr33_shards
             metrics["t2.partition_layout"] = pr33_layout
+        # PR68: minimal parallel T2 observability (only when metrics gate is on)
+        try:
+            if int(t2_task_count or 0) > 0:
+                metrics["t2.task_count"] = int(t2_task_count)
+                metrics["t2.parallel_workers"] = int(t2_parallel_workers or 0)
+        except Exception:
+            pass
     result = T2Result(
         retrieved=retrieved, graph_deltas_residual=graph_deltas_residual, metrics=metrics
     )

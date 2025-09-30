@@ -139,6 +139,54 @@ wasn’t configured to emit them in your environment.
 - `parallel_workers` smaller than `workers`? That is expected when `task_count < workers`.
 - No speedups? T1’s per‑task work is small in this microbench and Python‑bound; the goal here is observability, not perf claims.
 
+---
+
+## PR68 — T2 parallel fan‑out across in‑memory shards (flag‑gated)
+
+**What changed.** T2 can now fan‑out semantic retrieval across **in‑memory** shards and deterministically merge results. This preserves the sequential policy: walk tiers in order, sort within a tier (score desc, id asc), de‑duplicate by `id`, and stop at `k` (post‑merge clamp). When parallel is **OFF** (or `max_workers<=1`) behavior/logs remain byte‑for‑byte identical to sequential.
+
+**Gate & backend.**
+- Enabled only when **all** are true:
+  - `perf.parallel.enabled: true`
+  - `perf.parallel.t2: true`
+  - `perf.parallel.max_workers > 1`
+  - T2 backend is `"inmemory"`
+  - The index exposes a private shard iterator `_iter_shards_for_t2(...)` and yields >1 shard
+- Other backends (e.g., Lance) fall back to the sequential path.
+
+**How to enable (safe defaults remain OFF):**
+```yaml
+perf:
+  parallel:
+    enabled: true
+    max_workers: 4
+    t2: true
+t2:
+  backend: inmemory   # required for PR68
+```
+
+**Deterministic merge semantics.**
+- **Tier‑ordered walk**: finish `exact_semantic` before `cluster_semantic` (then `archive`).
+- **Stable sort key** within a tier: primary = score (quantized) **descending**, secondary = `id` **ascending**.
+- **De‑duplicate** across shards by `id` (keep the best by the same key).
+- **Clamp after merge**: `k` (aka `t2_k`) applied once globally, preserving sequential results and order.
+
+**Caches.** Uses the **shared, lock‑wrapped** caches from PR65. Isolated per‑worker caches are **not** used in PR68.
+
+**Metrics (gated).** When `perf.enabled=true` and `perf.metrics.report_memory=true`, T2 emits:
+- `t2.task_count` — number of shard tasks.
+- `t2.parallel_workers` — `min(max_workers, task_count)`.
+
+**Troubleshooting.**
+- Not seeing any parallelism? Check the five gate conditions above (most commonly: backend not `inmemory`, or only one shard).
+- Expecting cross‑tier interleaving by score? PR68 preserves **tier‑ordered** semantics (matches sequential). High‑score items in later tiers will not displace earlier‑tier items once `k` is satisfied.
+- Seeing identical behavior with flags on? That’s expected if `task_count <= 1` or `max_workers <= 1`.
+
+**CI/tests.** Functional tests assert:
+- Gate‑OFF identity; gate‑ON equality (results and order) vs sequential on fixed fixtures.
+- Deterministic tie‑break for equal scores (id‑ascending).
+- Clamp is applied **after** merge.
+
 ## Cache safety (PR65 summary)
 
 - Default mode: lock‑wrapped shared caches in T1/T2 (already applied; no behavior change when parallel is OFF or `max_workers<=1`).
