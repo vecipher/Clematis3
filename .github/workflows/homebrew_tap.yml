@@ -55,8 +55,10 @@ jobs:
         run: |
           VER="${{ steps.vars.outputs.ver }}"
           mkdir -p _release
-          # Use a dedicated dir and skip if the file is already present from a prior attempt.
-          gh release download "v${VER}" -p "clematis-${VER}.tar.gz" -D _release --skip-existing
+          # Ensure a clean slate in case of prior attempts/reruns.
+          rm -f "_release/clematis-${VER}.tar.gz" "clematis-${VER}.tar.gz" || true
+          # Download the sdist tarball, overwriting if it somehow exists.
+          gh release download "v${VER}" -p "clematis-${VER}.tar.gz" -D _release --clobber
 
       - name: Compute SHA256
         id: sha
