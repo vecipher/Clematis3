@@ -13,6 +13,8 @@ jobs:
   update-tap:
     name: Update Homebrew Formula on release
     runs-on: ubuntu-latest
+    env:
+      BOT_PAT: ${{ secrets.BOT_PAT }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -73,9 +75,28 @@ jobs:
           echo "---"
           grep -E "^  (url|sha256|version)" -n "$F"
 
-      - name: Create PR with updated formula
+      # Use a PAT so the PR is authored by a real user and downstream CI triggers.
+      - name: Create PR with updated formula (PAT)
+        if: ${{ env.BOT_PAT != '' }}
         uses: peter-evans/create-pull-request@v6
         with:
+          token: ${{ secrets.BOT_PAT }}
+          commit-message: "brew(tap): update Formula for ${{ steps.vars.outputs.tag }}"
+          title: "brew(tap): update clematis.rb for ${{ steps.vars.outputs.tag }}"
+          body: |
+            Automated update of Homebrew Formula to tag `${{ steps.vars.outputs.tag }}`.
+            - url/sha256/version refreshed from Release sdist.
+          branch: "bot/brew-tap-${{ steps.vars.outputs.tag }}"
+          base: "main"
+          labels: "automation, packaging, homebrew"
+
+      # Fallback: use GITHUB_TOKEN if BOT_PAT is not configured.
+      # Note: PRs created with GITHUB_TOKEN do not trigger other workflows by default.
+      - name: Create PR with updated formula (fallback to GITHUB_TOKEN)
+        if: ${{ env.BOT_PAT == '' }}
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ github.token }}
           commit-message: "brew(tap): update Formula for ${{ steps.vars.outputs.tag }}"
           title: "brew(tap): update clematis.rb for ${{ steps.vars.outputs.tag }}"
           body: |
