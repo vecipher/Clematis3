@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import deque
-from typing import Callable, Deque, Dict, Generic, Iterator, Optional, Tuple, TypeVar
+from typing import Callable, Deque, Dict, Generic, Iterator, Optional, Tuple, TypeVar, Iterable
 
 __all__ = ["LRUBytes"]
 
@@ -66,6 +66,17 @@ class LRUBytes(Generic[K, V]):
     def keys(self) -> Iterator[K]:
         # Deterministic LRU→MRU iteration
         return iter(list(self._q))
+
+    def items(self) -> Iterator[Tuple[K, V]]:
+        """
+        Deterministic snapshot iterator of (key, value) from LRU→MRU without
+        mutating recency. This is provided to conform to the CacheProtocol used
+        by parallel-safe wrappers. It yields current values (ignores byte costs).
+        """
+        # Copy order to avoid interference if callers mutate during iteration.
+        for k in list(self._q):
+            if k in self._map:
+                yield (k, self._map[k][0])
 
     def clear(self) -> None:
         self._q.clear()

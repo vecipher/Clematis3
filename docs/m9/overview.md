@@ -65,7 +65,7 @@ These rules guide the upcoming implementation and are called out here so reviewe
 - **Deterministic ordering** after parallel work: use explicit, stable sort keys (e.g., `graph_id`, `shard_id`, `(score,id)` with a documented tie‑break).
 - **Use the helper introduced in PR64.** Adopt `run_parallel` (see [`parallel_helper.md`](./parallel_helper.md)) to enforce deterministic aggregation via `order_key`, a sequential identity path when `max_workers<=1`, and a sorted error model for exceptions.
 - **No nondeterministic sources** in parallel paths: no random seeds, time‑based ordering, or hidden global state.
-- **Thread‑safe caches**: default to lock‑wrapped single cache; optional per‑worker caches must have deterministic post‑merge.
+- **Thread‑safe caches**: default to lock‑wrapped single cache; optional per‑worker caches must have deterministic post‑merge. See [cache_safety.md](./cache_safety.md).
 - **Logging**: stage outputs buffered and written through a centralized, ordered writer to guarantee JSONL line order.
 - **Scheduler/driver**: execution model may run tasks concurrently, but **fairness and policy** semantics must be unchanged.
 
@@ -91,8 +91,17 @@ These rules guide the upcoming implementation and are called out here so reviewe
 - Choose one fanout site (likely T2 shard workers) with a stable key (e.g., `shard_id`/`graph_id`).
 - Build zero‑arg thunks per task; define a pure `merge_fn` consuming `(key, result)` **in sorted order**.
 - Honor `perf.parallel` gates (`enabled`, `max_workers`, and feature gates `t1|t2|agents`).
+- **Cache safety:** wrap shared caches with `ThreadSafeCache` / `ThreadSafeBytesCache`; use per‑worker isolates + deterministic `merge_caches_deterministic` only where contention warrants it (details in [cache_safety.md](./cache_safety.md)).
 - Add identity tests (ON/OFF) and stress tests for caches/snapshots under fixed seeds.
 - Keep logs ordered (buffer and flush through a single writer if needed).
+
+## Cache safety (PR65 summary)
+
+- Default mode: lock‑wrapped shared caches in T1/T2 (already applied; no behavior change when parallel is OFF or `max_workers<=1`).
+- Optional mode: per‑worker isolated caches with deterministic post‑merge using `merge_caches_deterministic` (use the same `order_key` as in `run_parallel`).
+- Determinism: worker order = `order_key(worker_key)` (stable); keys within worker sorted; conflict policy explicit (`first_wins` or `assert_equal`).
+
+See **[cache_safety.md](./cache_safety.md)** for API, wiring patterns, and tests.
 
 ---
 *This page will be expanded in PR75/PR74 with bench notes, expected shapes, and realistic performance guidance.*
@@ -100,4 +109,5 @@ These rules guide the upcoming implementation and are called out here so reviewe
 ## Cross‑references
 - PR63 surface (this page): config keys, normalization, and identity guarantees.
 - PR64 helper: [`parallel_helper.md`](./parallel_helper.md) — deterministic runner API and usage.
+- PR65 cache safety: [`cache_safety.md`](./cache_safety.md) — wrappers + deterministic merge policies.
 - Future wiring: see milestone notes in `docs/m9/` as they land (PR65+).
