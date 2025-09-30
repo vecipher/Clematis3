@@ -1,5 +1,5 @@
 usage: clematis [-h] [--version]
-  {bench-t4,demo,inspect-snapshot,rotate-logs,seed-lance-demo,validate} ... ...
+  {rotate-logs,inspect-snapshot,bench-t4,seed-lance-demo,validate,demo} ... ...
 
 Clematis umbrella CLI
 

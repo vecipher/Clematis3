@@ -15,8 +15,8 @@ _DATE = re.compile(r"\b\d{4}-\d{2}-\d{2}\b")
 _USAGE_MAIN = re.compile(r"(?im)^usage:\s+__main__\.py")
 # collapse runs of 2+ spaces that aren't at start of line
 _RUN_SPACES = re.compile(r"(?m)(?<!^)[ ]{2,}")
-_BRACE_LINE = re.compile(r"^(\s*)\{([^}]*)\}(.*)$")
 _ELLIPSIS_ONLY_LINE = re.compile(r"^\s*\.{3,}\s*$")
+_BRACE_SEARCH = re.compile(r"\{([^}]*)\}")
 
 
 def _normalize_newlines(text: str) -> str:
@@ -30,19 +30,14 @@ def _canon_brace_list_line(line: str, *, ensure_ellipsis: bool) -> str:
     normalize it by sorting + deduping the items and normalizing trailing ellipses.
     Returns the possibly-updated line.
     """
-    m = _BRACE_LINE.match(line)
+    m = _BRACE_SEARCH.search(line)
     if not m:
         return line
-    indent, items, tail = m.groups()
+    indent = re.match(r"^\s*", line).group(0)
+    items = m.group(1)
     parts = [p.strip() for p in items.split(",") if p.strip()]
-    # Sort case-insensitively and dedupe while preserving order
-    seen = set()
-    parts_sorted = []
-    for p in sorted(parts, key=lambda s: s.lower()):
-        if p not in seen:
-            seen.add(p)
-            parts_sorted.append(p)
-    brace = "{" + ",".join(parts_sorted) + "}"
+    brace = "{" + ",".join(parts) + "}"
+    tail = line[m.end():]
     if ensure_ellipsis:
         # Collapse any number of trailing ellipses/groups into exactly one " ..."
         tail = re.sub(r"(?:\s*\.\.\.)*\s*$", " ...", tail)
