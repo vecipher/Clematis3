@@ -16,6 +16,7 @@ _USAGE_MAIN = re.compile(r"(?im)^usage:\s+__main__\.py")
 # collapse runs of 2+ spaces that aren't at start of line
 _RUN_SPACES = re.compile(r"(?m)(?<!^)[ ]{2,}")
 _BRACE_LINE = re.compile(r"^(\s*)\{([^}]*)\}(.*)$")
+_ELLIPSIS_ONLY_LINE = re.compile(r"^\s*\.{3,}\s*$")
 
 
 def _normalize_newlines(text: str) -> str:
@@ -61,16 +62,25 @@ def normalize_help(text: str) -> str:
     # collapse spacing artifacts from different line-wrap behaviors
     text = _RUN_SPACES.sub(" ", text)
 
-    # --- Canonicalize the top-level usage brace line across Python versions ---
-    # We only rewrite the line *immediately following* the first "usage: clematis"
-    # (the positional-arguments brace block later is left untouched).
+    # --- Canonicalize the top-level usage brace list across Python versions ---
+    # Some argparse versions put the {sub1,sub2,...} list on the same "usage:" line,
+    # others wrap it onto the next line, and some even emit an extra standalone "..." line.
+    # Normalize any brace list found on the usage line or shortly after, ensure a single
+    # trailing " ...", and drop any immediate ellipsis-only lines that follow.
     lines = text.splitlines()
-    for i, line in enumerate(lines):
-        if line.startswith("usage: clematis"):
-            j = i + 1
-            if j < len(lines):
-                lines[j] = _canon_brace_list_line(lines[j], ensure_ellipsis=True)
-            break
+    usage_idx = next((i for i, l in enumerate(lines) if l.startswith("usage: clematis")), None)
+    if usage_idx is not None:
+        first_brace_idx = None
+        for j in range(usage_idx, min(usage_idx + 5, len(lines))):
+            if "{" in lines[j] and "}" in lines[j]:
+                lines[j] = _canon_brace_list_line(lines[j], ensure_ellipsis=(first_brace_idx is None))
+                if first_brace_idx is None:
+                    first_brace_idx = j
+        if first_brace_idx is not None:
+            k = first_brace_idx + 1
+            # Drop any trailing ellipsis-only lines that argparse may emit.
+            while k < len(lines) and _ELLIPSIS_ONLY_LINE.match(lines[k]):
+                del lines[k]
 
     # strip trailing whitespace on each line
     text = "\n".join(line.rstrip() for line in lines)
