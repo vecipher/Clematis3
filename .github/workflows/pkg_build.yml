@@ -314,6 +314,15 @@ jobs:
           python -m build
           python -m twine check dist/*
 
+      - name: Upload artifacts to Release (sdist + wheel)
+        if: ${{ github.event_name == 'release' }}
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.tar.gz
+            dist/*.whl
+          fail_on_unmatched_files: true
+
       - name: Generate CycloneDX SBOM (from clean venv)
         run: |
           python -m venv .sbom
