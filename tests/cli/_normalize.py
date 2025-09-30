@@ -23,28 +23,6 @@ def _normalize_newlines(text: str) -> str:
     return text.replace("\r\n", "\n").replace("\r", "\n")
 
 
-def _canon_brace_list_line(line: str, *, ensure_ellipsis: bool) -> str:
-    """
-    If the line contains a brace-enclosed, comma-separated list like
-    "... {a,b,c} ...", normalize trailing ellipses to exactly one and
-    preserve original item order.
-    """
-    m = _BRACE_SEARCH.search(line)
-    if not m:
-        return line
-    # Left part (indent+prefix), the brace, and tail
-    start, end = m.span()
-    prefix, items, tail = line[:start], m.group(0)[1:-1], line[end:]
-    parts = [p.strip() for p in items.split(",") if p.strip()]
-    brace = "{" + ",".join(parts) + "}"
-    if ensure_ellipsis:
-        tail = re.sub(r"(?:\s*\.\.\.)*\s$", " ...", tail)
-    else:
-        tail = re.sub(r"\s+$", "", tail)
-    # Preserve original leading whitespace/prefix
-    return f"{prefix}{brace}{tail}"
-
-
 def _rebuild_top_usage_block(lines: list[str]) -> list[str]:
     """
     Canonicalize the top-level usage block into exactly two lines:
