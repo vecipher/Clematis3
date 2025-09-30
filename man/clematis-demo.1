@@ -2,10 +2,19 @@
 .SH NAME
 clematis\-demo \\\- Delegates to scripts/ for 'demo'
 .SH SYNOPSIS
-clematis\-demo [options]
+usage: clematis demo [\-\-json | \-\-table] [\-\-quiet] [\-\-verbose] [\-h]
 .SH DESCRIPTION
 Delegates to scripts/ for 'demo'
 .SH OPTIONS
 .nf
-Delegates to scripts/
+usage: clematis demo [\-\-json | \-\-table] [\-\-quiet] [\-\-verbose] [\-h]
+
+Delegates to scripts/run_demo.py
+
+options:
+  \-\-json      JSON output (stable, machine\-readable)
+  \-\-table     Plain table output (no color)
+  \-\-quiet     suppress non\-essential stderr
+  \-\-verbose   increase stderr verbosity
+  \-h, \-\-help  show this help message and exit
 .fi
