@@ -55,14 +55,34 @@ perf:
 ```
 See the extended notes in **docs/m9/overview.md**. Flipping these flags in PR63 does not change runtime yet; later PRs (PR64+) implement execution.
 
-Also available: a deterministic parallel helper (`run_parallel`) that enforces stable ordering, a sequential identity path when `max_workers<=1`, and deterministic exception aggregation. It is **unused by default** (unit-tested only) and intended for wiring in PR65+. See **[docs/m9/parallel_helper.md](docs/m9/parallel_helper.md)**.
+
+**Example — key/thunk pattern with deterministic merge**
+```python
+from clematis.engine.util.parallel import run_parallel
+
+# Build (key, thunk) tasks; freeze loop var with default arg
+tasks = [(sid, (lambda s=sid: do_work(s))) for sid in [3, 1, 2]]
+
+def merge(pairs):
+    # pairs are sorted by order_key(key)
+    return [res for _, res in pairs]
+
+out = run_parallel(
+    tasks,
+    max_workers=4,
+    merge_fn=merge,
+    order_key=lambda k: (k,),  # total order; tie-breaks handled by submit index
+)
+```
+
+*Cache safety:* PR65 adds thread-safe wrappers for shared caches and an optional isolate+merge strategy. See **[docs/m9/cache_safety.md](docs/m9/cache_safety.md)**.
 
 ## Repository layout (brief)
 - `clematis/engine/` — core stages (T1–T4), scheduler stubs, persistence, logs.
 - `clematis/engine/util/parallel.py` — deterministic thread-pool helper (`run_parallel`), unit tests only.
 - `clematis/cli/` — umbrella + wrapper subcommands (delegates to `clematis.scripts.*`).
 - `scripts/` — direct script shims (`*_hint.py`, tolerant import, single stderr hint).
-- `docs/` — milestone docs and updates (see `docs/m9/overview.md`, `docs/m9/parallel_helper.md`).
+- `docs/` — milestone docs and updates (see `docs/m9/overview.md`, `docs/m9/parallel_helper.md`, `docs/m9/cache_safety.md`).
 - `tests/` — deterministic tests, golden comparisons, CLI checks.
 
 ## Environment flags

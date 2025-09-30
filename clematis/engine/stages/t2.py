@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import Dict, Any, List
 from ..types import T2Result, EpisodeRef
-from ..cache import stable_key
+from ..cache import stable_key, ThreadSafeCache
 from ..util.lru_bytes import LRUBytes
 from ..util.embed_store import open_reader
 from ...adapters.embeddings import BGEAdapter
@@ -178,7 +178,8 @@ def _get_cache(ctx, cfg_t2: dict):
     ttl_s = int(c.get("ttl_s", 300))
     cfg_tuple = ("lru", max_entries, ttl_s)
     if _T2_CACHE is None or _T2_CACHE_CFG != cfg_tuple:
-        _T2_CACHE = LRUCache(max_entries=max_entries, ttl_s=ttl_s)
+        # PR65: wrap legacy LRU with a thin lock to make shared access safe under optional parallel paths.
+        _T2_CACHE = ThreadSafeCache(LRUCache(max_entries=max_entries, ttl_s=ttl_s))  # type: ignore[arg-type]
         _T2_CACHE_CFG = cfg_tuple
         _T2_CACHE_KIND = "lru"
     return _T2_CACHE, _T2_CACHE_KIND

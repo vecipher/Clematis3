@@ -7,6 +7,7 @@ All notable changes to this project will be documented in this file.
 ### Changed
 - Prerelease 0.8.0a4 (python_requires <3.14; Homebrew formula now on python@3.13).
 
+
 ### Added (PR63 — M9: deterministic parallelism config schema; defaults OFF)
 - **Configs:** Introduce `perf.parallel` in `configs/config.yaml` (identity path by default):
   ```yaml
@@ -29,7 +30,27 @@ All notable changes to this project will be documented in this file.
 - **Docs:** `docs/m9/overview.md` summarized the schema and identity rules; README adds an M9 stub that points to the doc.
 - **Identity & CI:** defaults keep outputs **byte‑for‑byte** unchanged (goldens unaffected); no new metrics; piggybacks existing config tests.
 
-### Added (PR55 — CLI output contract & exit codes)
+### Added (PR64 — M9: deterministic parallel helper; tests‑only, not wired)
+- **Engine util:** `clematis/engine/util/parallel.py` — `run_parallel(tasks, *, max_workers, merge_fn, order_key)` enforces deterministic aggregation regardless of completion order. `max_workers<=1` executes sequentially; exceptions aggregate deterministically via `ParallelError` with ordered `errors`.
+- **Tests:** `tests/helpers/test_parallel_helper.py` — ordering independent of completion, sequential equivalence, deterministic exceptions, empty/normalization cases.
+- **Docs:** `docs/m9/parallel_helper.md` (API, error model, examples, anti‑patterns, wiring guidance); README M9 section links and a small key/thunk example; `docs/m9/overview.md` references PR64 and outlines the hand‑off.
+- **Identity:** helper is **unused by default** (tests only); no runtime behavior change.
+
+### Added (PR65 — M9: Cache safety wrappers + deterministic merge; defaults OFF)
+- **Cache API:** `clematis/engine/cache.py` adds:
+  - `CacheProtocol` (minimal `get/put/__contains__/items`),
+  - `ThreadSafeCache` (lock wrapper for count/TTL caches),
+  - `ThreadSafeBytesCache` (lock wrapper for size‑aware caches with `put(key, value, cost)`), and
+  - `merge_caches_deterministic(...)` (deterministic worker/key‑sorted merge with explicit conflict policy: `"first_wins"` or `"assert_equal"`).
+- **LRU bytes conformance:** `clematis/engine/util/lru_bytes.py` exposes a deterministic `items()` iterator (LRU→MRU) without mutating recency; no behavior change.
+- **Stages (safety only):** `clematis/engine/stages/t1.py` and `.../t2.py` now wrap legacy caches with `ThreadSafeCache` / `ThreadSafeBytesCache` to guard optional parallel paths. **No behavior change** when parallel is OFF or when `max_workers<=1`.
+- **Docs:** `docs/m9/cache_safety.md` — modes (`lock` vs `isolate+merge`), determinism rules, wiring patterns; `docs/m9/overview.md` updated with a PR65 summary and links.
+- **Tests:**
+  - `tests/test_cache_guardrails.py` — concurrency smoke for both wrappers; stable `items()` snapshot,
+  - `tests/test_cache_coherency.py` — cache disable path, deterministic merge policies (first‑wins/assert‑equal) parity with sequential shared cache.
+- **Identity:** outputs remain **byte‑identical** with parallel OFF; with parallel ON + `max_workers=1`, results match sequential.
+
+-### Added (PR55 — CLI output contract & exit codes)
 - **Std flags across wrappers:** `--json` / `--table` (mutually exclusive) and `--quiet` / `--verbose` parsed by all CLI wrappers. Defaults unchanged when flags are omitted.
 - **Helpers:** `clematis/cli/_io.py` (plain ASCII `print_table`, compact `print_json`, `set_verbosity`) and `clematis/cli/_exit.py` (standard exit codes).
 - **Quiet contract:** Wrapper diagnostics respect `--quiet` (stderr suppressed) and `--verbose` (extra breadcrumbs). Stdout remains machine‑readable; no color.

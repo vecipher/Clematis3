@@ -1,9 +1,10 @@
 from __future__ import annotations
 from collections import OrderedDict
 from dataclasses import dataclass
-from typing import Any, Dict, Hashable, Tuple
+from typing import Any, Dict, Hashable, Tuple, Protocol, TypeVar, Generic, Optional, Iterable, List, Callable
 import time
 import json
+import threading
 
 
 @dataclass
@@ -54,10 +55,112 @@ class _NamespaceCache:
     def size(self) -> int:
         return len(self._d)
 
+    def items(self) -> Iterable[Tuple[Hashable, Any]]:
+        """Stable snapshot of (key, value) pairs in LRU order (oldest→newest)."""
+        # Do not mutate access order here. TTL pruning is left to the public wrappers.
+        return [(k, ent.value) for k, ent in self._d.items()]
+
 
 def stable_key(obj: Any) -> str:
     """JSON-stable key for dicts/lists/tuples when they are not hashable."""
     return json.dumps(obj, sort_keys=True, separators=(",", ":"))
+
+
+# ---- Parallel-safety surface (PR65) -----------------------------------------
+K = TypeVar("K")
+V = TypeVar("V")
+
+class CacheProtocol(Protocol[K, V]):
+    """Minimal cache protocol used by parallel-safe wrappers & merges."""
+    def get(self, key: K) -> Optional[V]: ...
+    def put(self, key: K, value: V) -> None: ...
+    def __contains__(self, key: K) -> bool: ...
+    def items(self) -> Iterable[Tuple[K, V]]: ...
+
+class ThreadSafeCache(Generic[K, V]):
+    """
+    Thin lock wrapper providing thread-safety for a CacheProtocol.
+    Does not change semantics of the underlying cache; only serializes access.
+    """
+    __slots__ = ("_inner", "_lock")
+
+    def __init__(self, inner: CacheProtocol[K, V], lock: Optional[threading.RLock] = None) -> None:
+        self._inner = inner
+        self._lock = lock or threading.RLock()
+
+    def get(self, key: K) -> Optional[V]:
+        with self._lock:
+            return self._inner.get(key)
+
+    def put(self, key: K, value: V) -> None:
+        with self._lock:
+            self._inner.put(key, value)
+
+    def __contains__(self, key: K) -> bool:
+        with self._lock:
+            return key in self._inner
+
+    def items(self) -> Iterable[Tuple[K, V]]:
+        # Return a snapshot list to avoid iterator invalidation under concurrent writers.
+        with self._lock:
+            return list(self._inner.items())
+
+class ThreadSafeBytesCache(Generic[K, V]):
+    """
+    Thin lock wrapper for size-aware caches (e.g., LRUBytes) whose `put` takes (key, value, cost).
+    Preserves the underlying cache's return signature (e.g., eviction counts/bytes).
+    """
+    __slots__ = ("_inner", "_lock")
+
+    def __init__(self, inner: Any, lock: Optional[threading.RLock] = None) -> None:
+        self._inner = inner
+        self._lock = lock or threading.RLock()
+
+    def get(self, key: K) -> Optional[V]:
+        with self._lock:
+            return self._inner.get(key)
+
+    def put(self, key: K, value: V, cost: int):
+        with self._lock:
+            # Return whatever the inner cache returns (e.g., (evicted_entries, evicted_bytes))
+            return self._inner.put(key, value, cost)
+
+    def __contains__(self, key: K) -> bool:
+        with self._lock:
+            return key in self._inner
+
+    def items(self) -> Iterable[Tuple[K, V]]:
+        with self._lock:
+            return list(self._inner.items())
+
+def merge_caches_deterministic(
+    target: CacheProtocol[K, V],
+    worker_caches: List[Tuple[Any, CacheProtocol[K, V]]],
+    *,
+    worker_order_key: Callable[[Any], Any],
+    key_order_key: Callable[[K], Any],
+    on_conflict: str = "first_wins",  # or "assert_equal"
+) -> None:
+    """
+    Deterministically merge items from per-worker caches into a single target cache.
+    - Workers are iterated in sorted order of worker_order_key(worker_key).
+    - Within each worker, keys are iterated in sorted order of key_order_key(key).
+    - Conflicts resolved either by 'first_wins' (skip later) or 'assert_equal'.
+    """
+    # Iterate workers in deterministic order
+    for _, wc in sorted(worker_caches, key=lambda t: worker_order_key(t[0])):
+        # Snapshot and sort keys deterministically
+        kvs = list(wc.items())
+        kvs.sort(key=lambda kv: key_order_key(kv[0]))
+        for k, v in kvs:
+            if k in target:
+                if on_conflict == "assert_equal":
+                    existing = target.get(k)
+                    assert existing == v, f"Cache conflict for {k!r}: {existing!r} vs {v!r}"
+                # first_wins → skip later value
+                continue
+            target.put(k, v)
+# -----------------------------------------------------------------------------
 
 
 # Backward-compatible LRUCache shim for legacy imports
@@ -129,6 +232,18 @@ class LRUCache:
     def put(self, key: Any, value: Any) -> None:
         self.set(key, value)
 
+    def __contains__(self, key: Any) -> bool:
+        """Membership check with TTL pruning; does not affect recency order."""
+        hk = CacheManager._hashable_or_stable(key)
+        ent = self._ns._d.get(hk)
+        if ent is None:
+            return False
+        # TTL prune on read without touching order
+        if self._ns._ttl and (self._ns._time() - ent.ts) > self._ns._ttl:
+            self._ns._d.pop(hk, None)
+            return False
+        return True
+
     def invalidate(self) -> int:
         return self._ns.invalidate()
 
@@ -140,6 +255,23 @@ class LRUCache:
 
     def __len__(self) -> int:
         return self._ns.size()
+
+    def items(self) -> Iterable[Tuple[Any, Any]]:
+        """
+        Snapshot of (key, value) with TTL pruning. Keys are the internal stable keys
+        used by this cache. Order is oldest→newest and does not mutate access order.
+        """
+        out = []
+        now = self._ns._time()
+        ttl = self._ns._ttl
+        # Copy keys first to avoid RuntimeError if TTL pruning removes entries
+        for k, ent in list(self._ns._d.items()):
+            if ttl and (now - ent.ts) > ttl:
+                # prune expired without touching order effects
+                self._ns._d.pop(k, None)
+                continue
+            out.append((k, ent.value))
+        return out
 
     @property
     def stats(self) -> Dict[str, int]:

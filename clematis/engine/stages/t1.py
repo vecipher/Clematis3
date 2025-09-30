@@ -3,7 +3,7 @@ from collections import defaultdict
 import heapq
 from typing import Dict, Any, List, Tuple
 from ..types import T1Result
-from ..cache import LRUCache, stable_key
+from ..cache import LRUCache, stable_key, ThreadSafeCache, ThreadSafeBytesCache
 from ..util.ring import DedupeRing
 from ..util.lru_det import DeterministicLRUSet
 from ..util.lru_bytes import LRUBytes
@@ -27,7 +27,7 @@ def _get_cache(ctx, cfg_t1: dict):
     if perf_on and (max_e > 0 or max_b > 0):
         cfg_tuple = ("bytes", max_e, max_b)
         if _T1_CACHE is None or _T1_CACHE_CFG != cfg_tuple:
-            _T1_CACHE = LRUBytes(max_entries=max_e, max_bytes=max_b)
+            _T1_CACHE = ThreadSafeBytesCache(LRUBytes(max_entries=max_e, max_bytes=max_b))  # type: ignore[arg-type]
             _T1_CACHE_CFG = cfg_tuple
             _T1_CACHE_KIND = "bytes"
         return _T1_CACHE, _T1_CACHE_KIND
@@ -40,7 +40,8 @@ def _get_cache(ctx, cfg_t1: dict):
     ttl_s = int(c.get("ttl_s", 300))
     cfg_tuple = ("lru", max_entries, ttl_s)
     if _T1_CACHE is None or _T1_CACHE_CFG != cfg_tuple:
-        _T1_CACHE = LRUCache(max_entries=max_entries, ttl_s=ttl_s)
+        # PR65: wrap legacy LRU with a thin lock to make shared access safe under optional parallel paths.
+        _T1_CACHE = ThreadSafeCache(LRUCache(max_entries=max_entries, ttl_s=ttl_s))  # type: ignore[arg-type]
         _T1_CACHE_CFG = cfg_tuple
         _T1_CACHE_KIND = "lru"
     return _T1_CACHE, _T1_CACHE_KIND

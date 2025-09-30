@@ -1,9 +1,12 @@
+# Coherency tests for orchestrator-level caching behavior.
+# These assert keying and enable/disable semantics without timing assumptions.
 from types import SimpleNamespace
 import pytest
 
 import clematis.engine.orchestrator as orch
 
 
+# Cache key must include the state's version_etag; bumping it forces a miss.
 def test_t2_cache_uses_version_in_key(monkeypatch):
     calls = {"t2": 0}
 
@@ -61,6 +64,7 @@ def test_t2_cache_uses_version_in_key(monkeypatch):
     assert calls["t2"] == 2  # re-executed due to version change
 
 
+# Cache key must include the input query; different queries produce misses.
 def test_t2_cache_is_query_sensitive(monkeypatch):
     calls = {"t2": 0}
 
@@ -107,3 +111,52 @@ def test_t2_cache_is_query_sensitive(monkeypatch):
     # Repeating "alpha" now should be a hit (no new call)
     orch.run_turn(ctx, state, input_text="alpha")
     assert calls["t2"] == 2
+
+
+# Test that disabling the cache causes t2 to be called every time.
+def test_t2_cache_can_be_disabled(monkeypatch):
+    calls = {"t2": 0}
+
+    # Swallow logs
+    monkeypatch.setattr(orch, "append_jsonl", lambda *_args, **_kw: None, raising=True)
+    monkeypatch.setattr(
+        orch,
+        "t1_propagate",
+        lambda ctx, state, text: SimpleNamespace(metrics={"t1": True}),
+        raising=True,
+    )
+
+    def fake_t2(ctx, state, text, t1):
+        calls["t2"] += 1
+        return SimpleNamespace(metrics={"t2": True}, retrieved=[])
+
+    monkeypatch.setattr(orch, "t2_semantic", fake_t2, raising=True)
+
+    def fake_t3_deliberate(ctx, state, bundle):
+        return SimpleNamespace(version="t3-plan-v1", ops=[], deltas=[], reflection=False)
+
+    def fake_t3_dialogue(dialog_bundle, plan):
+        return "OK"
+
+    monkeypatch.setattr(orch, "t3_deliberate", fake_t3_deliberate, raising=False)
+    monkeypatch.setattr(orch, "t3_dialogue", fake_t3_dialogue, raising=False)
+
+    # Disable cache in config; identical calls should not be cached.
+    ctx = SimpleNamespace(
+        turn_id=1,
+        agent_id="Cachey",
+        config=SimpleNamespace(
+            t4={
+                "enabled": False,
+                "cache": {"enabled": False, "max_entries": 16, "ttl_sec": 600},
+            }
+        ),
+    )
+    state = {"version_etag": "9"}
+
+    orch.run_turn(ctx, state, input_text="same")
+    orch.run_turn(ctx, state, input_text="same")
+    orch.run_turn(ctx, state, input_text="same")
+
+    # With cache disabled, t2 runs on every call
+    assert calls["t2"] == 3
