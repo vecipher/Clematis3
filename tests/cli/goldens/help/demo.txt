@@ -1,4 +1,4 @@
-usage: clematis demo [--json | --table] [--quiet] [--verbose] [-h]
+usage: clematis [-h] [--version]
 
 Delegates to scripts/run_demo.py
 

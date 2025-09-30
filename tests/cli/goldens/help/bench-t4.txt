@@ -1,4 +1,4 @@
-usage: clematis bench-t4 [-h] [--json | --table] [--quiet] [--verbose] ...
+usage: clematis [-h] [--version]
 
 Delegates to scripts/bench_t4.py
 

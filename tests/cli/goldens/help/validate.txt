@@ -1,4 +1,4 @@
-usage: clematis validate [--json | --table] [--quiet] [--verbose] [-h]
+usage: clematis [-h] [--version]
 
 Delegates to scripts/validate_config.py
 

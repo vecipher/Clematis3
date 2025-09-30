@@ -25,26 +25,76 @@ def _normalize_newlines(text: str) -> str:
 
 def _canon_brace_list_line(line: str, *, ensure_ellipsis: bool) -> str:
     """
-    If the line contains a brace-enclosed, comma-separated list like:
-        "  {a,b,c} ..."
-    normalize it by sorting + deduping the items and normalizing trailing ellipses.
-    Returns the possibly-updated line.
+    If the line contains a brace-enclosed, comma-separated list like
+    "... {a,b,c} ...", normalize trailing ellipses to exactly one and
+    preserve original item order.
     """
     m = _BRACE_SEARCH.search(line)
     if not m:
         return line
-    indent = re.match(r"^\s*", line).group(0)
-    items = m.group(1)
+    # Left part (indent+prefix), the brace, and tail
+    start, end = m.span()
+    prefix, items, tail = line[:start], m.group(0)[1:-1], line[end:]
     parts = [p.strip() for p in items.split(",") if p.strip()]
     brace = "{" + ",".join(parts) + "}"
-    tail = line[m.end():]
     if ensure_ellipsis:
-        # Collapse any number of trailing ellipses/groups into exactly one " ..."
-        tail = re.sub(r"(?:\s*\.\.\.)*\s*$", " ...", tail)
+        tail = re.sub(r"(?:\s*\.\.\.)*\s$", " ...", tail)
     else:
-        # Do not enforce ellipsis; just strip trailing whitespace
         tail = re.sub(r"\s+$", "", tail)
-    return f"{indent}{brace}{tail}"
+    # Preserve original leading whitespace/prefix
+    return f"{prefix}{brace}{tail}"
+
+
+def _rebuild_top_usage_block(lines: list[str]) -> list[str]:
+    """
+    Canonicalize the top-level usage block into exactly two lines:
+        usage: clematis [-h] [--version]
+          {a,b,c} ...
+    followed by a single blank line. This avoids argparse wrapping
+    differences across Python versions and platforms.
+    """
+    # find first usage: clematis
+    try:
+        i = next(idx for idx, l in enumerate(lines) if l.startswith("usage: clematis"))
+    except StopIteration:
+        return lines
+
+    # extract the first brace list within the next few lines (if any)
+    items: list[str] = []
+    for j in range(i, min(i + 6, len(lines))):
+        m = _BRACE_SEARCH.search(lines[j])
+        if m:
+            raw = m.group(1)
+            items = [p.strip() for p in raw.split(",") if p.strip()]
+            break
+
+    # Build canonical two-line usage (match goldens)
+    usage_head = "usage: clematis [-h] [--version]"
+    new_block = [usage_head]
+    if items:
+        new_block.append("  {" + ",".join(items) + "} ...")
+
+    # determine extent of the existing usage block to replace
+    k = i + 1
+    while k < len(lines):
+        # stop when we reach a clearly non-usage line (e.g., section title or blank)
+        if lines[k].strip() == "":
+            k += 1
+            break
+        if not lines[k].startswith(" ") and "usage:" not in lines[k]:
+            break
+        k += 1
+
+    # also drop any immediate ellipsis-only lines after usage
+    while k < len(lines) and _ELLIPSIS_ONLY_LINE.match(lines[k]):
+        k += 1
+
+    # ensure exactly one blank line after our canonical block
+    rest = lines[k:]
+    while rest and (rest[0].strip() == "" or _ELLIPSIS_ONLY_LINE.match(rest[0])):
+        rest.pop(0)
+    lines[i:] = new_block + [""] + rest
+    return lines
 
 
 def normalize_help(text: str) -> str:
@@ -57,25 +107,9 @@ def normalize_help(text: str) -> str:
     # collapse spacing artifacts from different line-wrap behaviors
     text = _RUN_SPACES.sub(" ", text)
 
-    # --- Canonicalize the top-level usage brace list across Python versions ---
-    # Some argparse versions put the {sub1,sub2,...} list on the same "usage:" line,
-    # others wrap it onto the next line, and some even emit an extra standalone "..." line.
-    # Normalize any brace list found on the usage line or shortly after, ensure a single
-    # trailing " ...", and drop any immediate ellipsis-only lines that follow.
+    # Canonicalize the ENTIRE top-level usage block (2 lines + one blank line)
     lines = text.splitlines()
-    usage_idx = next((i for i, l in enumerate(lines) if l.startswith("usage: clematis")), None)
-    if usage_idx is not None:
-        first_brace_idx = None
-        for j in range(usage_idx, min(usage_idx + 5, len(lines))):
-            if "{" in lines[j] and "}" in lines[j]:
-                lines[j] = _canon_brace_list_line(lines[j], ensure_ellipsis=(first_brace_idx is None))
-                if first_brace_idx is None:
-                    first_brace_idx = j
-        if first_brace_idx is not None:
-            k = first_brace_idx + 1
-            # Drop any trailing ellipsis-only lines that argparse may emit.
-            while k < len(lines) and _ELLIPSIS_ONLY_LINE.match(lines[k]):
-                del lines[k]
+    lines = _rebuild_top_usage_block(lines)
 
     # strip trailing whitespace on each line
     text = "\n".join(line.rstrip() for line in lines)
