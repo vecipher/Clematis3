@@ -54,13 +54,15 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           VER="${{ steps.vars.outputs.ver }}"
-          gh release download "v${VER}" -p "clematis-${VER}.tar.gz"
+          mkdir -p _release
+          # Use a dedicated dir and skip if the file is already present from a prior attempt.
+          gh release download "v${VER}" -p "clematis-${VER}.tar.gz" -D _release --skip-existing
 
       - name: Compute SHA256
         id: sha
         run: |
           VER="${{ steps.vars.outputs.ver }}"
-          echo "sha=$(sha256sum clematis-${VER}.tar.gz | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+          echo "sha=$(sha256sum _release/clematis-${VER}.tar.gz | awk '{print $1}')" >> "$GITHUB_OUTPUT"
 
       - name: Update Formula file
         run: |
