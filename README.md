@@ -2,7 +2,7 @@
 
 Clematis is a deterministic, turn‑based scaffold for agential AI. It models agents with concept graphs and tiered reasoning (T1→T4), uses small LLMs where needed, and keeps runtime behavior reproducible (no hidden network calls in tests/CI).
 
-> **Status (Milestone 9):** In progress ⚙️ — PR63 (config schema for deterministic parallelism; defaults **OFF**) has landed. Identity is unchanged by default. A deterministic parallel helper (`run_parallel`) is now available (tests-only, not wired) — see **[docs/m9/parallel_helper.md](docs/m9/parallel_helper.md)** and **[docs/m9/overview.md](docs/m9/overview.md)**. Previous: Milestone 8 complete (PR61 packaging/extras; PR62 lint/type gates).
+> **Status (Milestone 9):** In progress ⚙️ — PR63 (config schema; defaults **OFF**), PR64 (deterministic runner), PR65 (cache safety wrappers), PR66 (flag‑gated T1 fan‑out across graphs), and PR67 (parallel metrics + microbench) have landed. Parallelism remains **OFF by default**; identity is unchanged unless explicitly enabled. See **[docs/m9/overview.md](docs/m9/overview.md)** and **[docs/m9/parallel_helper.md](docs/m9/parallel_helper.md)**.
 
 ---
 
@@ -40,8 +40,8 @@ python -m clematis --dir ./.logs rotate-logs -- --dry-run
 
 CLI details, delegation rules, and recipes live in **[docs/m8/cli.md](docs/m8/cli.md)**. Packaging/extras and quality gates: **[docs/m8/packaging_cli.md](docs/m8/packaging_cli.md)** · **[CONTRIBUTING.md](CONTRIBUTING.md)**.
 
-### M9: parallel config (schema only)
-The PR63 surface adds a validated config for deterministic parallelism. Defaults keep behavior identical to previous milestones.
+### M9: deterministic parallelism (flag‑gated)
+The PR63 surface adds a validated config for deterministic parallelism. Defaults keep behavior identical to previous milestones. As of PR66, T1 can fan‑out **per active graph** via the deterministic runner, with stable merge ordering; as of PR67, minimal observability metrics are available when enabled.
 
 ```yaml
 # configs/config.yaml (excerpt)
@@ -53,26 +53,29 @@ perf:
     t2: false
     agents: false
 ```
-See the extended notes in **docs/m9/overview.md**. Flipping these flags in PR63 does not change runtime yet; later PRs (PR64+) implement execution.
 
+**Enable T1 fan‑out (example):** For a quick try with deterministic fan‑out across graphs:
 
-**Example — key/thunk pattern with deterministic merge**
-```python
-from clematis.engine.util.parallel import run_parallel
+```yaml
+perf:
+  parallel:
+    enabled: true
+    max_workers: 4   # >1 to enable parallel path
+    t1: true
+```
+**Observability (optional):** To see minimal parallel metrics (`task_count`, `parallel_workers`) in T1 outputs and in the microbench, also set:
 
-# Build (key, thunk) tasks; freeze loop var with default arg
-tasks = [(sid, (lambda s=sid: do_work(s))) for sid in [3, 1, 2]]
+```yaml
+perf:
+  enabled: true
+  metrics:
+    report_memory: true
+```
 
-def merge(pairs):
-    # pairs are sorted by order_key(key)
-    return [res for _, res in pairs]
+**Microbench:**
 
-out = run_parallel(
-    tasks,
-    max_workers=4,
-    merge_fn=merge,
-    order_key=lambda k: (k,),  # total order; tie-breaks handled by submit index
-)
+```bash
+python clematis/scripts/bench_t1.py --graphs 32 --iters 3 --workers 8 --parallel --json
 ```
 
 *Cache safety:* PR65 adds thread-safe wrappers for shared caches and an optional isolate+merge strategy. See **[docs/m9/cache_safety.md](docs/m9/cache_safety.md)**.
@@ -82,6 +85,7 @@ out = run_parallel(
 - `clematis/engine/util/parallel.py` — deterministic thread-pool helper (`run_parallel`), unit tests only.
 - `clematis/cli/` — umbrella + wrapper subcommands (delegates to `clematis.scripts.*`).
 - `scripts/` — direct script shims (`*_hint.py`, tolerant import, single stderr hint).
+- `clematis/scripts/` — local microbenches and helpers (e.g., `bench_t1.py`).
 - `docs/` — milestone docs and updates (see `docs/m9/overview.md`, `docs/m9/parallel_helper.md`, `docs/m9/cache_safety.md`).
 - `tests/` — deterministic tests, golden comparisons, CLI checks.
 

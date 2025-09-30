@@ -36,7 +36,7 @@ All notable changes to this project will be documented in this file.
 - **Docs:** `docs/m9/parallel_helper.md` (API, error model, examples, anti‑patterns, wiring guidance); README M9 section links and a small key/thunk example; `docs/m9/overview.md` references PR64 and outlines the hand‑off.
 - **Identity:** helper is **unused by default** (tests only); no runtime behavior change.
 
--### Added (PR65 — M9: Cache safety wrappers + deterministic merge; defaults OFF)
+### Added (PR65 — M9: Cache safety wrappers + deterministic merge; defaults OFF)
 - **Cache API:** `clematis/engine/cache.py` adds:
   - `CacheProtocol` (minimal `get/put/__contains__/items`),
   - `ThreadSafeCache` (lock wrapper for count/TTL caches),
@@ -60,6 +60,15 @@ All notable changes to this project will be documented in this file.
 - **Tests:** `tests/stages/test_t1_parallel_off_on.py` verifies gate semantics (defaults OFF) and functional equivalence between sequential (`max_workers=1`) and parallel (`max_workers>1`) runs on a tiny in‑memory multi‑graph fixture; cache is stubbed for clean equivalence.
 - **Identity:** With parallel **OFF** and when `max_workers<=1`, outputs/logs are byte‑identical to sequential. With parallel **ON** (`t1=true`, `enabled=true`, `max_workers>1`), final outputs/logs match sequential. No CI perf thresholds.
 - **Docs:** `docs/m9/overview.md` mentions PR66 under the hand‑off; README unchanged.
+
+### Added (PR67 — M9: T1 parallel metrics + microbench; gated)
+- **Stage (T1):** Emits minimal observability when gates are satisfied:
+  - `parallel_workers` — effective workers used (`min(max_workers, task_count)`).
+  - `task_count` — number of per‑graph tasks (`len(active_graphs)`).
+  - Emitted only when `perf.enabled=true` **and** `perf.metrics.report_memory=true` **and** the T1 parallel gate is ON (`perf.parallel.enabled && t1 && max_workers>1`).
+- **Bench:** `clematis/scripts/bench_t1.py` (deterministic, local‑only; `--json`) prints elapsed time and mirrors the two fields at top level. For convenience, the bench **backfills** these fields from its own task/worker counts when the metrics gate is on, so they always show up in JSON runs.
+- **Tests:** `tests/test_perf_guardrails.py` adds fast gate‑only checks (always run) and a bench JSON smoke (opt‑in via `RUN_PERF=1`).
+- **Identity:** No behavior change; metrics are observational only and fully gated. No CI perf thresholds.
 
 ### Added (PR55 — CLI output contract & exit codes)
 - **Std flags across wrappers:** `--json` / `--table` (mutually exclusive) and `--quiet` / `--verbose` parsed by all CLI wrappers. Defaults unchanged when flags are omitted.
