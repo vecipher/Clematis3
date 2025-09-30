@@ -1,7 +1,9 @@
 # stages/t2_quality_trace.py
 from __future__ import annotations
 from pathlib import Path
-import json, os, hashlib
+import json
+import os
+import hashlib
 from typing import Any, Dict, List, Optional
 import unicodedata
 import logging

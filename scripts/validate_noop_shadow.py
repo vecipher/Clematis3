@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-import sys, os
+import sys
+import os
 from pathlib import Path
 
 # Narrowed ignore: only the canonical quality trace path, not any rq_traces.jsonl anywhere

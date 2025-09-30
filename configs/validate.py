@@ -835,7 +835,7 @@ def _validate_config_normalize_impl(cfg: Dict[str, Any]) -> Dict[str, Any]:
             _err(errors, "t2.lancedb.partitions", "must be an object")
         raw_parts = _ensure_dict(raw_parts_val)
         if raw_parts:
-            pp: Dict[str, Any] = {}
+            ldb_parts_out: Dict[str, Any] = {}
             if "by" in raw_parts:
                 by = raw_parts.get("by")
                 if not (isinstance(by, list) and all(isinstance(x, str) for x in by)):
@@ -845,15 +845,15 @@ def _validate_config_normalize_impl(cfg: Dict[str, Any]) -> Dict[str, Any]:
                         "must be a list of strings (e.g., ['owner','quarter'])",
                     )
                 else:
-                    pp["by"] = list(by)
+                    ldb_parts_out["by"] = list(by)
             if "shard_order" in raw_parts:
                 so = str(raw_parts.get("shard_order")).lower()
                 if so not in {"lex", "score"}:
                     _err(errors, "t2.lancedb.partitions.shard_order", "must be 'lex' or 'score'")
                 else:
-                    pp["shard_order"] = so
-            if pp:
-                ldb_out["partitions"] = pp
+                    ldb_parts_out["shard_order"] = so
+            if ldb_parts_out:
+                ldb_out["partitions"] = ldb_parts_out
         if ldb_out:
             t2["lancedb"] = ldb_out
 
@@ -1564,11 +1564,11 @@ def _validate_config_normalize_impl(cfg: Dict[str, Any]) -> Dict[str, Any]:
 
         # cache
         if raw_q_cache:
-            qc: Dict[str, Any] = {}
+            qcache: Dict[str, Any] = {}
             if "salt" in raw_q_cache:
-                qc["salt"] = str(raw_q_cache.get("salt"))
-            if qc:
-                q["cache"] = qc
+                qcache["salt"] = str(raw_q_cache.get("salt"))
+            if qcache:
+                q["cache"] = qcache
 
         # attach normalized quality only if provided
         t2["quality"] = q

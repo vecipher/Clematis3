@@ -296,7 +296,8 @@ def _init_index_from_cfg(state: dict, cfg_t2: dict):
     return idx, backend, fallback_reason
 
 
-import hashlib, json
+import hashlib
+import json
 
 
 def _quality_digest(qcfg: dict) -> str:
@@ -869,7 +870,8 @@ def t2_semantic(ctx, state, text: str, t1) -> T2Result:
                 # compute diversity over head if any; else 0.0
                 head_refs = retrieved[:selected_n] if selected_n > 0 else []
                 mmr_items_head = []
-                import unicodedata, re
+                import unicodedata
+                import re
 
                 for r in head_refs:
                     s = unicodedata.normalize("NFKC", getattr(r, "text", "") or "").lower()

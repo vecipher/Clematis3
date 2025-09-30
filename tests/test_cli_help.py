@@ -1,4 +1,5 @@
-import sys, subprocess
+import sys
+import subprocess
 
 
 def test_help_is_deterministic():

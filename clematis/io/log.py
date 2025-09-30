@@ -1,4 +1,5 @@
-import json, os
+import json
+import os
 from . import paths
 
 

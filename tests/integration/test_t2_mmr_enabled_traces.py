@@ -64,7 +64,8 @@ def test_mmr_works_with_text_only_and_reports_diversity_head():
     # Compute diversity on the head (k=2) similar to the gated metric in t2.py
     head = out[:2]
     # very small tokenizer: lower + split non-alnum
-    import unicodedata, re
+    import unicodedata
+    import re
 
     def toks(s: str):
         s = unicodedata.normalize("NFKC", s or "").lower()

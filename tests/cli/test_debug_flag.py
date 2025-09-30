@@ -1,4 +1,5 @@
-import sys, subprocess
+import sys
+import subprocess
 
 
 def _run(args, debug=False):
