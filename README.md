@@ -2,7 +2,7 @@
 
 Clematis is a deterministic, turn‑based scaffold for agential AI. It models agents with concept graphs and tiered reasoning (T1→T4), uses small LLMs where needed, and keeps runtime behavior reproducible (no hidden network calls in tests/CI).
 
-> **Status (Milestone 9):** In progress ⚙️ — PR63 (config schema for deterministic parallelism; defaults **OFF**) has landed. Identity is unchanged by default. See **[docs/m9/overview.md](docs/m9/overview.md)**. Previous: Milestone 8 complete (PR61 packaging/extras; PR62 lint/type gates).
+> **Status (Milestone 9):** In progress ⚙️ — PR63 (config schema for deterministic parallelism; defaults **OFF**) has landed. Identity is unchanged by default. A deterministic parallel helper (`run_parallel`) is now available (tests-only, not wired) — see **[docs/m9/parallel_helper.md](docs/m9/parallel_helper.md)** and **[docs/m9/overview.md](docs/m9/overview.md)**. Previous: Milestone 8 complete (PR61 packaging/extras; PR62 lint/type gates).
 
 ---
 
@@ -55,11 +55,14 @@ perf:
 ```
 See the extended notes in **docs/m9/overview.md**. Flipping these flags in PR63 does not change runtime yet; later PRs (PR64+) implement execution.
 
+Also available: a deterministic parallel helper (`run_parallel`) that enforces stable ordering, a sequential identity path when `max_workers<=1`, and deterministic exception aggregation. It is **unused by default** (unit-tested only) and intended for wiring in PR65+. See **[docs/m9/parallel_helper.md](docs/m9/parallel_helper.md)**.
+
 ## Repository layout (brief)
 - `clematis/engine/` — core stages (T1–T4), scheduler stubs, persistence, logs.
+- `clematis/engine/util/parallel.py` — deterministic thread-pool helper (`run_parallel`), unit tests only.
 - `clematis/cli/` — umbrella + wrapper subcommands (delegates to `clematis.scripts.*`).
 - `scripts/` — direct script shims (`*_hint.py`, tolerant import, single stderr hint).
-- `docs/` — milestone docs and updates.
+- `docs/` — milestone docs and updates (see `docs/m9/overview.md`, `docs/m9/parallel_helper.md`).
 - `tests/` — deterministic tests, golden comparisons, CLI checks.
 
 ## Environment flags

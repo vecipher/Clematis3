@@ -1,5 +1,3 @@
-
-
 # Milestone 9 — Deterministic Parallelism (PR63 surface)
 
 This document describes the configuration **surface only** added in PR63. It does **not** change runtime behavior. All defaults keep parallel execution **OFF** and preserve byte‑for‑byte identity with prior milestones.
@@ -65,6 +63,7 @@ perf.parallel.foo unknown key
 ## Forward‑looking determinism requirements (for PR64+)
 These rules guide the upcoming implementation and are called out here so reviewers can align on expectations:
 - **Deterministic ordering** after parallel work: use explicit, stable sort keys (e.g., `graph_id`, `shard_id`, `(score,id)` with a documented tie‑break).
+- **Use the helper introduced in PR64.** Adopt `run_parallel` (see [`parallel_helper.md`](./parallel_helper.md)) to enforce deterministic aggregation via `order_key`, a sequential identity path when `max_workers<=1`, and a sorted error model for exceptions.
 - **No nondeterministic sources** in parallel paths: no random seeds, time‑based ordering, or hidden global state.
 - **Thread‑safe caches**: default to lock‑wrapped single cache; optional per‑worker caches must have deterministic post‑merge.
 - **Logging**: stage outputs buffered and written through a centralized, ordered writer to guarantee JSONL line order.
@@ -80,5 +79,25 @@ These rules guide the upcoming implementation and are called out here so reviewe
 - No API changes.
 - Tested on Python 3.11–3.13 in CI.
 
+## Hand‑off to PR64/PR65
+
+**PR64 (helper; no wiring)**
+- Adds `clematis/engine/util/parallel.py` with `run_parallel(tasks, *, max_workers, merge_fn, order_key)`.
+- Pure Python; no RNG/time/global state; no logging.
+- **Acceptance:** ordering stable across runs; exceptions deterministic; `max_workers<=1` is identical to sequential.
+- **Scope:** unit tests only; no runtime behavior change.
+
+**PR65 (initial wiring; gated)**
+- Choose one fanout site (likely T2 shard workers) with a stable key (e.g., `shard_id`/`graph_id`).
+- Build zero‑arg thunks per task; define a pure `merge_fn` consuming `(key, result)` **in sorted order**.
+- Honor `perf.parallel` gates (`enabled`, `max_workers`, and feature gates `t1|t2|agents`).
+- Add identity tests (ON/OFF) and stress tests for caches/snapshots under fixed seeds.
+- Keep logs ordered (buffer and flush through a single writer if needed).
+
 ---
 *This page will be expanded in PR75/PR74 with bench notes, expected shapes, and realistic performance guidance.*
+
+## Cross‑references
+- PR63 surface (this page): config keys, normalization, and identity guarantees.
+- PR64 helper: [`parallel_helper.md`](./parallel_helper.md) — deterministic runner API and usage.
+- Future wiring: see milestone notes in `docs/m9/` as they land (PR65+).
