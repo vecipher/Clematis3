@@ -15,10 +15,40 @@ _DATE = re.compile(r"\b\d{4}-\d{2}-\d{2}\b")
 _USAGE_MAIN = re.compile(r"(?im)^usage:\s+__main__\.py")
 # collapse runs of 2+ spaces that aren't at start of line
 _RUN_SPACES = re.compile(r"(?m)(?<!^)[ ]{2,}")
+_BRACE_LINE = re.compile(r"^(\s*)\{([^}]*)\}(.*)$")
 
 
 def _normalize_newlines(text: str) -> str:
     return text.replace("\r\n", "\n").replace("\r", "\n")
+
+
+def _canon_brace_list_line(line: str, *, ensure_ellipsis: bool) -> str:
+    """
+    If the line contains a brace-enclosed, comma-separated list like:
+        "  {a,b,c} ..."
+    normalize it by sorting + deduping the items and normalizing trailing ellipses.
+    Returns the possibly-updated line.
+    """
+    m = _BRACE_LINE.match(line)
+    if not m:
+        return line
+    indent, items, tail = m.groups()
+    parts = [p.strip() for p in items.split(",") if p.strip()]
+    # Sort case-insensitively and dedupe while preserving order
+    seen = set()
+    parts_sorted = []
+    for p in sorted(parts, key=lambda s: s.lower()):
+        if p not in seen:
+            seen.add(p)
+            parts_sorted.append(p)
+    brace = "{" + ",".join(parts_sorted) + "}"
+    if ensure_ellipsis:
+        # Collapse any number of trailing ellipses/groups into exactly one " ..."
+        tail = re.sub(r"(?:\s*\.\.\.)*\s*$", " ...", tail)
+    else:
+        # Do not enforce ellipsis; just strip trailing whitespace
+        tail = re.sub(r"\s+$", "", tail)
+    return f"{indent}{brace}{tail}"
 
 
 def normalize_help(text: str) -> str:
@@ -32,29 +62,14 @@ def normalize_help(text: str) -> str:
     text = _RUN_SPACES.sub(" ", text)
 
     # --- Canonicalize the top-level usage brace line across Python versions ---
-    # Some Python versions omit the trailing ellipsis on the subcommand brace line,
-    # e.g.:
-    #   usage: clematis [-h] [--version]
-    #     {rotate-logs,...,demo}
-    # vs:
-    #   usage: clematis [-h] [--version]
-    #     {rotate-logs,...,demo} ...
-    #
-    # We rewrite only the line *immediately following* the first "usage: clematis"
-    # so we do not affect the later "positional arguments:" section which often
-    # repeats the brace list without an ellipsis.
+    # We only rewrite the line *immediately following* the first "usage: clematis"
+    # (the positional-arguments brace block later is left untouched).
     lines = text.splitlines()
     for i, line in enumerate(lines):
         if line.startswith("usage: clematis"):
             j = i + 1
             if j < len(lines):
-                nxt = lines[j]
-                stripped = nxt.lstrip()
-                if stripped.startswith("{") and "}" in stripped:
-                    # Collapse any number of trailing ellipses to exactly one " ..."
-                    stripped = re.sub(r"(?:\s*\.\.\.)*\s*$", " ...", stripped)
-                    indent = len(nxt) - len(nxt.lstrip())
-                    lines[j] = (" " * indent) + stripped
+                lines[j] = _canon_brace_list_line(lines[j], ensure_ellipsis=True)
             break
 
     # strip trailing whitespace on each line
