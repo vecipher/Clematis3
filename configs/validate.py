@@ -311,7 +311,7 @@ ALLOWED_GRAPH_PROMOTION = {
 _ALLOWED_SCHED_POLICIES = {"round_robin", "fair_queue"}
 
 # PERF (M6) allowed keys
-ALLOWED_PERF = {"enabled", "t1", "t2", "snapshots", "metrics"}
+ALLOWED_PERF = {"enabled", "t1", "t2", "snapshots", "metrics", "parallel"}
 ALLOWED_PERF_T1 = {"queue_cap", "dedupe_window", "cache", "caps"}
 ALLOWED_PERF_T1_CACHE = {"max_entries", "max_bytes"}
 ALLOWED_PERF_T1_CAPS = {"frontier", "visited"}
@@ -321,6 +321,7 @@ ALLOWED_PERF_T2_READER = {"partitions"}
 ALLOWED_PERF_T2_READER_PARTITIONS = {"enabled", "layout", "path", "by"}
 ALLOWED_PERF_SNAP = {"compression", "level", "delta_mode", "every_n_turns"}
 ALLOWED_PERF_METRICS = {"report_memory"}
+ALLOWED_PERF_PARALLEL = {"enabled", "max_workers", "t1", "t2", "agents"}
 
 ALLOWED_T2_QUALITY = {
     "enabled",
@@ -450,6 +451,7 @@ def _validate_config_normalize_impl(cfg: Dict[str, Any]) -> Dict[str, Any]:
     raw_perf_t2_reader_partitions = _ensure_dict(raw_perf_t2_reader.get("partitions"))
     raw_perf_snap = _ensure_dict(raw_perf.get("snapshots"))
     raw_perf_metrics = _ensure_dict(raw_perf.get("metrics"))
+    raw_perf_parallel = _ensure_dict(raw_perf.get("parallel"))
 
     raw_t2_quality = _ensure_dict(raw_t2.get("quality"))
     raw_q_norm = _ensure_dict(raw_t2_quality.get("normalizer"))
@@ -626,11 +628,19 @@ def _validate_config_normalize_impl(cfg: Dict[str, Any]) -> Dict[str, Any]:
                 sug = _suggest_key(k, ALLOWED_PERF_SNAP)
                 hint = f" (did you mean '{sug}')" if sug else ""
                 _err(errors, f"perf.snapshots.{k}", f"unknown key{hint}")
-        for k in raw_perf_metrics.keys():
-            if k not in ALLOWED_PERF_METRICS:
-                sug = _suggest_key(k, ALLOWED_PERF_METRICS)
+        # Unknown keys in perf.metrics (only if metrics provided)
+        if "metrics" in raw_perf and isinstance(raw_perf.get("metrics"), dict):
+            for k in raw_perf_metrics.keys():
+                if k not in ALLOWED_PERF_METRICS:
+                    sug = _suggest_key(k, ALLOWED_PERF_METRICS)
+                    hint = f" (did you mean '{sug}')" if sug else ""
+                    _err(errors, f"perf.metrics.{k}", f"unknown key{hint}")
+        # Unknown keys in perf.parallel
+        for k in raw_perf_parallel.keys():
+            if k not in ALLOWED_PERF_PARALLEL:
+                sug = _suggest_key(k, ALLOWED_PERF_PARALLEL)
                 hint = f" (did you mean '{sug}')" if sug else ""
-                _err(errors, f"perf.metrics.{k}", f"unknown key{hint}")
+                _err(errors, f"perf.parallel.{k}", f"unknown key{hint}")
 
     # T2.quality unknown key checks (RQ prep only)
     if raw_t2_quality:
@@ -1333,6 +1343,24 @@ def _validate_config_normalize_impl(cfg: Dict[str, Any]) -> Dict[str, Any]:
             if pm:
                 p["metrics"] = pm
 
+        # perf.parallel
+        if raw_perf_parallel:
+            pp: Dict[str, Any] = {}
+            if "enabled" in raw_perf_parallel:
+                pp["enabled"] = _coerce_bool(raw_perf_parallel.get("enabled"))
+            if "max_workers" in raw_perf_parallel:
+                mw = _coerce_int(raw_perf_parallel.get("max_workers"))
+                if mw < 0:
+                    mw = 0
+                pp["max_workers"] = mw
+            if "t1" in raw_perf_parallel:
+                pp["t1"] = _coerce_bool(raw_perf_parallel.get("t1"))
+            if "t2" in raw_perf_parallel:
+                pp["t2"] = _coerce_bool(raw_perf_parallel.get("t2"))
+            if "agents" in raw_perf_parallel:
+                pp["agents"] = _coerce_bool(raw_perf_parallel.get("agents"))
+            if pp:
+                p["parallel"] = pp
         merged["perf"] = p
 
     # ---- T2.QUALITY (M6 prep only; no runtime wiring) ----

@@ -3,8 +3,31 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+
 ### Changed
 - Prerelease 0.8.0a4 (python_requires <3.14; Homebrew formula now on python@3.13).
+
+### Added (PR63 — M9: deterministic parallelism config schema; defaults OFF)
+- **Configs:** Introduce `perf.parallel` in `configs/config.yaml` (identity path by default):
+  ```yaml
+  perf:
+    parallel:
+      enabled: false
+      max_workers: 0    # 0/1 ⇒ sequential; >1 reserved for future PRs
+      t1: false         # stage toggles; schema only in PR63
+      t2: false
+      agents: false
+  ```
+- **Validator:** `configs/validate.py` accepts the new block and enforces:
+  - unknown-key checks for `perf.parallel.*` (helpful suggestion when near‑miss),
+  - coercions/bounds (`enabled: bool`, `max_workers: int≥0`; negatives normalized to `0`),
+  - stage toggles as strict booleans. No runtime wiring yet.
+- **Types:** `clematis/engine/types.py` gains an optional `PerfParallelCfg` surface (used by the validator/tests; not consulted by runtime).
+- **Tests:**
+  - `tests/test_config_perf_defaults.py` — asserts new defaults are present and identity‑safe (OFF/seq),
+  - `tests/test_config_validate_parallel.py` — strict acceptance, bounds/normalization, and unknown‑key rejection for `perf.parallel`.
+- **Docs:** `docs/m9/overview.md` summarized the schema and identity rules; README adds an M9 stub that points to the doc.
+- **Identity & CI:** defaults keep outputs **byte‑for‑byte** unchanged (goldens unaffected); no new metrics; piggybacks existing config tests.
 
 ### Added (PR55 — CLI output contract & exit codes)
 - **Std flags across wrappers:** `--json` / `--table` (mutually exclusive) and `--quiet` / `--verbose` parsed by all CLI wrappers. Defaults unchanged when flags are omitted.
