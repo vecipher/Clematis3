@@ -7,11 +7,24 @@ from ..cache import LRUCache, stable_key, ThreadSafeCache, ThreadSafeBytesCache
 from ..util.ring import DedupeRing
 from ..util.lru_det import DeterministicLRUSet
 from ..util.lru_bytes import LRUBytes
+from ..util.parallel import run_parallel
 
 # module-level cache holder configured via Config.t1.cache
 _T1_CACHE = None
 _T1_CACHE_CFG = None
 _T1_CACHE_KIND = None
+
+
+# Small gate helper for T1 parallelism
+def _t1_parallel_enabled(cfg) -> bool:
+    """
+    Flag gate for PR66: enable parallel T1 when perf.parallel is on, t1 gate is true,
+    and max_workers > 1. Defaults keep parallelism OFF.
+    """
+    enabled = bool(_cfg_get(cfg, ["perf", "parallel", "enabled"], False))
+    t1_gate = bool(_cfg_get(cfg, ["perf", "parallel", "t1"], False))
+    workers = int(_cfg_get(cfg, ["perf", "parallel", "max_workers"], 0) or 0)
+    return bool(enabled and t1_gate and workers > 1)
 
 
 def _get_cache(ctx, cfg_t1: dict):
@@ -180,17 +193,32 @@ def t1_propagate(ctx, state, text: str) -> T1Result:
 
     all_deltas: List[Dict[str, Any]] = []
 
-    for gid in active_graphs:
+    def _t1_one_graph(gid: str):
+        # Returns (deltas_for_gid, per_graph_metrics)
         g = store.get_graph(gid)
-        # Build a tiny label list for seeding
         labels = [(n.id, n.label) for n in g.nodes.values()]
         seeds = _match_keywords(text, labels)
         if not seeds:
-            continue
+            return [], {
+                "pops": 0,
+                "iters": 0,
+                "propagations": 0,
+                "radius_cap_hits": 0,
+                "layer_cap_hits": 0,
+                "node_budget_hits": 0,
+                "_max_delta_local": 0.0,
+                "_cache_hit": 0,
+                "_cache_miss": 0,
+                "_t1_frontier_evicted": 0,
+                "_t1_dedup_hits": 0,
+                "_t1_visited_evicted": 0,
+                "_t1_cache_evicted": 0,
+                "_t1_cache_bytes": 0,
+            }
+
         # ---- T1 cache pre-check ----
         etag = store.version_etag(gid)
         decay_cfg = cfg_t1.get("decay", {})
-        # edge_mult is already computed above; include its shape in the key
         seed_ids = sorted(seeds.keys())
         policy_caps = {
             "radius_cap": radius_cap,
@@ -200,7 +228,6 @@ def t1_propagate(ctx, state, text: str) -> T1Result:
             "queue_budget": effective_queue_budget,
             "node_budget": node_budget,
         }
-        # PR31: include perf caps in cache key to avoid cross-mode reuse
         policy_caps.update(
             {
                 "frontier_cap": int(frontier_cap_cfg or 0),
@@ -220,16 +247,24 @@ def t1_propagate(ctx, state, text: str) -> T1Result:
         if cache is not None:
             hit = cache.get(ckey)
             if hit is not None:
-                all_deltas.extend(hit["deltas"])
-                total_pops += hit["metrics"]["pops"]
-                total_iters += hit["metrics"].get("iters", 0)
-                total_propagations += hit["metrics"].get("propagations", 0)
-                total_layer_hits = hit["metrics"].get("layer_cap_hits", 0)
-                layer_hits += total_layer_hits
-                cache_hits += 1
-                continue
-            cache_misses += 1
+                return hit["deltas"], {
+                    "pops": hit["metrics"]["pops"],
+                    "iters": hit["metrics"].get("iters", 0),
+                    "propagations": hit["metrics"].get("propagations", 0),
+                    "radius_cap_hits": hit["metrics"].get("radius_cap_hits", 0),
+                    "layer_cap_hits": hit["metrics"].get("layer_cap_hits", 0),
+                    "node_budget_hits": hit["metrics"].get("node_budget_hits", 0),
+                    "_max_delta_local": 0.0,  # cached path does not affect max_delta in current design
+                    "_cache_hit": 1,
+                    "_cache_miss": 0,
+                    "_t1_frontier_evicted": 0,
+                    "_t1_dedup_hits": 0,
+                    "_t1_visited_evicted": 0,
+                    "_t1_cache_evicted": 0,
+                    "_t1_cache_bytes": 0,
+                }
 
+        # --- Compute fresh ---
         csr = store.csr(gid)  # dict[src] -> list[(dst, Edge)]
         acc = defaultdict(float)  # accumulated contribution per node
         dist = {}  # hop distance per node
@@ -237,6 +272,9 @@ def t1_propagate(ctx, state, text: str) -> T1Result:
 
         layers_processed = 0  # unique layers beyond seeds we actually explored
         propagations = 0
+        layer_hits_local = 0
+        radius_cap_hits_local = 0
+        node_budget_hits_local = 0
 
         # PR31 structures (only used when enabled)
         ring = DedupeRing(dedupe_window_cfg) if (perf_enabled and dedupe_window_cfg > 0) else None
@@ -246,23 +284,37 @@ def t1_propagate(ctx, state, text: str) -> T1Result:
 
         # max-heap by remaining magnitude (use negative for heapq)
         pq: List[Tuple[float, str, str, float]] = []
+        local_max_delta = 0.0
         for nid, w in seeds.items():
             item = (-abs(w), nid, nid, float(w))
             if ring and ring.contains(nid):
-                t1_dedup_hits += 1
+                # Count hits locally; merged deterministically later
+                local_t1_dedup_hits = 1
             else:
                 heapq.heappush(pq, item)
                 if effective_frontier_cap is not None and len(pq) > effective_frontier_cap:
                     ev = len(pq) - effective_frontier_cap
-                    # Keep the top 'cap' items by the existing comparator (min-heap on (-abs, node_id))
                     pq = heapq.nsmallest(effective_frontier_cap, pq)
                     heapq.heapify(pq)
-                    t1_frontier_evicted += ev
+                    local_t1_frontier_evicted = ev
+                else:
+                    local_t1_frontier_evicted = 0
                 if ring:
                     ring.add(nid)
             acc[nid] += w
             dist[nid] = 0
-            max_delta = max(max_delta, abs(w))
+            local_max_delta = max(local_max_delta, abs(w))
+
+        # Visit PQ
+        local_t1_dedup_hits_total = 0
+        local_t1_frontier_evicted_total = 0
+        local_t1_visited_evicted_total = 0
+
+        # Initialize counters from seeding step
+        if 'local_t1_dedup_hits' in locals():
+            local_t1_dedup_hits_total += locals()['local_t1_dedup_hits']
+        if 'local_t1_frontier_evicted' in locals():
+            local_t1_frontier_evicted_total += locals()['local_t1_frontier_evicted']
 
         while pq and pops < effective_queue_budget:
             _, node_key, u, w = heapq.heappop(pq)
@@ -271,10 +323,9 @@ def t1_propagate(ctx, state, text: str) -> T1Result:
                 continue
             if visited_lru:
                 if visited_lru.add(u):
-                    t1_visited_evicted += 1
+                    local_t1_visited_evicted_total += 1
             layer = dist.get(u, 0)  # 0 for seeds, 1 for first neighbors, etc.
 
-            # Update layers_processed (count each depth beyond seeds once)
             if layer > 0 and layer > layers_processed:
                 layers_processed = layer
                 if layers_processed > effective_iter_cap_layers:
@@ -282,7 +333,7 @@ def t1_propagate(ctx, state, text: str) -> T1Result:
                     continue
 
             if abs(acc[u]) >= node_budget:
-                node_hits += 1
+                node_budget_hits_local += 1
                 continue
             if u not in csr:
                 continue
@@ -291,10 +342,10 @@ def t1_propagate(ctx, state, text: str) -> T1Result:
             for v, e in csr[u]:
                 d = dist[u] + 1
                 if d > radius_cap:
-                    radius_hits += 1
+                    radius_cap_hits_local += 1
                     continue
                 if d > effective_iter_cap_layers:
-                    layer_hits += 1
+                    layer_hits_local += 1
                     continue
 
                 decay = _compute_decay(d, cfg_t1)
@@ -304,22 +355,24 @@ def t1_propagate(ctx, state, text: str) -> T1Result:
 
                 acc[v] += contrib
                 propagations += 1
-                max_delta = max(max_delta, abs(contrib))
+                local_max_delta = max(local_max_delta, abs(contrib))
                 if (v not in dist) or (d < dist[v]):
                     dist[v] = d
                 if abs(acc[v]) < node_budget:
                     item2 = (-abs(contrib), v, v, contrib)
                     if ring and ring.contains(v):
-                        t1_dedup_hits += 1
+                        local_t1_dedup_hits_total += 1
                     else:
                         heapq.heappush(pq, item2)
                         if effective_frontier_cap is not None and len(pq) > effective_frontier_cap:
                             ev = len(pq) - effective_frontier_cap
                             pq = heapq.nsmallest(effective_frontier_cap, pq)
                             heapq.heapify(pq)
-                            t1_frontier_evicted += ev
+                            local_t1_frontier_evicted_total += ev
                         if ring:
                             ring.add(v)
+                else:
+                    node_budget_hits_local += 1
 
                 if relax_cap is not None and propagations >= relax_cap:
                     stop_relax = True
@@ -328,7 +381,6 @@ def t1_propagate(ctx, state, text: str) -> T1Result:
             if stop_relax:
                 break
 
-        # Convert accumulators to per-graph deltas and cache the result
         deltas_for_gid: List[Dict[str, Any]] = []
         for nid, val in sorted(acc.items(), key=lambda kv: kv[0]):
             if abs(val) < EPS:
@@ -336,25 +388,105 @@ def t1_propagate(ctx, state, text: str) -> T1Result:
             deltas_for_gid.append({"op": "upsert_node", "id": nid})
         result_metrics = {
             "pops": pops,
-            "iters": min(
-                layers_processed, effective_iter_cap_layers
-            ),  # layers beyond seeds actually explored
+            "iters": min(layers_processed, effective_iter_cap_layers),
             "propagations": propagations,
-            "layer_cap_hits": layer_hits,  # local increments already tracked globally
+            "radius_cap_hits": radius_cap_hits_local,
+            "layer_cap_hits": layer_hits_local,
+            "node_budget_hits": node_budget_hits_local,
         }
-        result = {"deltas": deltas_for_gid, "metrics": result_metrics}
+        # Cache write (if any), collect eviction stats
+        local_cache_evicted = 0
+        local_cache_bytes = 0
         if cache is not None:
+            result = {"deltas": deltas_for_gid, "metrics": result_metrics}
             if cache_kind == "bytes":
                 cost = _estimate_t1_cost(deltas_for_gid, result_metrics)
                 ev_n, ev_b = cache.put(ckey, result, cost)
-                t1_cache_evicted += int(ev_n or 0)
-                t1_cache_bytes += int(ev_b or 0)
+                local_cache_evicted += int(ev_n or 0)
+                local_cache_bytes += int(ev_b or 0)
             else:
                 cache.put(ckey, result)
-        all_deltas.extend(deltas_for_gid)
-        total_pops += pops
-        total_iters += result_metrics["iters"]
-        total_propagations += propagations
+        return deltas_for_gid, {
+            **result_metrics,
+            "_max_delta_local": local_max_delta,
+            "_cache_hit": 0,
+            "_cache_miss": 1 if cache is not None else 0,
+            "_t1_frontier_evicted": local_t1_frontier_evicted_total,
+            "_t1_dedup_hits": local_t1_dedup_hits_total,
+            "_t1_visited_evicted": local_t1_visited_evicted_total,
+            "_t1_cache_evicted": local_cache_evicted,
+            "_t1_cache_bytes": local_cache_bytes,
+        }
+
+    # Choose path: sequential (unchanged) vs parallel fanout via run_parallel
+    if not _t1_parallel_enabled(ctx.cfg):
+        for gid in active_graphs:
+            deltas_for_gid, m = _t1_one_graph(gid)
+            if deltas_for_gid:
+                all_deltas.extend(deltas_for_gid)
+            total_pops += m["pops"]
+            total_iters += m["iters"]
+            total_propagations += m["propagations"]
+            layer_hits += m["layer_cap_hits"]
+            radius_hits += m.get("radius_cap_hits", 0)
+            node_hits += m.get("node_budget_hits", 0)
+            max_delta = max(max_delta, m["_max_delta_local"])
+            cache_hits += m["_cache_hit"]
+            cache_misses += m["_cache_miss"]
+            if perf_enabled and metrics_enabled:
+                t1_frontier_evicted += m["_t1_frontier_evicted"]
+                t1_dedup_hits += m["_t1_dedup_hits"]
+                t1_visited_evicted += m["_t1_visited_evicted"]
+                t1_cache_evicted += m["_t1_cache_evicted"]
+                t1_cache_bytes += m["_t1_cache_bytes"]
+    else:
+        # Build (key, thunk) with a stable order key that preserves the original active_graphs order.
+        tasks: List[Tuple[Tuple[int, str], Any]] = []
+        for idx, gid in enumerate(active_graphs):
+            def make_thunk(_gid=gid):
+                def _():
+                    return _t1_one_graph(_gid)
+                return _
+            tasks.append(((idx, str(gid)), make_thunk()))
+        def merge_fn(pairs):
+            # pairs sorted by (index, gid)
+            agg_deltas = []
+            agg_pops = agg_iters = agg_props = 0
+            agg_radius_hits = 0
+            agg_layer_hits = 0
+            agg_node_hits = 0
+            agg_cache_hits = agg_cache_miss = 0
+            agg_max_delta = 0.0
+            agg_frontier_ev = agg_dedup = agg_visited_ev = agg_cache_ev = agg_cache_b = 0
+            for _, (deltas_for_gid, m) in pairs:
+                if deltas_for_gid:
+                    agg_deltas.extend(deltas_for_gid)
+                agg_pops += m["pops"]
+                agg_iters += m["iters"]
+                agg_props += m["propagations"]
+                agg_radius_hits += m.get("radius_cap_hits", 0)
+                agg_layer_hits += m.get("layer_cap_hits", 0)
+                agg_node_hits += m.get("node_budget_hits", 0)
+                agg_max_delta = max(agg_max_delta, m["_max_delta_local"])
+                agg_cache_hits += m["_cache_hit"]
+                agg_cache_miss += m["_cache_miss"]
+                if perf_enabled and metrics_enabled:
+                    agg_frontier_ev += m["_t1_frontier_evicted"]
+                    agg_dedup += m["_t1_dedup_hits"]
+                    agg_visited_ev += m["_t1_visited_evicted"]
+                    agg_cache_ev += m["_t1_cache_evicted"]
+                    agg_cache_b += m["_t1_cache_bytes"]
+            return (agg_deltas, agg_pops, agg_iters, agg_props, agg_radius_hits, agg_layer_hits, agg_node_hits,
+                    agg_max_delta, agg_cache_hits, agg_cache_miss, agg_frontier_ev, agg_dedup, agg_visited_ev,
+                    agg_cache_ev, agg_cache_b)
+        (all_deltas, total_pops, total_iters, total_propagations, radius_hits, layer_hits, node_hits,
+         max_delta, cache_hits, cache_misses, t1_frontier_evicted, t1_dedup_hits, t1_visited_evicted,
+         t1_cache_evicted, t1_cache_bytes) = run_parallel(
+            tasks,
+            max_workers=int(_cfg_get(ctx.cfg, ["perf", "parallel", "max_workers"], 0) or 0),
+            merge_fn=merge_fn,
+            order_key=lambda k: (k[0], k[1]),
+        )
 
     metrics = {
         "pops": total_pops,

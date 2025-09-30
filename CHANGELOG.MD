@@ -36,7 +36,7 @@ All notable changes to this project will be documented in this file.
 - **Docs:** `docs/m9/parallel_helper.md` (API, error model, examples, anti‑patterns, wiring guidance); README M9 section links and a small key/thunk example; `docs/m9/overview.md` references PR64 and outlines the hand‑off.
 - **Identity:** helper is **unused by default** (tests only); no runtime behavior change.
 
-### Added (PR65 — M9: Cache safety wrappers + deterministic merge; defaults OFF)
+-### Added (PR65 — M9: Cache safety wrappers + deterministic merge; defaults OFF)
 - **Cache API:** `clematis/engine/cache.py` adds:
   - `CacheProtocol` (minimal `get/put/__contains__/items`),
   - `ThreadSafeCache` (lock wrapper for count/TTL caches),
@@ -50,7 +50,18 @@ All notable changes to this project will be documented in this file.
   - `tests/test_cache_coherency.py` — cache disable path, deterministic merge policies (first‑wins/assert‑equal) parity with sequential shared cache.
 - **Identity:** outputs remain **byte‑identical** with parallel OFF; with parallel ON + `max_workers=1`, results match sequential.
 
--### Added (PR55 — CLI output contract & exit codes)
+### Added (PR66 — M9: Parallel T1 across graphs; flag‑gated, defaults OFF)
+- **Stage wiring:** `clematis/engine/stages/t1.py` fans out per **active graph** via `run_parallel`. Uses a stable key `(submit_index, graph_id)` with `order_key=lambda k: (k[0], k[1])` to preserve the original iteration order.
+- **Deterministic aggregation:**
+  - Deltas are concatenated strictly in graph order.
+  - Logs are **buffered per graph** in tasks and flushed in merge order (no interleaving).
+  - Metrics are reduced deterministically (sums/max) and now include `radius_cap_hits` and `node_budget_hits` (with zeros on early paths/cache hits for back‑compat).
+- **Cache safety:** Reuses PR65 lock‑wrapped caches; no isolate+merge in T1 yet (can be added later if contention warrants).
+- **Tests:** `tests/stages/test_t1_parallel_off_on.py` verifies gate semantics (defaults OFF) and functional equivalence between sequential (`max_workers=1`) and parallel (`max_workers>1`) runs on a tiny in‑memory multi‑graph fixture; cache is stubbed for clean equivalence.
+- **Identity:** With parallel **OFF** and when `max_workers<=1`, outputs/logs are byte‑identical to sequential. With parallel **ON** (`t1=true`, `enabled=true`, `max_workers>1`), final outputs/logs match sequential. No CI perf thresholds.
+- **Docs:** `docs/m9/overview.md` mentions PR66 under the hand‑off; README unchanged.
+
+### Added (PR55 — CLI output contract & exit codes)
 - **Std flags across wrappers:** `--json` / `--table` (mutually exclusive) and `--quiet` / `--verbose` parsed by all CLI wrappers. Defaults unchanged when flags are omitted.
 - **Helpers:** `clematis/cli/_io.py` (plain ASCII `print_table`, compact `print_json`, `set_verbosity`) and `clematis/cli/_exit.py` (standard exit codes).
 - **Quiet contract:** Wrapper diagnostics respect `--quiet` (stderr suppressed) and `--verbose` (extra breadcrumbs). Stdout remains machine‑readable; no color.
