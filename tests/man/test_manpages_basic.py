@@ -2,7 +2,7 @@ import os, subprocess, sys, pathlib
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
-GOLD_DIR = ROOT / "tests" / "golden" / "man"
+GOLD_DIR = ROOT / "man"
 
 
 def _read(p: pathlib.Path) -> str:

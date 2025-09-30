@@ -287,3 +287,90 @@ class Config:
 
     # M5: scheduler config (feature-flagged; defaults merged by validate.py)
     scheduler: Dict[str, Any] = field(default_factory=dict)
+
+# --- M9: deterministic parallelism config typing --------------------------------
+
+try:  # Python 3.11+
+    from typing import TypedDict, NotRequired  # type: ignore[attr-defined]
+except Exception:  # fallback for older typing support
+    from typing_extensions import TypedDict  # type: ignore[assignment]
+    try:
+        from typing_extensions import NotRequired  # type: ignore[assignment]
+    except Exception:
+        # For very old environments, NotRequired may not exist; keep types permissive.
+        NotRequired = None  # type: ignore
+
+class PerfParallelConfig(TypedDict, total=False):
+    """Config surface for deterministic parallel execution (PR63/M9).
+
+    All fields are optional from the type system's POV; validation enforces shape.
+    """
+    enabled: bool
+    max_workers: int  # 0 or 1 => sequential; negative normalized to 0
+    t1: bool
+    t2: bool
+    agents: bool
+
+class PerfMetricsConfig(TypedDict, total=False):
+    """Minimal metrics config surface referenced by PR63.
+
+    Only keys surfaced by validate.py today; extended in later PRs.
+    """
+    report_memory: bool
+
+
+class PerfConfig(TypedDict, total=False):
+    """Top-level perf config container.
+
+    Validation in configs/validate.py is the single source of truth. This
+    type is intentionally permissive (total=False) so adding future fields
+    does not break imports.
+    """
+    enabled: bool
+    metrics: PerfMetricsConfig
+    parallel: PerfParallelConfig
+
+
+def is_parallel_enabled(perf: Dict[str, Any] | "PerfConfig" | None) -> bool:
+    """Return True only when parallel execution should actually run.
+
+    Conditions (post-normalization by validate.py):
+    - perf.enabled is True
+    - perf.parallel.enabled is True
+    - at least one of {t1,t2,agents} is True
+    - max_workers >= 2  (0/1 are sequential)
+    """
+    if not perf:
+        return False
+    # TypedDicts are dicts at runtime.
+    p = perf if isinstance(perf, dict) else dict(perf)  # type: ignore[arg-type]
+    if not p.get("enabled"):
+        return False
+    par = p.get("parallel") or {}
+    if not isinstance(par, dict):
+        return False
+    if not par.get("enabled"):
+        return False
+    if not any(bool(par.get(k)) for k in ("t1", "t2", "agents")):
+        return False
+    maxw = int(par.get("max_workers", 0))
+    return maxw >= 2
+
+
+def parallel_max_workers(perf: Dict[str, Any] | "PerfConfig" | None) -> int:
+    """Helper that mirrors validate.py normalization for max_workers.
+
+    Values <= 0 are treated as 0 (sequential). This does *not* clamp high values;
+    scheduling code should apply its own upper bounds if needed.
+    """
+    if not perf:
+        return 0
+    p = perf if isinstance(perf, dict) else dict(perf)  # type: ignore[arg-type]
+    par = p.get("parallel") or {}
+    if not isinstance(par, dict):
+        return 0
+    try:
+        mw = int(par.get("max_workers", 0))
+    except Exception:
+        mw = 0
+    return mw if mw > 0 else 0

@@ -28,19 +28,18 @@ import argparse
 import datetime as _dt
 import hashlib
 import json
-import os
 import sys
 from typing import List
 
 try:
     import numpy as np
-except Exception as e:  # pragma: no cover
+except Exception:  # pragma: no cover
     print("[seed-lance] numpy is required: pip install numpy", file=sys.stderr)
     raise
 
 try:
     import lancedb  # type: ignore
-except Exception as e:  # pragma: no cover
+except Exception:  # pragma: no cover
     print("[seed-lance] lancedb is required: pip install lancedb", file=sys.stderr)
     raise
 
@@ -204,7 +203,7 @@ def main(argv: List[str] | None = None) -> int:
     except Exception as e:
         # If table exists and not overwriting, open it and append missing IDs only
         if "Table already exists" in str(e) and not args.overwrite:
-            print(f"[seed-lance] table exists; opening and upserting unique ids…", file=sys.stderr)
+            print("[seed-lance] table exists; opening and upserting unique ids…", file=sys.stderr)
             tbl = db.open_table(args.table)
             # upsert by id to keep it idempotent
             # lancedb supports `tbl.add(data)`; duplicates by id may exist depending on schema

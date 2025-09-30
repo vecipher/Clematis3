@@ -1,5 +1,4 @@
-usage: clematis inspect-snapshot [-h] [--json | --table] [--quiet] [--verbose]
-  ...
+usage: clematis [-h] [--version]
 
 Delegates to scripts/inspect_snapshot.py
 

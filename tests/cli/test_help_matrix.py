@@ -1,4 +1,5 @@
-import sys, subprocess
+import sys
+import subprocess
 
 PY = sys.executable
 

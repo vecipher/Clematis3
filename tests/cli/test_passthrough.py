@@ -1,4 +1,7 @@
-import sys, subprocess, shlex, pathlib
+import sys
+import subprocess
+import shlex
+import pathlib
 
 PY = sys.executable
 

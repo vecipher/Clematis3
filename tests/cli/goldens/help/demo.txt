@@ -1,1 +1,10 @@
-Delegates to scripts/
+usage: clematis [-h] [--version]
+
+Delegates to scripts/run_demo.py
+
+options:
+  --json JSON output (stable, machine-readable)
+  --table Plain table output (no color)
+  --quiet suppress non-essential stderr
+  --verbose increase stderr verbosity
+  -h, --help show this help message and exit

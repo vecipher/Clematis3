@@ -1,4 +1,5 @@
-import sys, subprocess
+import sys
+import subprocess
 
 
 def test_unknown_subcommand_yields_code_2():

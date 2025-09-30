@@ -2,7 +2,7 @@
 
 Clematis is a deterministic, turn‑based scaffold for agential AI. It models agents with concept graphs and tiered reasoning (T1→T4), uses small LLMs where needed, and keeps runtime behavior reproducible (no hidden network calls in tests/CI).
 
-> **Status (Milestone 8):** Complete ✅ — PR61 (Optional extras: `zstd`, `lancedb`) and PR62 (pre-commit, Ruff/Mypy configs, CI lint/type gates). **Next:** Milestone 9 (Performance and Deterministic Parallelism). MY CONFIG IS A FUCKING MESS I NEED TO FIX IT
+> **Status (Milestone 9):** In progress ⚙️ — PR63 (config schema for deterministic parallelism; defaults **OFF**) has landed. Identity is unchanged by default. See **[docs/m9/overview.md](docs/m9/overview.md)**. Previous: Milestone 8 complete (PR61 packaging/extras; PR62 lint/type gates).
 
 ---
 
@@ -40,6 +40,21 @@ python -m clematis --dir ./.logs rotate-logs -- --dry-run
 
 CLI details, delegation rules, and recipes live in **[docs/m8/cli.md](docs/m8/cli.md)**. Packaging/extras and quality gates: **[docs/m8/packaging_cli.md](docs/m8/packaging_cli.md)** · **[CONTRIBUTING.md](CONTRIBUTING.md)**.
 
+### M9: parallel config (schema only)
+The PR63 surface adds a validated config for deterministic parallelism. Defaults keep behavior identical to previous milestones.
+
+```yaml
+# configs/config.yaml (excerpt)
+perf:
+  parallel:
+    enabled: false
+    max_workers: 0   # 0/1 = sequential
+    t1: false
+    t2: false
+    agents: false
+```
+See the extended notes in **docs/m9/overview.md**. Flipping these flags in PR63 does not change runtime yet; later PRs (PR64+) implement execution.
+
 ## Repository layout (brief)
 - `clematis/engine/` — core stages (T1–T4), scheduler stubs, persistence, logs.
 - `clematis/cli/` — umbrella + wrapper subcommands (delegates to `clematis.scripts.*`).
@@ -62,6 +77,7 @@ CLI details, delegation rules, and recipes live in **[docs/m8/cli.md](docs/m8/cl
   – Add fast CLI smokes to CI (help phrase, arg‑order, sentinel strip, shim hint).
   – pre-commit + Ruff/Mypy configs; dual Ruff CI gates (repo safety + CLI strict).
   – declare NumPy as a runtime dependency (examples smoke).
+- **M9 (WIP):** deterministic parallelism — schema landed in PR63 (defaults OFF, identity preserved); runtime work continues in PR64–PR76.
 
 Pre‑M8 hardening notes: **`Changelog/PreM8Hardening.txt`**.
 LLM adapter + fixtures: **`docs/m3/llm_adapter.md`**.

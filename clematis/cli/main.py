@@ -66,6 +66,24 @@ def main(argv: List[str] | None = None) -> int:
 
     idx = next((i for i, tok in enumerate(argv) if tok in choices), -1)
     if idx >= 0:
+        # If user asked for help on the subcommand, print the subparser help
+        # directly to keep usage/prog stable ("clematis <sub> ...") and match goldens.
+        sub_tail = argv[idx + 1 :]
+        if any(x in sub_tail for x in ("-h", "--help")):
+            try:
+                sub_actions = [
+                    a for a in parser._actions if isinstance(a, argparse._SubParsersAction)
+                ]
+                sub_map = sub_actions[0].choices if sub_actions else {}
+                sp = sub_map.get(argv[idx])
+            except Exception:
+                sp = None
+            if sp is not None:
+                sp.print_help(sys.stdout)
+                return 0
+            # Fallback: delegate to argparse rendering with a minimal argv
+            parser.parse_args(argv[: idx + 1] + ["-h"])
+            return 0
         # extras before subcommand, but strip umbrella-only flags (--debug, --config/-c)
         pre = []
         it = iter(argv[:idx])

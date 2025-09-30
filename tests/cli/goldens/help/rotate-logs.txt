@@ -1,4 +1,4 @@
-usage: clematis rotate-logs [-h] [--json | --table] [--quiet] [--verbose] ...
+usage: clematis [-h] [--version]
 
 Delegates to scripts/rotate_logs.py
 

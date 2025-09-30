@@ -1,4 +1,5 @@
-import os, json
+import os
+import json
 from clematis.world.scenario import run_one_turn
 from clematis.engine.types import Config
 

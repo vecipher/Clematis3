@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 from __future__ import annotations
-import argparse, json, os, sys, re
+import argparse
+import json
+import os
+import sys
+import re
 from pathlib import Path
 
 

@@ -85,8 +85,21 @@ t4:
     namespaces: []
     max_entries: 512
     ttl_sec: 600
+# budgets: ...
 budgets: {time_ms: 1000, ops: 1000, tokens: 1024, time_ms_reflection: 6000}
 flags: {enable_world_memory: true, allow_reflection: true}
+
+# -----------------------------------------------------------------------------
+# M9 Deterministic Parallelism (defaults OFF)
+# -----------------------------------------------------------------------------
+perf:
+  parallel:
+    enabled: false
+    max_workers: 0  # 0 or 1 = sequential
+    t1: false
+    t2: false
+    agents: false
+
 # -----------------------------------------------------------------------------
 # Scheduler (M5) — Example config (feature-flagged; defaults live in validate.py)
 # -----------------------------------------------------------------------------
