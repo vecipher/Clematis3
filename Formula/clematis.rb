@@ -6,10 +6,10 @@ class Clematis < Formula
   desc "Deterministic, offline-by-default multi-agent concept-graph engine"
   homepage "https://github.com/vecipher/Clematis3"
   # These three are substituted below after heredoc with env vars.
-  url "https://github.com/vecipher/Clematis3/releases/download/v0.8.0a4/clematis-0.8.0a4.tar.gz"
-  sha256 "c98b1b968f0b959ca2d1d58107d8b36a1525dcc197ae2bc3574e9eeb27c439a4"
+  url "https://github.com/vecipher/Clematis3/releases/download/v0.8.0a5/clematis-0.8.0a5.tar.gz"
+  sha256 "c0f969ca48f3ee9f9e8ad18526dafae4c1a929b63c91dc9c09c346fb08b13d38"
   license "MIT"
-  version "0.8.0a4"
+  version "0.8.0a5"
 
   depends_on "python@3.13"
 

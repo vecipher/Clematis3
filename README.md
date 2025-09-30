@@ -2,7 +2,7 @@
 
 Clematis is a deterministic, turn‑based scaffold for agential AI. It models agents with concept graphs and tiered reasoning (T1→T4), uses small LLMs where needed, and keeps runtime behavior reproducible (no hidden network calls in tests/CI).
 
-> **Status (Milestone 9):** In progress ⚙️ — PR63 (config schema; defaults **OFF**), PR64 (deterministic runner), PR65 (cache safety wrappers), PR66 (flag‑gated T1 fan‑out across graphs), and PR67 (parallel metrics + microbench) have landed. Parallelism remains **OFF by default**; identity is unchanged unless explicitly enabled. See **[docs/m9/overview.md](docs/m9/overview.md)** and **[docs/m9/parallel_helper.md](docs/m9/parallel_helper.md)**.
+> **Status (Milestone 9):** In progress ⚙️ — PR63 (config schema; defaults **OFF**), PR64 (deterministic runner), PR65 (cache safety wrappers), PR66 (flag‑gated T1 fan‑out across graphs), PR67 (parallel metrics + microbench), and **PR68 (flag‑gated T2 fan‑out across in‑memory shards)** have landed. Parallelism remains **OFF by default**; identity is unchanged unless explicitly enabled. See **[docs/m9/overview.md](docs/m9/overview.md)** and **[docs/m9/parallel_helper.md](docs/m9/parallel_helper.md)**.
 
 ---
 
@@ -41,20 +41,7 @@ python -m clematis --dir ./.logs rotate-logs -- --dry-run
 CLI details, delegation rules, and recipes live in **[docs/m8/cli.md](docs/m8/cli.md)**. Packaging/extras and quality gates: **[docs/m8/packaging_cli.md](docs/m8/packaging_cli.md)** · **[CONTRIBUTING.md](CONTRIBUTING.md)**.
 
 ### M9: deterministic parallelism (flag‑gated)
-The PR63 surface adds a validated config for deterministic parallelism. Defaults keep behavior identical to previous milestones. As of PR66, T1 can fan‑out **per active graph** via the deterministic runner, with stable merge ordering; as of PR67, minimal observability metrics are available when enabled.
-
-```yaml
-# configs/config.yaml (excerpt)
-perf:
-  parallel:
-    enabled: false
-    max_workers: 0   # 0/1 = sequential
-    t1: false
-    t2: false
-    agents: false
-```
-
-**Enable T1 fan‑out (example):** For a quick try with deterministic fan‑out across graphs:
+The PR63 surface adds a validated config for deterministic parallelism. Defaults keep behavior identical to previous milestones. As of PR66, T1 can fan‑out **per active graph** via the deterministic runner, with stable merge ordering; as of PR67, minimal observability metrics are available when enabled. As of **PR68**, T2 can fan‑out across **in‑memory** shards with a deterministic, tier‑ordered merge (score‑desc, id‑asc; de‑dupe by id); OFF path remains byte‑identical.
 
 ```yaml
 perf:
@@ -63,6 +50,19 @@ perf:
     max_workers: 4   # >1 to enable parallel path
     t1: true
 ```
+
+**Enable T2 fan‑out (in‑memory backend only):**
+
+```yaml
+perf:
+  parallel:
+    enabled: true
+    max_workers: 4   # >1 to enable parallel path
+    t2: true
+t2:
+  backend: inmemory  # required for PR68 parallel path
+```
+
 **Observability (optional):** To see minimal parallel metrics (`task_count`, `parallel_workers`) in T1 outputs and in the microbench, also set:
 
 ```yaml
@@ -71,6 +71,8 @@ perf:
   metrics:
     report_memory: true
 ```
+
+When enabled, T2 emits `t2.task_count` and `t2.parallel_workers` (mirrors T1’s keys).
 
 **Microbench:**
 
@@ -83,6 +85,8 @@ python clematis/scripts/bench_t1.py --graphs 32 --iters 3 --workers 8 --parallel
 ## Repository layout (brief)
 - `clematis/engine/` — core stages (T1–T4), scheduler stubs, persistence, logs.
 - `clematis/engine/util/parallel.py` — deterministic thread-pool helper (`run_parallel`), unit tests only.
+- `clematis/engine/stages/t2_shard.py` — deterministic helpers for sharded T2 merge (quantized scoring, id tie‑break).
+- `tests/t2/test_t2_parallel_merge.py` — gate semantics, tie‑break, tier‑ordered K‑clamp, normalization.
 - `clematis/cli/` — umbrella + wrapper subcommands (delegates to `clematis.scripts.*`).
 - `scripts/` — direct script shims (`*_hint.py`, tolerant import, single stderr hint).
 - `clematis/scripts/` — local microbenches and helpers (e.g., `bench_t1.py`).
