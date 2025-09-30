@@ -8,6 +8,44 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  lint_types:
+    name: Lint & Types
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: |
+            pyproject.toml
+
+      - name: Upgrade pip
+        run: python -m pip install --upgrade pip
+
+      - name: Install lint/type deps
+        run: |
+          python -m pip install -U pip
+          # Install dev extras (ruff, mypy, stubs, etc.)
+          pip install -e .[dev]
+          # Fallback in case mypy/ruff aren't in extras on forks
+          pip install --upgrade --only-binary=:all: mypy ruff || pip install mypy ruff
+
+      - name: Ruff (lint)
+        run: |
+          ruff --version
+          ruff check .
+
+      - name: Mypy (types)
+        env:
+          # Make types deterministic and quiet in CI
+          MYPY_CACHE_DIR: .mypy_cache
+        run: |
+          mypy --version
+          mypy .
+
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -69,7 +107,7 @@ jobs:
           show("import clematis", lambda: __import__("clematis"))
           try:
               import clematis
-              print("clematis.__file__:", getattr(clemmatis, "__file__", None))
+              print("clematis.__file__:", getattr(clematis, "__file__", None))
               root = os.path.dirname(getattr(clematis, "__file__", "") or "")
               print("ls clematis root:", os.listdir(root) if root and os.path.isdir(root) else "N/A")
           except Exception:
