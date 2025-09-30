@@ -44,7 +44,7 @@ jobs:
           MYPY_CACHE_DIR: .mypy_cache
         run: |
           mypy --version
-          mypy .
+          mypy
 
   test:
     runs-on: ubuntu-latest
