@@ -95,6 +95,50 @@ These rules guide the upcoming implementation and are called out here so reviewe
 - Add identity tests (ON/OFF) and stress tests for caches/snapshots under fixed seeds.
 - Keep logs ordered (buffer and flush through a single writer if needed).
 
+## PR66 — T1 parallel fan‑out across graphs (flag‑gated)
+
+**What changed.** T1 now constructs one task **per active graph** and (when enabled) executes them via the deterministic runner introduced in PR64. Aggregation is fully deterministic:
+- Task keys are `(submit_index, graph_id)` and merged in that order.
+- Per‑graph deltas are concatenated in graph order; node IDs remain locally sorted.
+- Metrics are reduced deterministically (sums / max). Identity is preserved when parallel is OFF or `max_workers<=1`.
+
+**How to enable (safe defaults remain OFF):**
+```yaml
+perf:
+  parallel:
+    enabled: true
+    max_workers: 4
+    t1: true
+```
+With the gate OFF (or `max_workers<=1`), behavior and logs remain byte‑for‑byte identical to sequential.
+
+**Notes.** Cache safety from PR65 applies: shared caches are lock‑wrapped by default. No isolate‑merge is used in T1 unless explicitly configured in a later PR.
+
+---
+
+## PR67 — Minimal observability & microbench
+
+**New metrics (gated):** When `perf.enabled=true` and `perf.metrics.report_memory=true`, the T1 stage now includes two fields in its metrics map to help you reason about parallelism:
+- `task_count` — number of per‑graph tasks (i.e., `len(active_graphs)`).
+- `parallel_workers` — effective workers used, i.e. `min(max_workers, task_count)`.
+
+These fields are **observational only** and do not alter execution. They are helpful to confirm whether adding more workers can help for a given workload (e.g., if `parallel_workers < max_workers`, increasing workers alone will not speed up T1 unless `task_count` also increases).
+
+**Microbench (local only).** `clematis/scripts/bench_t1.py` produces a tiny, deterministic run to inspect shape and metrics:
+```bash
+python clematis/scripts/bench_t1.py \
+  --graphs 32 --iters 3 --workers 8 --parallel --json
+```
+Output includes elapsed time and the stage metrics. For convenience, the bench mirrors
+`parallel_workers` and `task_count` at the top level and will backfill those two keys in the
+printed metrics when the metrics gate is on, so they are visible in JSON runs even if the stage
+wasn’t configured to emit them in your environment.
+
+**Troubleshooting.**
+- Not seeing the two fields? Ensure `perf.enabled=true` and `perf.metrics.report_memory=true` in your config.
+- `parallel_workers` smaller than `workers`? That is expected when `task_count < workers`.
+- No speedups? T1’s per‑task work is small in this microbench and Python‑bound; the goal here is observability, not perf claims.
+
 ## Cache safety (PR65 summary)
 
 - Default mode: lock‑wrapped shared caches in T1/T2 (already applied; no behavior change when parallel is OFF or `max_workers<=1`).
@@ -111,3 +155,5 @@ See **[cache_safety.md](./cache_safety.md)** for API, wiring patterns, and tests
 - PR64 helper: [`parallel_helper.md`](./parallel_helper.md) — deterministic runner API and usage.
 - PR65 cache safety: [`cache_safety.md`](./cache_safety.md) — wrappers + deterministic merge policies.
 - Future wiring: see milestone notes in `docs/m9/` as they land (PR65+).
+- PR66 wiring: T1 across graphs (this page) — deterministic fan‑out & merge.
+- PR67 observability: minimal metrics + `bench_t1.py` (local).

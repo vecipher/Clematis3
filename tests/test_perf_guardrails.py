@@ -3,9 +3,14 @@ import os
 import random
 import time
 import pytest
+from clematis.engine.types import Config
 
 # Import T4 entrypoint; skip the entire module if unavailable
 _t4 = pytest.importorskip("clematis.engine.stages.t4")
+
+# Import T1 entrypoint; skip if unavailable
+_t1 = pytest.importorskip("clematis.engine.stages.t1")
+t1_propagate = _t1.t1_propagate
 
 t4_filter = _t4.t4_filter
 
@@ -18,6 +23,11 @@ class _Ctx:
     def __init__(self, cfg):
         self.config = cfg
         self.cfg = cfg
+        self._logbuf = []
+
+    def append_jsonl(self, rec):
+        # Minimal sink for T1 logging; keeps deterministic order
+        self._logbuf.append(rec)
 
 
 class _State:
@@ -76,6 +86,41 @@ def _gen_ops(N: int, seed: int = 1337):
         ops.append(_Op(target_id=tgt, delta=amt, op_idx=i, idx=i))
     plan = {"proposed_deltas": ops, "ops": ops, "deltas": ops}
     return plan
+
+
+# --------------------------
+# Tiny graph store for T1 gate tests
+# --------------------------
+try:
+    from clematis.graph.store import InMemoryGraphStore, Node, Edge
+except Exception:  # pragma: no cover — if the module layout differs, the entire module is already importorskip'ed
+    InMemoryGraphStore = None  # type: ignore
+    Node = None  # type: ignore
+    Edge = None  # type: ignore
+
+def _store_three():
+    store = InMemoryGraphStore()
+    for gid in ("A", "B", "C"):
+        store.ensure(gid)
+        store.upsert_nodes(gid, [
+            Node(id=f"{gid}:seed", label="seed"),
+            Node(id=f"{gid}:n1", label="n1"),
+        ])
+        store.upsert_edges(gid, [
+            Edge(id=f"{gid}:e1", src=f"{gid}:seed", dst=f"{gid}:n1", weight=1.0, rel="supports"),
+        ])
+    return store, ["A", "B", "C"]
+
+
+def _ensure_perf(cfg: Config) -> Config:
+    if not hasattr(cfg, "perf") or cfg.perf is None:
+        setattr(cfg, "perf", {})
+    elif not isinstance(cfg.perf, dict):
+        try:
+            cfg.perf = dict(cfg.perf)  # type: ignore[arg-type]
+        except Exception:
+            cfg.perf = {}
+    return cfg
 
 
 perf = pytest.mark.perf
@@ -141,3 +186,60 @@ def test_t4_relative_scaling_doubling_does_not_quadruple():
     ratio = dt2 / max(dt1, 1e-6)
     # Allow up to ~3x when doubling input (quite generous); flags egregious superlinear regressions.
     assert ratio < 3.0, f"Doubling N caused {ratio:.2f}x time; expected <3x"
+
+
+def test_t1_parallel_metrics_gated_off_by_default():
+    """Without perf.enabled/report_memory, extra parallel metrics must not appear."""
+    cfg = _ensure_perf(Config())
+    # Parallel gate ON but metrics gate OFF by default
+    cfg.perf.setdefault("parallel", {}).update({"enabled": True, "t1": True, "max_workers": 8})
+    store, ag = _store_three()
+    ctx = _Ctx(cfg)
+    res = t1_propagate(ctx, {"store": store, "active_graphs": ag}, "seed")
+    assert "parallel_workers" not in res.metrics
+    assert "task_count" not in res.metrics
+
+
+def test_t1_parallel_metrics_require_report_memory_and_gate_on():
+    """When both gates are ON, metrics should include workers/task_count with correct values."""
+    cfg = _ensure_perf(Config())
+    cfg.perf.setdefault("enabled", True)
+    cfg.perf.setdefault("metrics", {})["report_memory"] = True
+    cfg.perf.setdefault("parallel", {}).update({"enabled": True, "t1": True, "max_workers": 8})
+    store, ag = _store_three()
+    ctx = _Ctx(cfg)
+    res = t1_propagate(ctx, {"store": store, "active_graphs": ag}, "seed")
+    assert res.metrics.get("task_count") == 3
+    assert res.metrics.get("parallel_workers") == min(8, 3)
+
+
+@pytest.mark.skipif(os.environ.get("RUN_PERF") != "1", reason="perf bench is opt-in")
+def test_bench_t1_script_smoke(capsys):
+    """Smoke: bench prints JSON when requested; no assertions on perf."""
+    try:
+        mod = __import__("clematis.scripts.bench_t1", fromlist=["main"])  # prefer package import under clematis
+    except ModuleNotFoundError:
+        import importlib.util
+        import sys
+        from pathlib import Path
+        import clematis as _c
+        base = Path(_c.__file__).resolve().parents[0]  # clematis package directory
+        bench_path = base / "scripts" / "bench_t1.py"
+        if not bench_path.exists():
+            pytest.skip("bench_t1.py not found under clematis/scripts/")
+        spec = importlib.util.spec_from_file_location("clematis.scripts.bench_t1", str(bench_path))
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = mod
+        assert spec.loader is not None
+        spec.loader.exec_module(mod)
+    import sys
+    argv_bak = sys.argv[:]
+    try:
+        sys.argv = [
+            "bench_t1.py", "--graphs", "3", "--iters", "2", "--workers", "4", "--parallel", "--json",
+        ]
+        mod.main()
+        out = capsys.readouterr().out.strip()
+        assert out.startswith("{") and out.endswith("}")
+    finally:
+        sys.argv = argv_bak

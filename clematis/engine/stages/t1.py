@@ -7,7 +7,9 @@ from ..cache import LRUCache, stable_key, ThreadSafeCache, ThreadSafeBytesCache
 from ..util.ring import DedupeRing
 from ..util.lru_det import DeterministicLRUSet
 from ..util.lru_bytes import LRUBytes
+
 from ..util.parallel import run_parallel
+from ..util.metrics import metrics_gate_on, metrics_update_gated
 
 # module-level cache holder configured via Config.t1.cache
 _T1_CACHE = None
@@ -181,6 +183,10 @@ def t1_propagate(ctx, state, text: str) -> T1Result:
 
     store = state.get("store")
     active_graphs = state.get("active_graphs", [])
+    # PR67: compute task/worker counts (used only when metrics gate + parallel gate are ON)
+    task_count = len(active_graphs)
+    requested_workers = int(_cfg_get(ctx.cfg, ["perf", "parallel", "max_workers"], 0) or 0)
+    effective_workers = min(requested_workers, max(1, task_count))
     total_pops = 0
     total_iters = 0
     total_propagations = 0
@@ -511,5 +517,12 @@ def t1_propagate(ctx, state, text: str) -> T1Result:
                 "t1.cache_evictions": t1_cache_evicted,
                 "t1.cache_bytes": t1_cache_bytes,
             }
+        )
+    # PR67: emit minimal parallel metrics at the very end so they persist in all paths
+    if metrics_gate_on(ctx.cfg):
+        metrics_update_gated(
+            metrics,
+            {"parallel_workers": int(effective_workers), "task_count": int(task_count)},
+            ctx.cfg,
         )
     return T1Result(graph_deltas=all_deltas, metrics=metrics)
