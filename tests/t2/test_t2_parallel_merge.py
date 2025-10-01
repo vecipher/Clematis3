@@ -1,5 +1,3 @@
-
-
 import pytest
 from types import SimpleNamespace as NS
 
@@ -51,9 +49,11 @@ def test_gate_semantics_variants():
     idx = DummyIndex(has_shards=True)
     assert _t2_parallel_enabled(cfg, "inmemory", idx) is False
 
-    # enabled but backend not in-memory -> False
+    # enable flags for subsequent checks
     cfg = NS(perf=NS(parallel=NS(enabled=True, t2=True, max_workers=4)))
-    assert _t2_parallel_enabled(cfg, "lancedb", idx) is False
+
+    # enabled; backend lancedb is now supported (PR69) when shards>1 -> True
+    assert _t2_parallel_enabled(cfg, "lancedb", idx) is True
 
     # enabled, t2 true, >1 worker, in-memory with shard affordance -> True
     assert _t2_parallel_enabled(cfg, "inmemory", idx) is True

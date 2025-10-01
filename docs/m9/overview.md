@@ -205,3 +205,57 @@ See **[cache_safety.md](./cache_safety.md)** for API, wiring patterns, and tests
 - Future wiring: see milestone notes in `docs/m9/` as they land (PR65+).
 - PR66 wiring: T1 across graphs (this page) — deterministic fan‑out & merge.
 - PR67 observability: minimal metrics + `bench_t1.py` (local).
+
+---
+
+## PR69 — M9-07: LanceDB parallel T2 + deterministic T2 microbench (flag‑gated)
+
+**What changed.**
+- Extend PR68’s parallel T2 to the **LanceDB** backend using the same deterministic fan‑out/merge semantics. No score/policy changes.
+- Add a **deterministic T2 microbench** (`clematis/scripts/bench_t2.py`) for local inspection. Bench is read‑only and does not alter runtime behavior.
+
+**Gate & backend.** Parallel T2 activates only when **all** are true:
+- `perf.parallel.enabled: true`
+- `perf.parallel.t2: true`
+- `perf.parallel.max_workers > 1`
+- T2 backend is `"inmemory"` **or** `"lancedb"`
+- The index exposes `_iter_shards_for_t2(tier, suggested)` and yields **>1** shards/partitions
+
+**Deterministic partitioning (LanceDB).**
+- `LanceIndex._iter_shards_for_t2(...)` enumerates shards in a **stable** order.
+  - Prefer one shard per **quarter** when multiple quarters exist.
+  - Otherwise create **2–4** stable hash buckets by `id`.
+  - Enumeration never truncates by `suggested`; the caller controls concurrency.
+- Each shard is a read‑only view mirroring `search_tiered(...)` scoring and tie‑breaks.
+
+**Deterministic merge semantics (unchanged from PR68).**
+- **Tier‑ordered walk**: `exact_semantic` → `cluster_semantic` → `archive`.
+- **Stable sort within tier**: score (quantized) **desc**, then `id` **asc**.
+- **De‑duplicate** by `id` across shards; **global K‑clamp** after merge.
+
+**Metrics (gated).** When `perf.enabled=true` and `perf.metrics.report_memory=true`:
+- `t2.task_count` — number of shard tasks (both backends)
+- `t2.parallel_workers` — effective workers used (both backends)
+- `t2.partition_count` — **Lance‑only**, number of partitions observed when parallel path is active
+
+**Microbench.** Deterministic, read‑only T2 bench:
+```bash
+python -m clematis.scripts.bench_t2 --iters 3 --workers 4 --backend inmemory --parallel --json
+python -m clematis.scripts.bench_t2 --iters 3 --workers 4 --backend lancedb --parallel --json  # falls back if extras missing
+```
+Output JSON always includes:
+`queries, shards, workers, effective_workers, backend, parallel, elapsed_ms, t2_task_count, t2_parallel_workers, t2_partition_count`.
+Backfilled `t2_*` fields are provided even if the runtime metrics gate is off.
+
+**Invariants.**
+- **OFF / ≤1‑shard** path: outputs/logs remain **byte‑identical** to PR68 baseline.
+- **ON** (in‑memory or Lance): result **set and order** identical to sequential under fixed seed/time.
+
+**CI/tests.**
+- Default matrix does **not** require Lance extras; import/gate hygiene tests run without them.
+- Optional `extras‑lancedb` job may install `.[lancedb]` and run equivalence tests (non‑required).
+
+**Troubleshooting.**
+- Not seeing parallelism? Check all five gate conditions; most misses are single‑shard datasets or `max_workers<=1`.
+- Expecting cross‑tier interleaving by score? By design, results are **tier‑ordered** to match sequential.
+- Seeing identical behavior with flags on? That’s expected when shard count ≤ 1 or flags don’t all hold.

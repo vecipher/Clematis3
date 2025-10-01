@@ -1,7 +1,21 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
+
 ## [Unreleased]
+
+
+### Added (PR69 — M9-07: LanceDB parallel T2 + deterministic T2 microbench; flag‑gated, defaults OFF)
+- **Stage (T2):** Gate now allows `inmemory` **and** `lancedb` backends when `perf.parallel.enabled=true`, `perf.parallel.t2=true`, and `perf.parallel.max_workers>1`, and when the index exposes `_iter_shards_for_t2(...)` yielding >1 shards. Parallel fan‑out uses the existing deterministic merge (tier‑ordered; sort by score desc (quantized) then `id` asc; de‑dupe; global K‑clamp). Disabled or single‑shard paths remain sequential.
+- **Lance index:** `LanceIndex._iter_shards_for_t2(tier, suggested)` deterministically enumerates logical shards — prefer per‑quarter shards when multiple quarters exist; otherwise 2–4 stable hash buckets by `id`. New `_LancePartition` provides a read‑only shard view that mirrors `search_tiered(...)` scoring and tie‑breaks.
+- **Metrics (gated):** When `perf.enabled && perf.metrics.report_memory`, T2 now emits `t2.task_count` and `t2.parallel_workers` (both backends) and **Lance‑only** `t2.partition_count`. No metrics are emitted when the gate is off.
+- **Bench:** `clematis/scripts/bench_t2.py` — deterministic T2 microbench with `--iters/--workers/--backend {inmemory,lancedb}/--parallel/--json`. JSON always includes `queries, shards, workers, effective_workers, backend, parallel, elapsed_ms` and backfilled `t2_task_count, t2_parallel_workers, t2_partition_count` even when the runtime metrics gate is off.
+- **Tests:** Added `tests/t2/test_t2_lance_gate_import.py` (no‑extras import hygiene + gate truth table) and `tests/perf/test_bench_t2_smoke.py` (bench smoke & CLI JSON). Updated `tests/t2/test_t2_parallel_merge.py` to reflect PR69 gate semantics for `lancedb`.
+- **Docs:** `docs/m9/overview.md` notes PR69 enablement/invariants; README adds bench usage and gating snippet.
+
+### Invariants (PR69)
+- **Disabled/≤1‑shard path:** outputs and logs are **byte‑identical** to PR68 baseline (identity preserved).
+- **Enabled path (inmemory/Lance):** result **set and order** identical to sequential under fixed seed/time (tier‑ordered; score desc then `id` asc; de‑dupe; global K‑clamp).
 
 
 ### Changed
