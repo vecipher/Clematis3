@@ -146,7 +146,12 @@ def _estimate_result_cost(retrieved, metrics):
 
 # PR68: Parallel T2 helpers
 def _t2_parallel_enabled(cfg_obj, backend: str, index) -> bool:
-    """Gate for PR68 parallel T2. Only enable for in-memory backend with shard support."""
+    """Gate for PR68/PR69 parallel T2.
+    Enable for in-memory **or** LanceDB backends when:
+      • perf.parallel.enabled && perf.parallel.t2 && max_workers>1
+      • index exposes `_iter_shards_for_t2`
+      • iterator yields >1 shard (deterministically checked)
+    """
     try:
         if not _cfg_get(cfg_obj, ["perf", "parallel", "enabled"], False):
             return False
@@ -155,9 +160,21 @@ def _t2_parallel_enabled(cfg_obj, backend: str, index) -> bool:
         mw = int(_cfg_get(cfg_obj, ["perf", "parallel", "max_workers"], 1) or 1)
         if mw <= 1:
             return False
-        if str(backend or "inmemory").lower() != "inmemory":
+        backend_l = str(backend or "inmemory").lower()
+        if backend_l not in ("inmemory", "lancedb"):
             return False
-        return hasattr(index, "_iter_shards_for_t2")
+        if not hasattr(index, "_iter_shards_for_t2"):
+            return False
+        # Probe deterministically whether we have more than one shard/partition
+        try:
+            try:
+                it = index._iter_shards_for_t2("exact_semantic", suggested=mw)  # type: ignore[attr-defined]
+            except TypeError:
+                it = index._iter_shards_for_t2("exact_semantic")  # type: ignore[attr-defined]
+            shards = list(it)
+            return len(shards) > 1
+        except Exception:
+            return False
     except Exception:
         return False
 
@@ -526,6 +543,7 @@ def t2_semantic(ctx, state, text: str, t1) -> T2Result:
     # PR68: counters for optional parallel T2
     t2_task_count = 0
     t2_parallel_workers = 0
+    t2_partition_count = 0
     # Execute tiers with dedupe
     retrieved = []  # List[EpisodeRef]
     seen_ids = set()
@@ -587,6 +605,9 @@ def t2_semantic(ctx, state, text: str, t1) -> T2Result:
             if len(shards) > 1:
                 t2_task_count = len(shards)
                 t2_parallel_workers = min(len(shards), suggested)
+                # PR69: expose partition count for LanceDB path (gated metrics only)
+                if str(backend_selected).lower() == "lancedb":
+                    t2_partition_count = len(shards)
                 def _task(sh):
                     return _collect_shard_hits(
                         sh, tiers, owner_query, q_vec, k_retrieval, now_str,
@@ -1054,6 +1075,11 @@ def t2_semantic(ctx, state, text: str, t1) -> T2Result:
             if int(t2_task_count or 0) > 0:
                 metrics["t2.task_count"] = int(t2_task_count)
                 metrics["t2.parallel_workers"] = int(t2_parallel_workers or 0)
+        except Exception:
+            pass
+        try:
+            if int(t2_partition_count or 0) > 0:
+                metrics["t2.partition_count"] = int(t2_partition_count)
         except Exception:
             pass
     result = T2Result(
