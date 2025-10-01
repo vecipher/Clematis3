@@ -119,7 +119,7 @@ def test_on_path_independent_batch_flushes_logs_and_applies(patched_run_turn, pa
 
     apply_lines = [json.loads(x) for x in apply.read_text(encoding="utf-8").strip().splitlines()]
     assert len(apply_lines) == 2
-    assert [l["agent"] for l in apply_lines] == ["A", "B"]
+    assert [item["agent"] for item in apply_lines] == ["A", "B"]
 
 
 def test_on_path_overlapping_graphs_selects_subset(patched_run_turn):
