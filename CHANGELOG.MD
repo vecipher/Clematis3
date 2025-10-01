@@ -2,7 +2,24 @@
 All notable changes to this project will be documented in this file.
 
 
+
 ## [Unreleased]
+
+
+### Added (PR70 — M9-08: Agent-level parallel driver; flag‑gated, defaults OFF)
+- **Orchestrator/Driver:** Optional agent-level **compute→commit** path. Compute runs T1→T4 per agent on a **read‑only snapshot** (no Apply); stage logs are **captured** via the ctx‑aware logger (`io.log.append_jsonl` + `engine/util/logmux.py`). Commit phase sorts buffers by `(turn_id, slice_idx)` and then **flushes** the buffered logs and **applies** deltas sequentially; outputs/logs remain deterministic.
+- **Gate:** Activates only when `perf.parallel.enabled=true`, `perf.parallel.agents=true`, and `perf.parallel.max_workers>1`.
+- **Independence:** Batches are selected greedily with **pairwise disjoint** graph sets; overlapping agents fall back to sequential (identity preserved).
+- **State snapshot:** `engine/stages/state_clone.py` provides shallow, **read‑only** snapshots (frozen containers; identity preserved for heavy objects).
+- **Logging:** `io/log.append_jsonl` is now **ctx‑aware**; when a `LogMux` is active, lines are buffered and flushed later in deterministic order; otherwise write‑through behavior is unchanged.
+- **Helpers:** Orchestrator helpers `_select_independent_batch`, `_run_turn_compute`, `_run_agents_parallel_batch`; centralized `engine/util/logmux.py` (buffer/flush; `ContextVar`).
+- **Tests:** `tests/test_config_validate_parallel_agents.py` (validator warnings), `tests/engine/test_logmux_capture.py` (buffer/flush), `tests/integration/test_agents_parallel_driver.py` (gate‑off identity; disjoint/overlap behaviors).
+- **Docs:** `docs/m9/overview.md` adds a PR70 section; README updated with status and enablement snippet.
+
+### Invariants (PR70)
+- **Disabled path:** with gate OFF or `max_workers<=1`, behavior/logs are **byte‑identical** to PR69 baseline.
+- **Enabled (eligible batches):** with disjoint agents, outputs/logs are **identical to sequential**; logs emitted in `(turn_id, slice_idx)` order.
+- **Scheduler fairness/policy:** unchanged.
 
 
 ### Added (PR69 — M9-07: LanceDB parallel T2 + deterministic T2 microbench; flag‑gated, defaults OFF)
@@ -20,6 +37,8 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 - Prerelease 0.8.0a5 (python_requires <3.14; Homebrew formula now on python@3.13).
+- **Engine (orchestrator):** `run_turn` supports a **dry‑run** mode (`_dry_run_until_t4`) used by the PR70 compute phase; GEL observe is skipped during dry‑run; default sequential path is unchanged.
+- **IO (logs):** `clematis/io/log.append_jsonl` is **context‑aware**; when a `LogMux` is active it buffers lines for deterministic flush; otherwise it writes through exactly as before.
 
 
 ### Added (PR63 — M9: deterministic parallelism config schema; defaults OFF)

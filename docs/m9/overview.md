@@ -259,3 +259,59 @@ Backfilled `t2_*` fields are provided even if the runtime metrics gate is off.
 - Not seeing parallelism? Check all five gate conditions; most misses are single‑shard datasets or `max_workers<=1`.
 - Expecting cross‑tier interleaving by score? By design, results are **tier‑ordered** to match sequential.
 - Seeing identical behavior with flags on? That’s expected when shard count ≤ 1 or flags don’t all hold.
+
+---
+
+## PR70 — M9-08: Agent-level parallel driver (flag‑gated)
+
+**What changed.**
+- Allow multiple agents’ turns to **compute concurrently** while keeping writes/logs **deterministic and identical** to sequential.
+- No changes to scheduler fairness/policy; only the execution model is extended.
+
+**Gate (all must be true).**
+- `perf.parallel.enabled: true`
+- `perf.parallel.agents: true`
+- `perf.parallel.max_workers > 1`
+
+**Batch eligibility (independence).**
+- A batch consists of agents whose graph sets are **pairwise disjoint**.
+- Graph sets are inferred from state (e.g., `state["graphs_by_agent"][agent_id]` or `state["agents"][agent_id]["graphs"]`).
+- If agents overlap, the driver falls back to sequential for those turns; identity is preserved.
+
+**Execution model (two‑phase, deterministic).**
+1) **Compute (parallel):**
+   - Run T1→T4 per agent on a **read‑only state snapshot**.
+   - **Do not apply** changes yet; stages emit their usual logs, which are **captured** via a LogMux instead of being written immediately.
+   - Artifacts captured per turn: `approved_deltas`, `dialogue`, `graphs_touched`, and buffered `(stream, obj)` log pairs.
+2) **Commit (sequential):**
+   - Sort buffers by `(turn_id, slice_idx)` and then:
+     - **Flush logs** via the centralized writer (exact order as sequential).
+     - **Apply deltas** to the real state in that same order.
+
+**Logging & determinism.**
+- `clematis/io/log.append_jsonl` is **ctx‑aware**; when a LogMux is active, lines are buffered and later flushed—ensuring JSONL **line order** matches the sequential run.
+- Because commit order is fixed, outputs and logs are **byte‑identical** to sequential for eligible batches.
+
+**Config snippet (enable agent driver):**
+```yaml
+perf:
+  parallel:
+    enabled: true
+    max_workers: 4
+    agents: true
+```
+
+**Metrics (optional, gated).**
+- When `perf.enabled=true` and `perf.metrics.report_memory=true`, drivers may emit `driver.agents_parallel_batch_size` to observe effective batch sizes. No schema changes when the gate is off.
+
+**Invariants.**
+- **OFF path:** outputs/logs remain **byte‑identical** to PR69 baseline.
+- **ON path (disjoint agents):** outputs/logs remain **identical** to sequential; commit order is `(turn_id, slice_idx)`.
+
+**CI/tests.**
+- Functional tests only (no perf thresholds).
+- Cases covered: gate‑off identity; gate‑on with **disjoint** agents (parallel compute + ordered commit); **overlap** fallback.
+
+**Troubleshooting.**
+- Not seeing parallelism? Check the three gate flags and ensure agents’ graph sets are disjoint; also verify `max_workers > 1`.
+- Missing or re‑ordered logs? Ensure the ctx‑aware logger is in use; commit sorts and flushes by `(turn_id, slice_idx)`.
