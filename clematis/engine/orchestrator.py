@@ -19,11 +19,13 @@ from .gel import (
     promote_clusters as gel_promote_clusters,
     apply_promotion as gel_apply_promotion,
 )
-from ..io.log import append_jsonl
+from ..io.log import append_jsonl, _append_jsonl_unbuffered
 
 # --- PR70: parallel driver helpers & readonly snapshot import ---
 from .stages.state_clone import readonly_snapshot
-from .util.logmux import LogMux, set_mux, reset_mux, flush
+from .util.logmux import LogMux, set_mux, reset_mux
+
+from .util.io_logging import enable_staging, disable_staging, default_key_for
 
 
 from .cache import CacheManager
@@ -112,6 +114,9 @@ def _run_agents_parallel_batch(ctx: TurnCtx, state: dict, tasks: list[tuple[str,
             out.append(Orchestrator().run_turn(subctx, state, text))
         return out
 
+    # PR71: centralize log writes via staging for deterministic ordering
+    stager = enable_staging()
+
     # Select independent batch in input order
     max_workers = int(((_get_cfg(ctx).get("perf") or {}).get("parallel") or {}).get("max_workers", 2))
     agent_ids = [aid for aid, _ in tasks]
@@ -126,29 +131,54 @@ def _run_agents_parallel_batch(ctx: TurnCtx, state: dict, tasks: list[tuple[str,
         buf = _run_turn_compute(ctx, base, aid, text)
         buffers.append(buf)
 
-    # Commit phase: sort and flush
+    # Stage all compute-phase logs first (no disk writes yet)
+    for buf in buffers:
+        turn_id = buf["turn_id"]
+        slice_idx = int(buf.get("slice_idx", 0) or 0)
+        for file_path, payload in buf["logs"]:
+            key = default_key_for(file_path=file_path, turn_id=turn_id, slice_idx=slice_idx)
+            try:
+                stager.stage(file_path, key, payload)
+            except RuntimeError as e:
+                if str(e) == "LOG_STAGING_BACKPRESSURE":
+                    # Drain and flush, then retry once
+                    for rec in stager.drain_sorted():
+                        _append_jsonl_unbuffered(rec.file_path, rec.payload)
+                    stager.stage(file_path, key, payload)
+                else:
+                    raise
+
+    # Apply deltas sequentially in deterministic order and stage apply logs
     results: list[TurnResult] = []
     for buf in _sort_turn_buffers(buffers):
-        flush(buf["logs"])  # deterministic emission
-        # Minimal t4 object for apply; contains only approved_deltas
         t4_like = _SNS(approved_deltas=list(buf["deltas"]), rejected_ops=[], reasons=["PR70_COMMIT"], metrics={"counts": {"approved": len(buf["deltas"])}})
         apply = apply_changes(ctx, state, t4_like)
-        # Write apply log (mirrors run_turn shape). We do not emit GEL logs here in PR70 minimal path.
-        append_jsonl(
-            "apply.jsonl",
-            {
-                "turn": buf["turn_id"],
-                "agent": buf["agent_id"],
-                "applied": apply.applied,
-                "clamps": apply.clamps,
-                "version_etag": apply.version_etag,
-                "snapshot": apply.snapshot_path,
-                "cache_invalidations": int((getattr(apply, "metrics", {}) or {}).get("cache_invalidations", 0)),
-                "ms": 0.0,
-            },
-        )
-        # Final TurnResult per agent; tests can inspect the dialogue
+        apply_payload = {
+            "turn": buf["turn_id"],
+            "agent": buf["agent_id"],
+            "applied": apply.applied,
+            "clamps": apply.clamps,
+            "version_etag": apply.version_etag,
+            "snapshot": apply.snapshot_path,
+            "cache_invalidations": int((getattr(apply, "metrics", {}) or {}).get("cache_invalidations", 0)),
+            "ms": 0.0,
+        }
+        key = default_key_for(file_path="apply.jsonl", turn_id=buf["turn_id"], slice_idx=int(buf.get("slice_idx", 0) or 0))
+        try:
+            stager.stage("apply.jsonl", key, apply_payload)
+        except RuntimeError as e:
+            if str(e) == "LOG_STAGING_BACKPRESSURE":
+                for rec in stager.drain_sorted():
+                    _append_jsonl_unbuffered(rec.file_path, rec.payload)
+                stager.stage("apply.jsonl", key, apply_payload)
+            else:
+                raise
         results.append(TurnResult(line=buf["dialogue"], events=[]))
+
+    # Final drain and ordered writes
+    for rec in stager.drain_sorted():
+        _append_jsonl_unbuffered(rec.file_path, rec.payload)
+    disable_staging()
 
     return results
 

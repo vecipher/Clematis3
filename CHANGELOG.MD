@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added (PR71 — M9-09: Log staging & ordered writes; flag-gated, defaults OFF)
+- **Central staging layer:** `engine/util/io_logging.py` buffers log records with a stable composite key `(turn_id, stage_ord, slice_idx, seq)`; canonical stream order via `stage_ord`: `t1.jsonl → t2.jsonl → t3_plan.jsonl → t3_dialogue.jsonl → t4.jsonl → apply.jsonl → health.jsonl → turn.jsonl → scheduler.jsonl`.
+- **Orchestrator (parallel path):** `_run_agents_parallel_batch` stages **all** compute-phase logs and commit-phase `apply.jsonl` entries, then performs a single **ordered flush**.
+- **Unbuffered writer:** `io/log._append_jsonl_unbuffered(...)` mirrors `append_jsonl(...)` serialization to preserve byte parity while bypassing LogMux during staged flush.
+- **Tests:** `tests/engine/test_io_logging_staging.py` (order & back-pressure), `tests/integration/test_agents_parallel_driver.py` (A→B ordering for `t1.jsonl`, `t4.jsonl`, `apply.jsonl` with fixed `turn`), `tests/test_golden_path.py` (byte-for-byte equality of `turn.jsonl` & `scheduler.jsonl` vs sequential baseline).
+- **Docs:** `docs/m9/overview.md` adds a PR71 section (design, gate, invariants, troubleshooting).
+
+### Invariants (PR71)
+- **Disabled path:** with gate OFF or `max_workers<=1`, behavior/logs are **byte-identical** to PR70.
+- **Enabled (disjoint agents):** with agent parallelism ON, final **content and line order** on disk are identical to sequential (ordered flush by composite key).
 
 ### Added (PR70 — M9-08: Agent-level parallel driver; flag‑gated, defaults OFF)
 - **Orchestrator/Driver:** Optional agent-level **compute→commit** path. Compute runs T1→T4 per agent on a **read‑only snapshot** (no Apply); stage logs are **captured** via the ctx‑aware logger (`io.log.append_jsonl` + `engine/util/logmux.py`). Commit phase sorts buffers by `(turn_id, slice_idx)` and then **flushes** the buffered logs and **applies** deltas sequentially; outputs/logs remain deterministic.
