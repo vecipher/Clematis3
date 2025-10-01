@@ -245,3 +245,10 @@
 {"turn": "demo-1", "agent": "AgentA", "tokens": 6, "truncated": false, "style_prefix_used": false, "snippet_count": 0, "ms": 0.024, "backend": "rulebased", "now": "2025-10-01T03:06:40.863220+00:00"}
 {"turn": "demo-1", "agent": "AgentA", "tokens": 6, "truncated": false, "style_prefix_used": false, "snippet_count": 0, "ms": 0.018, "backend": "rulebased", "now": "2025-10-01T03:06:40.867361+00:00"}
 {"turn": "demo-1", "agent": "AgentA", "tokens": 6, "truncated": false, "style_prefix_used": false, "snippet_count": 0, "ms": 0.026, "backend": "rulebased", "now": "2025-10-01T03:06:42.517834+00:00"}
+{"turn": "demo-1", "agent": "AgentA", "tokens": 6, "truncated": false, "style_prefix_used": false, "snippet_count": 0, "ms": 0.024, "backend": "rulebased", "now": "2025-10-01T11:03:20.276295+00:00"}
+{"turn": "demo-1", "agent": "AgentA", "tokens": 6, "truncated": false, "style_prefix_used": false, "snippet_count": 0, "ms": 0.019, "backend": "rulebased", "now": "2025-10-01T11:03:20.279166+00:00"}
+{"turn": "demo-1", "agent": "AgentA", "tokens": 6, "truncated": false, "style_prefix_used": false, "snippet_count": 0, "ms": 0.028, "backend": "rulebased", "now": "2025-10-01T11:03:21.923957+00:00"}
+{"turn": "demo-1", "agent": "AgentA", "tokens": 6, "truncated": false, "style_prefix_used": false, "snippet_count": 0, "ms": 0.027, "backend": "rulebased", "now": "2025-10-01T11:11:32.409242+00:00"}
+{"turn": "demo-1", "agent": "AgentA", "tokens": 6, "truncated": false, "style_prefix_used": false, "snippet_count": 0, "ms": 0.029, "backend": "rulebased", "now": "2025-10-01T11:11:37.255912+00:00"}
+{"turn": "demo-1", "agent": "AgentA", "tokens": 6, "truncated": false, "style_prefix_used": false, "snippet_count": 0, "ms": 0.024, "backend": "rulebased", "now": "2025-10-01T11:11:37.259311+00:00"}
+{"turn": "demo-1", "agent": "AgentA", "tokens": 6, "truncated": false, "style_prefix_used": false, "snippet_count": 0, "ms": 0.026, "backend": "rulebased", "now": "2025-10-01T11:11:38.975698+00:00"}

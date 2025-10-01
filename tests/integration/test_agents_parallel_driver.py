@@ -1,5 +1,3 @@
-
-
 import json
 from types import SimpleNamespace as SNS
 from pathlib import Path
@@ -110,16 +108,21 @@ def test_on_path_independent_batch_flushes_logs_and_applies(patched_run_turn, pa
     t1 = Path(logs_dir) / "t1.jsonl"
     t4 = Path(logs_dir) / "t4.jsonl"
     apply = Path(logs_dir) / "apply.jsonl"
+    turn_id = 123  # from ctx above
 
-    assert t1.exists() and t4.exists() and apply.exists()
     t1_lines = [json.loads(x) for x in t1.read_text(encoding="utf-8").strip().splitlines()]
-    # First two t1 entries should correspond to A then B (from compute flush order)
-    assert t1_lines[0]["agent"] == "A"
-    assert t1_lines[1]["agent"] == "B"
+    # Under PR71 staging, ordering is deterministic: A then B for the same turn
+    assert [entry["agent"] for entry in t1_lines[:2]] == ["A", "B"]
+    assert all(entry["turn"] == turn_id for entry in t1_lines[:2])
+
+    t4_lines = [json.loads(x) for x in t4.read_text(encoding="utf-8").strip().splitlines()]
+    assert [entry["agent"] for entry in t4_lines[:2]] == ["A", "B"]
+    assert all(entry["turn"] == turn_id for entry in t4_lines[:2])
 
     apply_lines = [json.loads(x) for x in apply.read_text(encoding="utf-8").strip().splitlines()]
     assert len(apply_lines) == 2
-    assert [item["agent"] for item in apply_lines] == ["A", "B"]
+    assert [entry["agent"] for entry in apply_lines] == ["A", "B"]
+    assert all(entry["turn"] == turn_id for entry in apply_lines)
 
 
 def test_on_path_overlapping_graphs_selects_subset(patched_run_turn):

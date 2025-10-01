@@ -3,6 +3,14 @@ import os
 from . import paths
 
 
+def _append_jsonl_unbuffered(filename: str, record: dict) -> None:
+    base = paths.logs_dir()
+    os.makedirs(base, exist_ok=True)
+    path = os.path.join(base, filename)
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+
 def append_jsonl(filename: str, record: dict) -> None:
     """Append a JSON record to a log file, or buffer it if a LogMux is active.
 
@@ -10,6 +18,9 @@ def append_jsonl(filename: str, record: dict) -> None:
     capture (stream, obj) pairs instead of writing immediately. The commit phase
     will flush them in deterministic order. When no mux is active, behavior is
     unchanged (write-through).
+
+    PR71: When the parallel driver's staging is active, the orchestrator will bypass
+    the mux at flush-time by calling _append_jsonl_unbuffered directly.
     """
     # Try to detect an active LogMux without introducing a hard import dependency
     # (avoid circular import at module load; import only inside the function).
@@ -31,8 +42,4 @@ def append_jsonl(filename: str, record: dict) -> None:
             # Fall back to write-through on any buffering error
             pass
 
-    base = paths.logs_dir()
-    os.makedirs(base, exist_ok=True)
-    path = os.path.join(base, filename)
-    with open(path, "a", encoding="utf-8") as f:
-        f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    _append_jsonl_unbuffered(filename, record)

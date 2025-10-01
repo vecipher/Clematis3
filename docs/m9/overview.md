@@ -262,6 +262,7 @@ Backfilled `t2_*` fields are provided even if the runtime metrics gate is off.
 
 ---
 
+
 ## PR70 — M9-08: Agent-level parallel driver (flag‑gated)
 
 **What changed.**
@@ -315,3 +316,34 @@ perf:
 **Troubleshooting.**
 - Not seeing parallelism? Check the three gate flags and ensure agents’ graph sets are disjoint; also verify `max_workers > 1`.
 - Missing or re‑ordered logs? Ensure the ctx‑aware logger is in use; commit sorts and flushes by `(turn_id, slice_idx)`.
+
+
+## PR71 — M9-09: Log staging & ordered writes (flag‑gated)
+
+**Goal.** Guarantee deterministic on-disk JSONL order under parallel execution; keep the disabled path byte-identical.
+
+### What changed
+- **Central staging layer** (`clematis/engine/util/io_logging.py`):
+  - Buffers log records with a stable composite key `(turn_id, stage_ord, slice_idx, seq)`.
+  - Canonical stream order via `stage_ord`:
+    `t1.jsonl` → `t2.jsonl` → `t3_plan.jsonl` → `t3_dialogue.jsonl` → `t4.jsonl` → `apply.jsonl` → `health.jsonl` → `turn.jsonl` → `scheduler.jsonl`.
+  - Bounded memory (`byte_limit`, default 32 MB). On limit, raise `LOG_STAGING_BACKPRESSURE` to trigger a deterministic drain→flush→retry cycle.
+- **Orchestrator (parallel path)** now stages *all* compute-phase logs and the commit-phase `apply.jsonl` records, then performs a single ordered flush.
+- **Unbuffered writer** (`clematis/io/log.py::_append_jsonl_unbuffered`) mirrors the exact JSON serialization of `append_jsonl(...)` to preserve byte parity.
+
+### Gate & invariants
+- **Enabled only** when all are true:
+  - `perf.parallel.enabled: true`
+  - `perf.parallel.agents: true`
+  - `perf.parallel.max_workers > 1`
+- **Disabled path:** byte-for-byte identical to PR70.
+- **Enabled path (disjoint agents):** log **content and line order** are identical to a sequential run.
+
+### Tests
+- `tests/engine/test_io_logging_staging.py` — unit tests for ordering and back-pressure.
+- `tests/integration/test_agents_parallel_driver.py` — asserts deterministic ordering for `t1.jsonl`, `t4.jsonl`, `apply.jsonl` (agents `A, B`; fixed `turn`).
+- `tests/test_golden_path.py` — golden check: `turn.jsonl` and `scheduler.jsonl` are byte-for-byte equal vs sequential baseline.
+
+### Troubleshooting
+- **Mismatch vs sequential?** Ensure `_append_jsonl_unbuffered(...)` uses the **same** JSON formatting as `append_jsonl(...)` (e.g., `ensure_ascii=False`, separators).
+- **No ordering effect?** Confirm the three gate conditions above; staging is only active in the agent-parallel path.
