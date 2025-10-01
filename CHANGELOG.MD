@@ -6,6 +6,17 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added (PR73 — M9-11: Parallel smoke in CI; opt-in, non-required)
+- **Workflow:** `.github/workflows/parallel-smoke.yml` — opt-in via `RUN_PERF=1` (or `workflow_dispatch` input); defaults **OFF** (`RUN_PERF=0`). Runs a tiny end-to-end execution with `perf.parallel.enabled=true` (agents/T1/T2 ON, `max_workers=2`) and prints a success line. **No perf thresholds.**
+- **Example config:** `examples/perf/parallel_on.yaml` — enables parallel gates with quiet metrics (no extra emissions).
+- **Docs:** README and `docs/m9/overview.md` note that the job is non-required and how to run it locally / in CI.
+
+### CI (PR73)
+- New, **non-required** job `parallel-smoke` (Linux, Python 3.12). Skips cleanly when `RUN_PERF=0`; contributors can opt-in per-run without affecting branch protection.
+
+### Invariants (PR73)
+- No behavior or threshold changes to required CI jobs; runtime behavior and disabled-path identity remain unchanged.
+
 ### Added (PR72 — M9-10: Identity & race test suite)
 - **Identity (seq vs par):** Proves byte-for-byte equality for `t1.jsonl`, `t2.jsonl`, `t4.jsonl`, `apply.jsonl`, `turn.jsonl`, and `scheduler.jsonl` between sequential (disabled path) and parallel (enabled path; `max_workers=2`) runs.
 - **Race regression (contention):** Deterministically perturbs pool scheduling (reverses job order) while keeping inputs fixed; artifacts remain identical.

@@ -1,0 +1,65 @@
+name: parallel-smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_perf:
+        description: "Set to 1 to run the perf smoke"
+        required: false
+        default: "0"
+  push:
+    paths:
+      - 'clematis/**'
+      - 'examples/perf/parallel_on.yaml'
+      - '.github/workflows/parallel_smoke.yml'
+  pull_request:
+    paths:
+      - 'clematis/**'
+      - 'examples/perf/parallel_on.yaml'
+      - '.github/workflows/parallel_smoke.yml'
+
+concurrency:
+  group: parallel-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  parallel-smoke:
+    name: Parallel smoke (opt-in)
+    runs-on: ubuntu-latest
+    env:
+      # Default OFF; contributors can flip via workflow_dispatch or env override.
+      RUN_PERF: ${{ github.event.inputs.run_perf || '0' }}
+      CLEMATIS_CONFIG: examples/perf/parallel_on.yaml
+      SOURCE_DATE_EPOCH: 0
+      PYTHONHASHSEED: 0
+      CLEMATIS_NETWORK_BAN: 1
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install
+        run: |
+          python -m pip install -U pip
+          python -m pip install -e .
+          python -m pip install -U pytest
+
+      - name: Skip (RUN_PERF=0)
+        if: env.RUN_PERF != '1'
+        run: |
+          echo "RUN_PERF=${RUN_PERF}; skipping parallel smoke (opt-in)."
+          exit 0
+
+      - name: Parallel smoke (agents/T1/T2 ON)
+        if: env.RUN_PERF == '1'
+        run: |
+          python3 scripts/run_demo.py \
+            --config examples/perf/parallel_on.yaml \
+            --agents AgentA,AgentB --steps 4
+          echo "parallel smoke OK"

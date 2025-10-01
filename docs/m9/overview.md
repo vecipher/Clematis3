@@ -383,3 +383,28 @@ perf:
 ### Troubleshooting
 - **Snapshot bytes differ?** Ensure your environment fixes the time source (`SOURCE_DATE_EPOCH=0`) or that snapshot writers are time‑independent for the tests. If snapshots are gated off in your environment, the suite compares logs only.
 - **Ordering drift in logs?** Verify PR71’s staging is active (parallel gate conditions hold) and that `_append_jsonl_unbuffered(...)` uses the same JSON serialization as `append_jsonl(...)`.
+
+## PR73 — M9-11: Parallel smoke in CI (opt-in perf)
+
+**Goal.** Keep performance checks **out of required CI** while providing a quick smoke that exercises the parallel path with gates ON. No perf thresholds; wiring sanity only.
+
+### What changed
+- **New workflow:** `.github/workflows/parallel-smoke.yml`
+  - Defaults **OFF** via `RUN_PERF=0`; contributors can opt-in by setting `RUN_PERF=1` (or via the `workflow_dispatch` input).
+  - Runs a tiny end-to-end execution with `perf.parallel.enabled=true` (agents/T1/T2 ON, `max_workers=2`).
+  - Uses a minimal example config: `examples/perf/parallel_on.yaml`.
+  - Prints a simple success message; **no thresholds**, **no required status**.
+
+### Example config (referenced by the workflow)
+```yaml
+# examples/perf/parallel_on.yaml
+perf:
+  enabled: true
+  metrics:
+    report_memory: false
+  parallel:
+    enabled: true
+    max_workers: 2
+    t1: true
+    t2: true
+    agents: true
