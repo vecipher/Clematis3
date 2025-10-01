@@ -77,3 +77,19 @@ python3 scripts/mem_compact.py --help
 - **No metrics when gates are off**: By design, `metrics.*` (including `tier_sequence`) only appear when `perf.enabled=true` **and** `perf.metrics.report_memory=true` (Gate B).
 - **Reader identity**: The T2 reader is hard‑gated; in disabled mode, `embed_store` is not engaged and the legacy tiers apply.
 - **Snapshots**: If delta mode is enabled but the baseline is missing, the reader falls back to a full snapshot and logs a deterministic warning when metrics gating allows it.
+
+---
+
+## Status
+**PR70 (agent‑level parallel driver)**, **PR71 (log staging & ordered writes)**, **PR72 (identity & race test suite)**, and **PR73 (parallel smoke CI; opt‑in)** have landed.
+
+---
+
+### M9: deterministic parallelism (flag‑gated)
+The new M9 parallel driver enables deterministic parallelism for agents (see `.github/workflows/identity_parallel.yml`).
+
+As of **PR73**, a non‑required CI smoke runs with parallelism enabled. It is **opt‑in** (default OFF) via `RUN_PERF=1` or the `workflow_dispatch` input. See `.github/workflows/parallel-smoke.yml`. To run the same smoke locally:
+```
+python3 scripts/run_demo.py --config examples/perf/parallel_on.yaml --agents AgentA,AgentB --steps 4
+```
+(No perf thresholds; this is a wiring sanity check only.)
