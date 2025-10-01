@@ -140,6 +140,30 @@ class LanceIndex:
         # Let Lance infer schema from the first row (handles dicts and lists well)
         self._episodes = self._db.create_table(self._table_name, data=[first_row])
 
+    def _read_all_rows(self) -> List[Dict[str, Any]]:
+        """Read and return all rows from the episodes table as a list of dicts.
+        This centralizes table-to-rows conversion so partitions can reuse it.
+        Returns [] if the episodes table is absent.
+        """
+        if self._episodes is None:
+            return []
+        # Try Arrow first for determinism and speed; fall back progressively.
+        try:
+            arrow = self._episodes.to_arrow()  # type: ignore[union-attr]
+            return arrow.to_pylist()
+        except Exception:
+            try:
+                df = self._episodes.to_pandas()  # type: ignore[union-attr]
+                return df.to_dict(orient="records")
+            except Exception:
+                rows: List[Dict[str, Any]] = []
+                try:
+                    for batch in self._episodes.to_batches():  # type: ignore[union-attr]
+                        rows.extend(batch.to_pylist())
+                except Exception:
+                    pass
+                return rows
+
     # ------------------------------- public API -------------------------------
 
     def add(self, ep: Dict[str, Any]) -> None:
@@ -207,29 +231,7 @@ class LanceIndex:
         if self._episodes is None:
             return []
 
-        q = np.asarray(q_vec, dtype=np.float32)
-        now = hints.get("now")
-        if isinstance(now, str):
-            now_dt = _parse_iso8601(now)
-        elif isinstance(now, datetime):
-            now_dt = now.astimezone(timezone.utc)
-        else:
-            now_dt = datetime.now(timezone.utc)
-
-        # Fetch full table once; for our current scale this is acceptable and keeps
-        # the math identical to the in-memory implementation.
-        try:
-            arrow = self._episodes.to_arrow()  # type: ignore[union-attr]
-            rows = arrow.to_pylist()
-        except Exception:
-            try:
-                df = self._episodes.to_pandas()  # type: ignore[union-attr]
-                rows = df.to_dict(orient="records")
-            except Exception:
-                # Last resort: iterate
-                rows = []
-                for batch in self._episodes.to_batches():  # type: ignore[union-attr]
-                    rows.extend(batch.to_pylist())
+        rows = self._read_all_rows()
 
         # Normalize fields and precompute
         eps: List[Dict[str, Any]] = []
@@ -253,7 +255,7 @@ class LanceIndex:
             try:
                 e_dt = _parse_iso8601(e.get("ts"))
             except Exception:
-                e_dt = now_dt
+                e_dt = datetime.now(timezone.utc)
             e["_dt"] = e_dt
             # quarter fill
             e.setdefault("quarter", _quarter_of(e_dt))
@@ -267,7 +269,7 @@ class LanceIndex:
         if tier == "exact_semantic":
             recent_days = hints.get("recent_days")
             if isinstance(recent_days, (int, float)) and recent_days > 0:
-                cutoff = now_dt - timedelta(days=float(recent_days))
+                cutoff = datetime.now(timezone.utc) - timedelta(days=float(recent_days))
                 eps = [e for e in eps if e["_dt"] >= cutoff]
         elif tier == "archive":
             qset = hints.get("archive_quarters")
@@ -282,7 +284,7 @@ class LanceIndex:
         # Vectorize and score
         def score_episode(e: Dict[str, Any]) -> float:
             v = np.asarray(e.get("vec_full", []), dtype=np.float32)
-            return _cosine(q, v)
+            return _cosine(q_vec, v)
 
         sim_threshold = hints.get("sim_threshold")
 
@@ -312,7 +314,7 @@ class LanceIndex:
                     [np.asarray(it.get("vec_full", []), dtype=np.float32) for it in items], axis=0
                 )
                 centroid = mat.mean(axis=0)
-                centroids.append((cid, _cosine(q, centroid)))
+                centroids.append((cid, _cosine(np.asarray(q_vec, dtype=np.float32), centroid)))
             # Pick top-M clusters
             M = int(hints.get("clusters_top_m", 3))
             centroids.sort(key=lambda p: (-p[1], p[0]))
@@ -357,6 +359,70 @@ class LanceIndex:
         self._version_cache = ver
         return ver
 
+    def _iter_shards_for_t2(self, tier: str, suggested: int = 0):
+        """Deterministically enumerate logical shards/partitions for T2.
+        Returns an iterable of shard objects that implement a `search_tiered(...)`
+        method with the same signature as `LanceIndex.search_tiered` but operate
+        on a subset of rows. If no meaningful partitioning is possible, yield [self].
+        Shard count is NOT truncated by `suggested`; concurrency is controlled by
+        the caller (max_workers). Enumeration order is stable.
+        """
+        # If table is missing or empty, yield self to keep semantics unchanged.
+        rows = self._read_all_rows()
+        if not rows:
+            return [self]
+
+        # Normalize quarter for all rows (matches search_tiered normalization)
+        norm_rows: List[Dict[str, Any]] = []
+        for r in rows:
+            e = dict(r)
+            ts = e.get("ts")
+            try:
+                e_dt = _parse_iso8601(ts)
+            except Exception:
+                e_dt = datetime.now(timezone.utc)
+            e.setdefault("quarter", _quarter_of(e_dt))
+            norm_rows.append(e)
+
+        # Partition by quarter if we have >1 distinct quarters.
+        quarters: Dict[str, List[str]] = {}
+        for e in norm_rows:
+            q = str(e.get("quarter"))
+            eid = str(e.get("id"))
+            quarters.setdefault(q, []).append(eid)
+        if len(quarters) > 1:
+            # Stable lexicographic order of quarter keys
+            parts = []
+            for q in sorted(quarters.keys()):
+                ids = sorted(set(quarters[q]))
+                parts.append(_LancePartition(parent=self, id_whitelist=set(ids), label=f"quarter:{q}"))
+            return parts
+
+        # Otherwise, create deterministic hash buckets by id to form logical shards.
+        # Bucket count is independent of `suggested` to avoid dropping recall; cap to a small
+        # stable number to prevent oversharding on tiny corpora.
+        import hashlib
+
+        def bucket_of(eid: str, buckets: int) -> int:
+            h = hashlib.sha1(eid.encode("utf-8")).hexdigest()
+            return int(h[:8], 16) % max(1, buckets)
+
+        # Choose a small, stable bucket count; prefer 4 if we have enough rows, else 2.
+        nrows = len(norm_rows)
+        bucket_count = 4 if nrows >= 8 else 2
+        buckets: Dict[int, List[str]] = {i: [] for i in range(bucket_count)}
+        for e in norm_rows:
+            eid = str(e.get("id"))
+            b = bucket_of(eid, bucket_count)
+            buckets[b].append(eid)
+        parts = []
+        for b in sorted(buckets.keys()):
+            ids = sorted(set(buckets[b]))
+            parts.append(_LancePartition(parent=self, id_whitelist=set(ids), label=f"hash:{b}"))
+        # If for some reason we collapsed to a single non-empty bucket, fall back to [self].
+        non_empty = [p for p in parts if p.id_whitelist]
+        return non_empty if len(non_empty) > 1 else [self]
+
     # ------------------------------- meta helpers ------------------------------
 
     def _bump_version(self) -> None:
@@ -368,3 +434,129 @@ class LanceIndex:
         current = (self._version_cache or 0) + 1
         self._meta.add([{"key": "counter", "version": int(current)}])
         self._version_cache = int(current)
+
+
+class _LancePartition:
+    """Logical read-only shard over a LanceIndex table.
+    Filters the parent index's rows to an id whitelist, then applies the same
+    tiered scoring logic as `LanceIndex.search_tiered`.
+    """
+
+    def __init__(self, parent: LanceIndex, id_whitelist: set[str], label: str = ""):
+        self._parent = parent
+        self.id_whitelist: set[str] = set(id_whitelist)
+        self._label = str(label)
+
+    # Interface expected by T2 shard collector: same signature as search_tiered
+    def search_tiered(
+        self,
+        owner: Optional[str],
+        q_vec: Iterable[float],
+        k: int,
+        tier: str,
+        hints: Dict[str, Any],
+    ) -> List[Dict[str, Any]]:
+        # Read and filter rows by id whitelist
+        rows = self._parent._read_all_rows()
+        if not rows or not self.id_whitelist:
+            return []
+        rows = [r for r in rows if str(r.get("id")) in self.id_whitelist]
+
+        # The remainder mirrors LanceIndex.search_tiered, but operates on `rows`
+        q = np.asarray(q_vec, dtype=np.float32)
+        now = hints.get("now")
+        if isinstance(now, str):
+            now_dt = _parse_iso8601(now)
+        elif isinstance(now, datetime):
+            now_dt = now.astimezone(timezone.utc)
+        else:
+            now_dt = datetime.now(timezone.utc)
+
+        eps: List[Dict[str, Any]] = []
+        for r in rows:
+            e = dict(r)
+            aux = e.get("aux", {})
+            if isinstance(aux, (bytes, bytearray)):
+                try:
+                    aux = json.loads(aux.decode("utf-8"))
+                except Exception:
+                    aux = {"_bytes": True}
+            elif isinstance(aux, str):
+                try:
+                    aux = json.loads(aux)
+                except Exception:
+                    aux = {"_text": aux}
+            e["aux"] = aux if isinstance(aux, dict) else {}
+            try:
+                e_dt = _parse_iso8601(e.get("ts"))
+            except Exception:
+                e_dt = now_dt
+            e["_dt"] = e_dt
+            e.setdefault("quarter", _quarter_of(e_dt))
+            if owner is not None and e.get("owner") != owner:
+                continue
+            eps.append(e)
+
+        tier = str(tier)
+        if tier == "exact_semantic":
+            recent_days = hints.get("recent_days")
+            if isinstance(recent_days, (int, float)) and recent_days > 0:
+                cutoff = now_dt - timedelta(days=float(recent_days))
+                eps = [e for e in eps if e["_dt"] >= cutoff]
+        elif tier == "archive":
+            qset = hints.get("archive_quarters")
+            if isinstance(qset, (set, list, tuple)):
+                qset = set(map(str, qset))
+                eps = [e for e in eps if str(e.get("quarter")) in qset]
+        elif tier == "cluster_semantic":
+            pass
+
+        def score_episode(e: Dict[str, Any]) -> float:
+            v = np.asarray(e.get("vec_full", []), dtype=np.float32)
+            return _cosine(q, v)
+
+        sim_threshold = hints.get("sim_threshold")
+
+        if tier == "cluster_semantic":
+            import hashlib
+
+            def cluster_of(e: Dict[str, Any]) -> str:
+                cid = None
+                aux = e.get("aux") or {}
+                if isinstance(aux, dict):
+                    cid = aux.get("cluster_id")
+                if not cid:
+                    cid = hashlib.sha1(str(e.get("id")).encode("utf-8")).hexdigest()[:8]
+                return str(cid)
+
+            clusters: Dict[str, List[Dict[str, Any]]] = {}
+            for e in eps:
+                clusters.setdefault(cluster_of(e), []).append(e)
+
+            centroids: List[Tuple[str, float]] = []
+            for cid, items in clusters.items():
+                if not items:
+                    continue
+                mat = np.stack(
+                    [np.asarray(it.get("vec_full", []), dtype=np.float32) for it in items], axis=0
+                )
+                centroid = mat.mean(axis=0)
+                centroids.append((cid, _cosine(q, centroid)))
+            M = int(hints.get("clusters_top_m", 3))
+            centroids.sort(key=lambda p: (-p[1], p[0]))
+            top_cids = {cid for cid, _ in centroids[: max(M, 0)]}
+            eps = [e for e in eps if cluster_of(e) in top_cids]
+
+        scored: List[Tuple[float, str, Dict[str, Any]]] = []
+        for e in eps:
+            s = score_episode(e)
+            if sim_threshold is not None and s < float(sim_threshold):
+                continue
+            eid = str(e.get("id"))
+            scored.append((s, eid, e))
+
+        scored.sort(key=lambda t: (-t[0], t[1]))
+        top = [e for (_, _, e) in scored[: max(int(k), 0)]]
+        for s, eid, e in scored[: max(int(k), 0)]:
+            e.setdefault("_score", s)
+        return top
