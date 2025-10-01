@@ -1,8 +1,12 @@
 # tests/helpers/identity.py
 from __future__ import annotations
 import json
-from typing import Any
+from typing import Any, Iterable
 import os
+
+from pathlib import Path
+import hashlib
+import shutil
 
 # Drop keys that vary across runs or are not part of disabled-path identity
 _DROP_KEYS = {
@@ -56,3 +60,86 @@ def normalize_logs_dir(p: str, base: str | None = None) -> str:
     if base and not os.path.isabs(p):
         p = os.path.join(base, p)
     return os.path.normpath(os.path.realpath(p))
+
+
+# ---------------------------------------------------------------------------
+# PR72 helpers: routing, IO, hashing, and snapshot collection
+# ---------------------------------------------------------------------------
+
+__all__ = [
+    "normalize_json_line",
+    "normalize_json_lines",
+    "normalize_logs_dir",
+    "route_logs",
+    "read_lines",
+    "hash_file",
+    "collect_snapshots_from_apply",
+    "hash_snapshots",
+    "purge_dir",
+]
+
+
+def route_logs(monkeypatch, path: str | Path) -> str:
+    """Monkeypatch the logs_dir() to a deterministic location and return it."""
+    p = str(path)
+    monkeypatch.setattr("clematis.io.paths.logs_dir", lambda: p)
+    return p
+
+
+def read_lines(dir_path: str | Path, name: str) -> list[str]:
+    """Read a JSONL file as raw lines (byte order preserved). Missing file → []."""
+    fp = Path(dir_path) / name
+    if not fp.exists():
+        return []
+    # Preserve exact bytes→unicode mapping using utf-8 without extra stripping
+    return fp.read_text(encoding="utf-8").splitlines()
+
+
+def hash_file(path: str | Path, *, chunk: int = 1 << 20) -> str:
+    """SHA256 of a file's bytes; returns hex digest. Missing file → empty string."""
+    p = Path(path)
+    if not p.exists():
+        return ""
+    h = hashlib.sha256()
+    with p.open("rb") as f:
+        while True:
+            b = f.read(chunk)
+            if not b:
+                break
+            h.update(b)
+    return h.hexdigest()
+
+
+def collect_snapshots_from_apply(logs_dir: str | Path) -> list[Path]:
+    """Return snapshot file paths in the order they appear in apply.jsonl (if any)."""
+    fp = Path(logs_dir) / "apply.jsonl"
+    if not fp.exists():
+        return []
+    out: list[Path] = []
+    for ln in fp.read_text(encoding="utf-8").splitlines():
+        if not ln.strip():
+            continue
+        try:
+            obj = json.loads(ln)
+        except Exception:
+            continue
+        snap = obj.get("snapshot")
+        if isinstance(snap, str):
+            out.append(Path(snap))
+    return out
+
+
+def hash_snapshots(paths: Iterable[Path]) -> list[str]:
+    """SHA256 digest list for existing snapshot files, in given order."""
+    digs: list[str] = []
+    for p in paths:
+        digs.append(hash_file(p))
+    return digs
+
+
+def purge_dir(path: str | Path) -> None:
+    """Remove a directory tree if it exists, then recreate it (empty)."""
+    p = Path(path)
+    if p.exists():
+        shutil.rmtree(p)
+    p.mkdir(parents=True, exist_ok=True)

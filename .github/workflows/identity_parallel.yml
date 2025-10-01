@@ -1,0 +1,61 @@
+
+
+name: identity-parallel
+
+on:
+  push:
+    branches: ["**"]
+    paths:
+      - 'clematis/**'
+      - 'tests/**'
+      - 'docs/m9/**'
+      - '.github/workflows/identity_parallel.yml'
+  pull_request:
+    paths:
+      - 'clematis/**'
+      - 'tests/**'
+      - 'docs/m9/**'
+      - '.github/workflows/identity_parallel.yml'
+
+jobs:
+  identity-parallel:
+    name: Identity (seq vs par) [${{ matrix.python-version }} | ${{ matrix.mode }}]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: [ '3.11', '3.12', '3.13' ]
+        mode: [ 'off', 'on' ]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install -U pip
+          python -m pip install -e .
+          python -m pip install -U pytest
+
+      - name: Set deterministic env
+        run: |
+          echo "SOURCE_DATE_EPOCH=0" >> $GITHUB_ENV
+          echo "CLEMATIS_NETWORK_BAN=1" >> $GITHUB_ENV
+          echo "PYTHONHASHSEED=0" >> $GITHUB_ENV
+
+      - name: Run identity tests
+        env:
+          ID_MODE: ${{ matrix.mode }}
+        run: |
+          set -euo pipefail
+          if [ "$ID_MODE" = "off" ]; then
+            pytest -q tests/integration/test_identity_parallel.py
+          else
+            pytest -q tests/integration/test_identity_parallel.py
+            pytest -q tests/integration/test_race_regression.py
+          fi

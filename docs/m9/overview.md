@@ -347,3 +347,39 @@ perf:
 ### Troubleshooting
 - **Mismatch vs sequential?** Ensure `_append_jsonl_unbuffered(...)` uses the **same** JSON formatting as `append_jsonl(...)` (e.g., `ensure_ascii=False`, separators).
 - **No ordering effect?** Confirm the three gate conditions above; staging is only active in the agent-parallel path.
+
+
+## PR72 — M9-10: Identity & race test suite
+
+**Goal.** Prove determinism with parallel **ON** under fixed inputs; keep disabled path byte-identical.
+
+### What the suite covers
+- **Sequential vs parallel identity** (workers=2 by default; optionally 3):
+  - Byte-for-byte equality for `t1.jsonl`, `t2.jsonl`, `t4.jsonl`, `apply.jsonl`, `turn.jsonl`, `scheduler.jsonl`.
+  - Snapshot determinism: collect `snapshot` paths from `apply.jsonl` and compare **content hashes** in order (skips if snapshots are not emitted).
+- **Race regression (internal contention)**:
+  - Deterministically perturbs pool scheduling (reverses job order) while keeping inputs fixed; all artifacts remain identical.
+- **Back‑pressure path**:
+  - Forces a tiny stager `byte_limit` to trigger drain→ordered‑flush→retry; artifacts remain identical to baseline.
+
+### Files (tests & helpers)
+- `tests/integration/test_identity_parallel.py` — seq vs par identity across seeds; compares logs and snapshots.
+- `tests/integration/test_race_regression.py` — contention toggle identity; stager back‑pressure identity.
+- `tests/helpers/identity.py` — routing, raw byte readers, snapshot collectors, hashing.
+- `tests/helpers/world.py` — tiny deterministic worlds and tasks.
+- `tests/helpers/configs.py` — minimal sequential/parallel configs for tests.
+- `tests/helpers/memory.py` — deterministic in‑memory vectors/rows and sharding helpers (kept local to tests).
+
+### CI
+- New workflow: **identity-parallel** (see `.github/workflows/identity_parallel.yml`).
+  - Matrix: Python **3.11–3.13**; modes `{off,on}`.
+  - Deterministic env: `SOURCE_DATE_EPOCH=0`, `PYTHONHASHSEED=0`, (optionally) `CLEMATIS_NETWORK_BAN=1`.
+  - Runs identity + race/back‑pressure tests.
+
+### Invariants
+- **Disabled path:** byte‑for‑byte identical to prior baseline.
+- **Enabled path:** with fixed inputs and flags, artifacts are **byte‑identical** regardless of internal scheduling or stager back‑pressure.
+
+### Troubleshooting
+- **Snapshot bytes differ?** Ensure your environment fixes the time source (`SOURCE_DATE_EPOCH=0`) or that snapshot writers are time‑independent for the tests. If snapshots are gated off in your environment, the suite compares logs only.
+- **Ordering drift in logs?** Verify PR71’s staging is active (parallel gate conditions hold) and that `_append_jsonl_unbuffered(...)` uses the same JSON serialization as `append_jsonl(...)`.

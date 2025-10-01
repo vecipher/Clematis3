@@ -2,7 +2,7 @@
 
 Clematis is a deterministic, turn‑based scaffold for agential AI. It models agents with concept graphs and tiered reasoning (T1→T4), uses small LLMs where needed, and keeps runtime behavior reproducible (no hidden network calls in tests/CI).
 
-> **Status (Milestone 9):** In progress ⚙️ — PR63 (config schema; defaults **OFF**), PR64 (deterministic runner), PR65 (cache safety wrappers), PR66 (flag‑gated T1 fan‑out across graphs), PR67 (parallel metrics + microbench), **PR68 (flag‑gated T2 fan‑out across in‑memory shards)**, **PR69 (LanceDB parallel T2 + deterministic T2 microbench)**, and **PR70 (agent‑level parallel driver)**, and **PR71 (log staging & ordered writes)** have landed. Parallelism remains **OFF by default**; identity is unchanged unless explicitly enabled. See **[docs/m9/overview.md](docs/m9/overview.md)** and **[docs/m9/parallel_helper.md](docs/m9/parallel_helper.md)**.
+> **Status (Milestone 9):** In progress ⚙️ — PR63 (config schema; defaults **OFF**), PR64 (deterministic runner), PR65 (cache safety wrappers), PR66 (flag‑gated T1 fan‑out across graphs), PR67 (parallel metrics + microbench), **PR68 (flag‑gated T2 fan‑out across in‑memory shards)**, **PR69 (LanceDB parallel T2 + deterministic T2 microbench)**, **PR70 (agent‑level parallel driver)**, **PR71 (log staging & ordered writes)**, and **PR72 (identity & race test suite)** have landed. Parallelism remains **OFF by default**; identity is unchanged unless explicitly enabled. See **[docs/m9/overview.md](docs/m9/overview.md)** and **[docs/m9/parallel_helper.md](docs/m9/parallel_helper.md)**.
 
 ---
 
@@ -43,6 +43,7 @@ CLI details, delegation rules, and recipes live in **[docs/m8/cli.md](docs/m8/cl
 ### M9: deterministic parallelism (flag‑gated)
 The PR63 surface adds a validated config for deterministic parallelism. Defaults keep behavior identical to previous milestones. As of PR66, T1 can fan‑out **per active graph** via the deterministic runner, with stable merge ordering; as of PR67, minimal observability metrics are available when enabled. As of **PR68**, T2 can fan‑out across **in‑memory** shards with a deterministic, tier‑ordered merge (score‑desc, id‑asc; de‑dupe by id); as of **PR69**, T2 can also fan‑out across **LanceDB** partitions behind the same gate; OFF path remains byte‑identical. As of **PR70**, an **agent‑level parallel driver** allows multiple agents’ turns to compute concurrently while preserving deterministic logs; it is gated separately via `perf.parallel.agents`.
 As of **PR71**, log staging guarantees deterministic on‑disk JSONL order under parallel execution; the disabled path remains byte‑identical.
+As of **PR72**, a dedicated identity & race test suite proves byte‑identical artifacts (t1/t2/t4/apply/turn/scheduler) between sequential and parallel runs and under contention/back‑pressure; CI runs this across Python 3.11–3.13 (see `.github/workflows/identity_parallel.yml`).
 
 ```yaml
 perf:
