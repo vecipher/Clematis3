@@ -4,6 +4,33 @@ from . import paths
 
 
 def append_jsonl(filename: str, record: dict) -> None:
+    """Append a JSON record to a log file, or buffer it if a LogMux is active.
+
+    PR70: When the agent-level parallel driver enables a per-turn LogMux, we
+    capture (stream, obj) pairs instead of writing immediately. The commit phase
+    will flush them in deterministic order. When no mux is active, behavior is
+    unchanged (write-through).
+    """
+    # Try to detect an active LogMux without introducing a hard import dependency
+    # (avoid circular import at module load; import only inside the function).
+    mux = None
+    try:  # best-effort, safe if module missing
+        from ..engine.util.logmux import LOG_MUX  # type: ignore
+        try:
+            mux = LOG_MUX.get()
+        except Exception:
+            mux = None
+    except Exception:
+        mux = None
+
+    if mux is not None:
+        try:
+            mux.write(str(filename), dict(record))
+            return
+        except Exception:
+            # Fall back to write-through on any buffering error
+            pass
+
     base = paths.logs_dir()
     os.makedirs(base, exist_ok=True)
     path = os.path.join(base, filename)

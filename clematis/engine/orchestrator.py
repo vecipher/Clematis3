@@ -21,7 +21,136 @@ from .gel import (
 )
 from ..io.log import append_jsonl
 
+# --- PR70: parallel driver helpers & readonly snapshot import ---
+from .stages.state_clone import readonly_snapshot
+from .util.logmux import LogMux, set_mux, reset_mux, flush
+
+
 from .cache import CacheManager
+
+# --- PR70: minimal compute/commit driver (not wired into run_turn default path) ---
+from types import SimpleNamespace as _SNS
+
+
+def _clone_ctx_for_agent(ctx: TurnCtx, agent_id: str, turn_id: int | str) -> TurnCtx:
+    """Shallow clone of TurnCtx with agent/turn specialized; preserves cfg/now/seed.
+    We use SimpleNamespace to avoid coupling to concrete ctx classes.
+    """
+    base = {}
+    for attr in ("cfg", "config", "now", "now_ms", "seed", "slice_idx", "slice_budgets"):
+        if hasattr(ctx, attr):
+            base[attr] = getattr(ctx, attr)
+    base["agent_id"] = str(agent_id)
+    base["turn_id"] = turn_id
+    # PR70: instruct run_turn to stop after T4 and record deltas/metrics
+    base["_dry_run_until_t4"] = True
+    return _SNS(**base)
+
+
+def _extract_dryrun_artifacts(ctx: TurnCtx) -> tuple[list, str, dict, dict]:
+    """Pull artifacts stashed by run_turn in dry-run mode.
+    Returns (approved_deltas, utter, t1_info, t2_info).
+    """
+    t4_obj = getattr(ctx, "_dryrun_t4", None)
+    deltas = list(getattr(t4_obj, "approved_deltas", []) or [])
+    utter = str(getattr(ctx, "_dryrun_utter", "") or "")
+    t1_info = getattr(ctx, "_dryrun_t1", {}) or {}
+    t2_info = getattr(ctx, "_dryrun_t2", {}) or {}
+    return deltas, utter, t1_info, t2_info
+
+
+def _run_turn_compute(ctx: TurnCtx, base_state: Any, agent_id: str, input_text: str) -> "_TurnBuffer":
+    """Compute phase: run stages up to T4 on a read-only snapshot, capturing logs.
+    The underlying `append_jsonl` is ctx-aware and will buffer to the active LogMux.
+    """
+    # Assign a deterministic, per-agent turn id if not present
+    turn_id = getattr(ctx, "turn_id", None)
+    if turn_id is None:
+        # Fallback: derive from time monotonic; tests usually set turn_id
+        turn_id = int(time.time() * 1000) % 10_000_000
+
+    # Clone a per-agent ctx with dry-run enabled
+    subctx = _clone_ctx_for_agent(ctx, agent_id, turn_id)
+
+    # Activate log capture for this compute
+    mux, token = _begin_log_capture()
+    try:
+        # IMPORTANT: read-only snapshot to avoid mutating the live state
+        ro = _make_readonly_snapshot(base_state)
+        # Run the existing sequential pipeline up to T4 (dry-run will early-return after T4)
+        _ = Orchestrator().run_turn(subctx, ro, input_text)
+        # Extract artifacts (approved deltas and utter)
+        deltas, utter, t1_info, t2_info = _extract_dryrun_artifacts(subctx)
+        logs = mux.dump()
+        buf: dict = {
+            "turn_id": subctx.turn_id,
+            "slice_idx": int(getattr(subctx, "slice_idx", 0) or 0),
+            "agent_id": str(agent_id),
+            "logs": logs,
+            "deltas": deltas,
+            "dialogue": utter,
+            "graphs_touched": set(t1_info.get("graphs_touched", []) or []),
+            "graph_versions": {},
+        }
+        return buf
+    finally:
+        _end_log_capture(token)
+
+
+def _run_agents_parallel_batch(ctx: TurnCtx, state: dict, tasks: list[tuple[str, str]]) -> list[TurnResult]:
+    """Run a batch of (agent_id, input_text) with compute-then-commit semantics.
+    This function is gated by the caller; it does not alter default run_turn behavior.
+    """
+    # Gate: require agents parallel to be enabled
+    if not _agents_parallel_enabled(ctx):
+        # Fallback: sequential
+        out: list[TurnResult] = []
+        for aid, text in tasks:
+            subctx = _clone_ctx_for_agent(ctx, aid, getattr(ctx, "turn_id", 0))
+            # Disable dry-run for sequential path
+            setattr(subctx, "_dry_run_until_t4", False)
+            out.append(Orchestrator().run_turn(subctx, state, text))
+        return out
+
+    # Select independent batch in input order
+    max_workers = int(((_get_cfg(ctx).get("perf") or {}).get("parallel") or {}).get("max_workers", 2))
+    agent_ids = [aid for aid, _ in tasks]
+    picked = _select_independent_batch(agent_ids, state, max_workers)
+
+    # Compute on a single read-only snapshot
+    base = _make_readonly_snapshot(state)
+    buffers: list = []
+    for aid, text in tasks:
+        if aid not in picked:
+            continue
+        buf = _run_turn_compute(ctx, base, aid, text)
+        buffers.append(buf)
+
+    # Commit phase: sort and flush
+    results: list[TurnResult] = []
+    for buf in _sort_turn_buffers(buffers):
+        flush(buf["logs"])  # deterministic emission
+        # Minimal t4 object for apply; contains only approved_deltas
+        t4_like = _SNS(approved_deltas=list(buf["deltas"]), rejected_ops=[], reasons=["PR70_COMMIT"], metrics={"counts": {"approved": len(buf["deltas"])}})
+        apply = apply_changes(ctx, state, t4_like)
+        # Write apply log (mirrors run_turn shape). We do not emit GEL logs here in PR70 minimal path.
+        append_jsonl(
+            "apply.jsonl",
+            {
+                "turn": buf["turn_id"],
+                "agent": buf["agent_id"],
+                "applied": apply.applied,
+                "clamps": apply.clamps,
+                "version_etag": apply.version_etag,
+                "snapshot": apply.snapshot_path,
+                "cache_invalidations": int((getattr(apply, "metrics", {}) or {}).get("cache_invalidations", 0)),
+                "ms": 0.0,
+            },
+        )
+        # Final TurnResult per agent; tests can inspect the dialogue
+        results.append(TurnResult(line=buf["dialogue"], events=[]))
+
+    return results
 
 # --- M5: Scheduler wiring (PR26 — helpers & scaffolding; yields gated) ---
 from typing import TypedDict
@@ -39,6 +168,17 @@ class _SliceCtx(TypedDict):
     started_ms: int
     budgets: Dict[str, int]
     agent_id: str
+
+# --- PR70: Turn buffer type for parallel driver scaffolding ---
+class _TurnBuffer(TypedDict):
+    turn_id: int | str
+    slice_idx: int
+    agent_id: str
+    logs: list[tuple[str, dict]]  # (stream, obj) pairs captured during compute
+    deltas: Any                    # placeholder for T4-approved deltas (PR70 wiring)
+    dialogue: str                  # the utterance string (if any)
+    graphs_touched: set[str]
+    graph_versions: Dict[str, str]
 
 
 def _m5_enabled(ctx) -> bool:
@@ -110,6 +250,7 @@ def agent_ready(ctx, state, agent_id: str) -> tuple[bool, str]:
 # --- Config accessor for harmonized config usage ---
 
 
+
 def _get_cfg(ctx) -> Dict[str, Any]:
     """Normalize config access across ctx.cfg / ctx.config; always returns a dict."""
     cfg = getattr(ctx, "cfg", None)
@@ -123,6 +264,95 @@ def _get_cfg(ctx) -> Dict[str, Any]:
     if isinstance(cfg2, SimpleNamespace):
         return dict(cfg2.__dict__)
     return {}
+
+# --- PR70 minimal driver helpers (scaffolding; not yet wired to run_turn) ---
+
+def _resolve_graphs_for_agent(state: Any, agent_id: str) -> set[str]:
+    """Best-effort resolver for graphs an agent may touch.
+    Looks for common shapes on state; returns empty set if unknown.
+    This keeps the selector safe and deterministic across environments.
+    """
+    try:
+        # Common shapes we tolerate:
+        # 1) state["agents"][agent_id]["graphs"] -> iterable of names
+        agents = state.get("agents") if isinstance(state, dict) else getattr(state, "agents", None)
+        if isinstance(agents, dict):
+            a = agents.get(agent_id) or {}
+            g = a.get("graphs") if isinstance(a, dict) else None
+            if g is None and hasattr(a, "graphs"):
+                g = getattr(a, "graphs")
+            if g is not None:
+                return {str(x) for x in g}
+        # 2) state["graphs_by_agent"][agent_id] -> iterable
+        gba = state.get("graphs_by_agent") if isinstance(state, dict) else getattr(state, "graphs_by_agent", None)
+        if isinstance(gba, dict) and agent_id in gba:
+            return {str(x) for x in (gba.get(agent_id) or [])}
+    except Exception:
+        pass
+    return set()
+
+
+def _select_independent_batch(agent_ids: list[str], state: Any, max_workers: int) -> list[str]:
+    """Greedy selection of agents whose graph sets are pairwise disjoint.
+    Deterministic order: preserves the input order; stops at max_workers.
+    """
+    picked: list[str] = []
+    used: set[str] = set()
+    for aid in agent_ids:
+        if len(picked) >= max(1, int(max_workers)):
+            break
+        gset = _resolve_graphs_for_agent(state, aid)
+        if used.isdisjoint(gset):
+            picked.append(aid)
+            used.update(gset)
+    return picked
+
+
+def _begin_log_capture() -> tuple[LogMux, object]:
+    """Activate a LogMux for the current task and return (mux, token)."""
+    mux = LogMux()
+    token = set_mux(mux)
+    return mux, token
+
+
+def _end_log_capture(token: object) -> None:
+    """Reset the active LogMux using the provided token."""
+    try:
+        reset_mux(token)
+    except Exception:
+        pass
+
+
+def _sort_turn_buffers(buffers: list[_TurnBuffer]) -> list[_TurnBuffer]:
+    """Sort buffers deterministically by (turn_id, slice_idx).
+    turn_id is compared as int when possible, else as string.
+    """
+    def _key(b: _TurnBuffer):
+        tid = b.get("turn_id")
+        try:
+            tid_i = int(tid)  # type: ignore[arg-type]
+            return (0, tid_i, int(b.get("slice_idx", 0)))
+        except Exception:
+            return (1, str(tid), int(b.get("slice_idx", 0)))
+    return sorted(buffers, key=_key)
+
+
+def _make_readonly_snapshot(state: Any) -> Any:
+    """Create a read-only snapshot facade used by the compute phase."""
+    return readonly_snapshot(state)
+
+# --- PR70: agent-level parallel driver gate ---
+
+def _agents_parallel_enabled(ctx) -> bool:
+    cfg = _get_cfg(ctx)
+    p = (cfg.get("perf") or {}).get("parallel") or {}
+    try:
+        enabled = bool(p.get("enabled", False))
+        agents = bool(p.get("agents", False))
+        mw = int(p.get("max_workers", 1) or 1)
+        return bool(enabled and agents and mw > 1)
+    except Exception:
+        return False
 
 
 # --- Helper for pick reason passthrough to scheduler logs ---
@@ -171,6 +401,9 @@ class Orchestrator:
         turn_id = getattr(ctx, "turn_id", "-")
         agent_id = getattr(ctx, "agent_id", "-")
         now = getattr(ctx, "now", None)
+
+        # PR70: allow a dry-run that stops after T4 to enable agent-level compute phase
+        _dry_run = bool(getattr(ctx, "_dry_run_until_t4", False))
 
         total_t0 = time.perf_counter()
 
@@ -263,12 +496,12 @@ class Orchestrator:
                 **({"now": now} if now else {}),
             },
         )
-        # --- M5 boundary check after T1 ---
+        # --- M5 liminilas check after T1 ---
         if slice_ctx is not None:
             consumed = {
                 "ms": int(round((time.perf_counter() - total_t0) * 1000.0)),
             }
-            # Map T1 metrics if present
+            # Map T1 metrics if there
             try:
                 if isinstance(t1.metrics, dict):
                     if t1.metrics.get("iters") is not None:
@@ -434,7 +667,7 @@ class Orchestrator:
         graph_enabled = (
             bool(graph_cfg_all.get("enabled", False)) if isinstance(graph_cfg_all, dict) else False
         )
-        if graph_enabled:
+        if graph_enabled and not _dry_run:
             t0_gel = time.perf_counter()
             items = getattr(t2, "retrieved", []) or []  # gel adapts dicts/objs/tuples
             try:
@@ -599,16 +832,16 @@ class Orchestrator:
         backend_fallback = None
         fallback_reason = None
 
-        # Allow tests to monkeypatch a module-level t3_dialogue with flexible signatures.
+        # let tests monkeypatch a module-level t3_dialogue with flexible signatures for speed and laziness.
         dlg_fn = globals().get("t3_dialogue")
         if callable(dlg_fn):
             try:
-                # Preferred signature: (dialog_bundle, plan)
+                # pref sig: (dialog_bundle, plan)
                 res = dlg_fn(dialog_bundle, plan)
             except TypeError:
                 # Fallback signature used by some tests: (ctx, state, dialog_bundle)
                 res = dlg_fn(ctx, state, dialog_bundle)
-            # Normalize: support returning just a string or (utter, metrics)
+            # normaliaztion: support returning just a string or (utter, metrics)
             if isinstance(res, tuple):
                 utter = res[0]
                 speak_metrics = res[1] if len(res) > 1 and isinstance(res[1], dict) else {}
@@ -696,13 +929,13 @@ class Orchestrator:
             },
         )
 
-        # Kill switch (t4.enabled). Default True if unspecified.
+        # the kill switch (t4.enabled). Default True if unspecified.
         t4_cfg_full = (_get_cfg(ctx).get("t4") if isinstance(_get_cfg(ctx), dict) else {}) or {}
         t4_enabled = (
             bool(t4_cfg_full.get("enabled", True)) if isinstance(t4_cfg_full, dict) else True
         )
 
-        # --- T4 / Apply (honor kill switch) ---
+        # --- T4 / Apply (it honousr kill switch dw tm abt it) ---
         if t4_enabled:
             # --- T4 ---
             t0 = time.perf_counter()
@@ -721,6 +954,25 @@ class Orchestrator:
                     **({"now": now} if now else {}),
                 },
             )
+            # PR70: in dry-run mode, record artifacts and return before Apply/Health
+            if _dry_run:
+                try:
+                    setattr(ctx, "_dryrun_t4", t4)
+                    setattr(ctx, "_dryrun_utter", utter if 'utter' in locals() else "")
+                    # also stash a few fields used by the batch driver
+                    setattr(ctx, "_dryrun_t1", {
+                        "pops": t1.metrics.get("pops"),
+                        "iters": t1.metrics.get("iters"),
+                        "graphs_touched": t1.metrics.get("graphs_touched"),
+                    })
+                    setattr(ctx, "_dryrun_t2", {
+                        "k_returned": t2.metrics.get("k_returned"),
+                        "k_used": t2.metrics.get("k_used"),
+                        "cache_hit": bool(cache_hit),
+                    })
+                except Exception:
+                    pass
+                return TurnResult(line=utter if 'utter' in locals() else "", events=[])
             # --- M5 boundary check after T4 ---
             if slice_ctx is not None:
                 consumed = {
@@ -783,7 +1035,7 @@ class Orchestrator:
                         },
                     )
                     return TurnResult(line=utter if 'utter' in locals() else "", events=[])
-            # --- GEL decay tick (optional; run before Apply so snapshot includes decay) ---
+            # --- GEL decay tick (optional, might learn a different mechanism; run before Apply so snapshot includes decay) ---
             graph_cfg_all2 = (
                 _get_cfg(ctx).get("graph") if isinstance(_get_cfg(ctx), dict) else {}
             ) or {}
@@ -850,7 +1102,7 @@ class Orchestrator:
                                 split_applied += 1
 
                         if do_promo:
-                            # Promotions derive from current merge candidates (metadata-based policies can refine later)
+                            # promotions of clusters into concept graphs derive from current merge candidates (metadata-based policies can refine later)
                             clusters = merges if do_merge else []
                             promos = gel_promote_clusters(ctx, state, clusters)
                             cap_p = int(pr_cfg.get("cap_per_turn", 2))
@@ -874,7 +1126,7 @@ class Orchestrator:
                             },
                         )
                 except Exception:
-                    # Never let optional GEL features break the turn
+                    # Never let optional ggelly features break the turn
                     pass
             # --- Apply & persist ---
             t0 = time.perf_counter()
@@ -959,7 +1211,7 @@ class Orchestrator:
                     )
                     return TurnResult(line=utter if 'utter' in locals() else "", events=[])
         else:
-            # Bypassed: provide inert placeholders; no t4/apply logs
+            # bypass case: give us inert placeholders; no t4/apply logs
             t4_ms = 0.0
             apply_ms = 0.0
             t4 = SimpleNamespace(

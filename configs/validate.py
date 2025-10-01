@@ -1695,6 +1695,19 @@ def validate_config_verbose(cfg: Dict[str, Any]) -> Tuple[Dict[str, Any], List[s
                         warnings.append(
                             "W[perf.snapshots]: snapshots configured while perf.enabled=false; features remain disabled (identity path)."
                         )
+            # PR70: agent-level parallel driver warnings
+            pp = _ensure_dict(perf.get("parallel"))
+            agents_flag = _coerce_bool(pp.get("agents", False))
+            par_enabled = _coerce_bool(pp.get("enabled", False))
+            mw = _coerce_int(pp.get("max_workers", 0))
+            if agents_flag and not perf_on:
+                warnings.append(
+                    "W[perf.parallel.agents]: agents=true while perf.enabled=false; agent-level driver remains disabled (identity path)."
+                )
+            if agents_flag and par_enabled and mw <= 1:
+                warnings.append(
+                    "W[perf.parallel]: max_workers<=1 with agents=true; agent-level driver will not activate."
+                )
             # Warn if both legacy and new frontier caps are present
             if "queue_cap" in pt1v and "frontier" in capsv:
                 warnings.append(

@@ -2,7 +2,7 @@
 
 Clematis is a deterministic, turn‑based scaffold for agential AI. It models agents with concept graphs and tiered reasoning (T1→T4), uses small LLMs where needed, and keeps runtime behavior reproducible (no hidden network calls in tests/CI).
 
-> **Status (Milestone 9):** In progress ⚙️ — PR63 (config schema; defaults **OFF**), PR64 (deterministic runner), PR65 (cache safety wrappers), PR66 (flag‑gated T1 fan‑out across graphs), PR67 (parallel metrics + microbench), **PR68 (flag‑gated T2 fan‑out across in‑memory shards)**, and **PR69 (LanceDB parallel T2 + deterministic T2 microbench)** have landed. Parallelism remains **OFF by default**; identity is unchanged unless explicitly enabled. See **[docs/m9/overview.md](docs/m9/overview.md)** and **[docs/m9/parallel_helper.md](docs/m9/parallel_helper.md)**.
+> **Status (Milestone 9):** In progress ⚙️ — PR63 (config schema; defaults **OFF**), PR64 (deterministic runner), PR65 (cache safety wrappers), PR66 (flag‑gated T1 fan‑out across graphs), PR67 (parallel metrics + microbench), **PR68 (flag‑gated T2 fan‑out across in‑memory shards)**, **PR69 (LanceDB parallel T2 + deterministic T2 microbench)**, and **PR70 (agent‑level parallel driver)** have landed. Parallelism remains **OFF by default**; identity is unchanged unless explicitly enabled. See **[docs/m9/overview.md](docs/m9/overview.md)** and **[docs/m9/parallel_helper.md](docs/m9/parallel_helper.md)**.
 
 ---
 
@@ -41,7 +41,7 @@ python -m clematis --dir ./.logs rotate-logs -- --dry-run
 CLI details, delegation rules, and recipes live in **[docs/m8/cli.md](docs/m8/cli.md)**. Packaging/extras and quality gates: **[docs/m8/packaging_cli.md](docs/m8/packaging_cli.md)** · **[CONTRIBUTING.md](CONTRIBUTING.md)**.
 
 ### M9: deterministic parallelism (flag‑gated)
-The PR63 surface adds a validated config for deterministic parallelism. Defaults keep behavior identical to previous milestones. As of PR66, T1 can fan‑out **per active graph** via the deterministic runner, with stable merge ordering; as of PR67, minimal observability metrics are available when enabled. As of **PR68**, T2 can fan‑out across **in‑memory** shards with a deterministic, tier‑ordered merge (score‑desc, id‑asc; de‑dupe by id); as of **PR69**, T2 can also fan‑out across **LanceDB** partitions behind the same gate; OFF path remains byte‑identical.
+The PR63 surface adds a validated config for deterministic parallelism. Defaults keep behavior identical to previous milestones. As of PR66, T1 can fan‑out **per active graph** via the deterministic runner, with stable merge ordering; as of PR67, minimal observability metrics are available when enabled. As of **PR68**, T2 can fan‑out across **in‑memory** shards with a deterministic, tier‑ordered merge (score‑desc, id‑asc; de‑dupe by id); as of **PR69**, T2 can also fan‑out across **LanceDB** partitions behind the same gate; OFF path remains byte‑identical. As of **PR70**, an **agent‑level parallel driver** allows multiple agents’ turns to compute concurrently while preserving deterministic logs; it is gated separately via `perf.parallel.agents`.
 
 ```yaml
 perf:
@@ -63,6 +63,16 @@ t2:
   backend: inmemory  # or "lancedb" (requires extras)
 ```
 
+**Enable agent‑level parallel driver (agents):**
+
+```yaml
+perf:
+  parallel:
+    enabled: true
+    max_workers: 4   # >1 to enable parallel path
+    agents: true
+```
+
 **Observability (optional):** To see minimal parallel metrics (`task_count`, `parallel_workers`) in T1 outputs and in the microbench, also set:
 
 ```yaml
@@ -73,6 +83,7 @@ perf:
 ```
 
 When enabled, T2 emits `t2.task_count` and `t2.parallel_workers`; on Lance it also emits `t2.partition_count` (number of partitions).
+When the agent driver is enabled, the system may also emit `driver.agents_parallel_batch_size` under the same metrics gate.
 
 **Microbench:**
 
@@ -91,6 +102,8 @@ python -m clematis.scripts.bench_t2 --iters 3 --workers 4 --backend lancedb --pa
 ## Repository layout (brief)
 - `clematis/engine/` — core stages (T1–T4), scheduler stubs, persistence, logs.
 - `clematis/engine/util/parallel.py` — deterministic thread-pool helper (`run_parallel`), unit tests only.
+- `clematis/engine/util/logmux.py` — ctx‑aware buffered logging (PR70 driver capture & deterministic flush).
+- `clematis/engine/stages/state_clone.py` — read‑only state snapshot utilities for the compute phase.
 - `clematis/engine/stages/t2_shard.py` — deterministic helpers for sharded T2 merge (quantized scoring, id tie‑break).
 - `tests/t2/test_t2_parallel_merge.py` — gate semantics, tie‑break, tier‑ordered K‑clamp, normalization.
 - `clematis/cli/` — umbrella + wrapper subcommands (delegates to `clematis.scripts.*`).
