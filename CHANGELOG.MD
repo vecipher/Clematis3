@@ -3,7 +3,22 @@ All notable changes to this project will be documented in this file.
 
 
 
+
 ## [Unreleased]
+
+### Added (PR72 — M9-10: Identity & race test suite)
+- **Identity (seq vs par):** Proves byte-for-byte equality for `t1.jsonl`, `t2.jsonl`, `t4.jsonl`, `apply.jsonl`, `turn.jsonl`, and `scheduler.jsonl` between sequential (disabled path) and parallel (enabled path; `max_workers=2`) runs.
+- **Race regression (contention):** Deterministically perturbs pool scheduling (reverses job order) while keeping inputs fixed; artifacts remain identical.
+- **Back-pressure path:** Forces a tiny stager `byte_limit` to trigger drain→ordered-flush→retry; artifacts remain identical to baseline.
+- **Tests:** `tests/integration/test_identity_parallel.py`, `tests/integration/test_race_regression.py`.
+- **Helpers:** `tests/helpers/identity.py`, `tests/helpers/world.py`, `tests/helpers/configs.py`, `tests/helpers/memory.py`.
+
+### CI (PR72)
+- New workflow: `.github/workflows/identity_parallel.yml` — matrix over Python **3.11–3.13** and modes `{off,on}`; sets deterministic env (`SOURCE_DATE_EPOCH=0`, `PYTHONHASHSEED=0`, `CLEMATIS_NETWORK_BAN=1`) and runs the identity + race/back-pressure tests.
+
+### Invariants (PR72)
+- **Disabled path:** outputs/logs remain **byte-identical** to prior baseline.
+- **Enabled path:** with fixed inputs and flags, artifacts are **byte-identical** regardless of internal scheduling or stager back-pressure.
 
 ### Added (PR71 — M9-09: Log staging & ordered writes; flag-gated, defaults OFF)
 - **Central staging layer:** `engine/util/io_logging.py` buffers log records with a stable composite key `(turn_id, stage_ord, slice_idx, seq)`; canonical stream order via `stage_ord`: `t1.jsonl → t2.jsonl → t3_plan.jsonl → t3_dialogue.jsonl → t4.jsonl → apply.jsonl → health.jsonl → turn.jsonl → scheduler.jsonl`.
