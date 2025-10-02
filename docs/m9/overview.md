@@ -1,22 +1,74 @@
-# Milestone 9 — Deterministic Parallelism (PR63 surface)
+# Milestone 9 — Deterministic Parallelism (Overview)
 
-This document describes the configuration **surface only** added in PR63. It does **not** change runtime behavior. All defaults keep parallel execution **OFF** and preserve byte‑for‑byte identity with prior milestones.
+This page summarizes the M9 deterministic parallelism work across **PR63–PR73**: the config surface, determinism/identity guarantees, and how to enable/verify it. Defaults keep parallel execution **OFF** and preserve byte‑for‑byte identity.
+
 
 ## Purpose
 Provide a stable, validated config contract for later PRs (PR64+). Teams can start wiring flags in their local branches without risking behavior drift on `main`.
+
+## Configuration matrix (M9)
+
+| Key                          | Type  | Default* | Notes |
+|------------------------------|-------|----------|-------|
+| `perf.parallel.enabled`      | bool  | `false`  | Global gate. When `false`, outputs/logs must match pre‑M9. |
+| `perf.parallel.max_workers`  | int   | `1`      | `<=1` ⇒ sequential. (If the block is omitted, the effective behavior is sequential.) |
+| `perf.parallel.t1`           | bool  | `false`  | Allow T1 fan‑out across graphs (guarded). |
+| `perf.parallel.t2`           | bool  | `false`  | Allow T2 fan‑out across shards (guarded, backend‑dependent). |
+| `perf.parallel.agents`       | bool  | `false`  | Agent‑level driver fan‑out (flag‑gated). |
+| `perf.metrics.enabled`       | bool  | `false`  | Gate for perf metrics emission. |
+| `perf.metrics.report_memory` | bool  | `false`  | Gate for memory/bytes counters (when metrics enabled). |
+
+*Default note: We keep the **identity path** by default. If `perf.parallel` is omitted entirely, the effective behavior is sequential and byte‑identical to pre‑M9. If the block is materialized, use `max_workers: 1` to preserve sequential behavior.
+
+**Identity invariant:** With all `perf.parallel.* = false` (or absent) and `max_workers <= 1`, artifacts (JSONL + snapshots) are **byte‑for‑byte identical** to pre‑M9.
+
+## Determinism & identity (summary)
+
+- **Ordered logs.** Parallel paths **stage** logs with a stable composite key *(turn_id, stage_ord, slice_idx, seq)*, then **ordered‑write** → results are **sequential‑identical** for `t1/t2/t4/apply/turn/scheduler`.
+- **Back‑pressure.** When stager buffers hit the cap, we raise `LOG_STAGING_BACKPRESSURE` and deterministically **drain → flush → retry**.
+- **Pools & merges.** Work submission uses a fixed order; merges tie‑break lexicographically by ID (and tier‑stable in T2) to remove nondeterminism.
+- **Tests.** `tests/integration/test_identity_parallel.py` asserts byte equality vs sequential; contention and tiny‑stager cases also remain identical.
+
+## Known limitations
+
+- **Small jobs:** Parallel overhead can exceed gains at tiny sizes (GIL, allocator, thread wakes).
+- **Backends:** T2 LanceDB partitions are reported only when Lance extras are installed; in‑memory backend reports zero partitions.
+- **Stage yields:** Agent‑level driver yields at **stage boundaries**; no mid‑stage pre‑emption.
+
+## Example configs
+
+- **Sequential baseline:** `examples/perf/parallel_off.yaml`
+- **Opt‑in parallel:** `examples/perf/parallel_on.yaml`
+
+End‑to‑end smoke locally:
+```bash
+python -m clematis.scripts.run_demo --config examples/perf/parallel_off.yaml
+python -m clematis.scripts.run_demo --config examples/perf/parallel_on.yaml
+```
+
+## Troubleshooting & FAQs
+
+- **Artifacts differ vs sequential.**
+  1) Ensure all `perf.parallel.*` are `false` (or block omitted) for the baseline.
+  2) Remove stale logs: `rm -f logs/*.jsonl` and re‑run.
+  3) Pin Python (3.11–3.13 are CI‑proven).
+  4) Don’t inadvertently toggle metrics gates if a test asserts shapes.
+
+- **Parallel didn’t speed up.**
+  Confirm a non‑trivial workload. Use `examples/perf/parallel_on.yaml` with more graphs/shards; microbenches are intentionally tiny.
 
 ## Config & identity rules
 
 ### Keys (under `perf.parallel`)
 - `enabled` (bool, default `false`)
-- `max_workers` (int, default `0`) — `0/1` means **sequential**; negative values normalize to `0`.
+- `max_workers` (int, default `1`) — values **≤1** behave sequentially.
 - `t1` (bool, default `false`) — gate for T1 stage parallelism (to be implemented in later PRs).
 - `t2` (bool, default `false`) — gate for T2 stage parallelism (later PRs).
 - `agents` (bool, default `false`) — gate for agent driver parallelism (later PRs).
 
 ### Normalization & validation
 - Unknown keys under `perf.parallel` fail validation with a clear path, e.g. `perf.parallel.foo unknown key`.
-- `max_workers <= 0` normalizes to `0` (sequential). Tests assert this normalization.
+- `max_workers <= 1` is treated as **sequential**. Tests assert the sequential identity path when this holds.
 - The validator **does not materialize** a `perf.parallel` block when the user does not provide one, avoiding golden churn.
 - No other parts of the config change semantics in PR63.
 
@@ -32,13 +84,13 @@ Provide a stable, validated config contract for later PRs (PR64+). Teams can sta
 perf:
   parallel:
     enabled: false
-    max_workers: 0   # 0/1 = sequential
+    max_workers: 1   # ≤1 = sequential
     t1: false
     t2: false
     agents: false
 ```
 
-### Opt‑in (no effect yet; surface only)
+### Opt‑in parallel (effect depends on wired PRs)
 ```yaml
 perf:
   parallel:
@@ -48,7 +100,7 @@ perf:
     t2: true
     agents: false
 ```
-*Result in PR63:* validation passes and values normalize as described, but runtime remains sequential because later PRs implement execution changes.
+*Effect:* when the relevant PRs are wired (e.g., PR68 for T2 shards, PR70 for agent driver), these flags activate deterministic parallelism; otherwise they are no‑ops and the run remains sequential.
 
 ### CLI validation
 Use the umbrella CLI `validate` command:
@@ -118,7 +170,7 @@ With the gate OFF (or `max_workers<=1`), behavior and logs remain byte‑for‑b
 
 ## PR67 — Minimal observability & microbench
 
-**New metrics (gated):** When `perf.enabled=true` and `perf.metrics.report_memory=true`, the T1 stage now includes two fields in its metrics map to help you reason about parallelism:
+**New metrics (gated):** When `perf.metrics.enabled=true` and `perf.metrics.report_memory=true`, the T1 stage now includes two fields in its metrics map to help you reason about parallelism:
 - `task_count` — number of per‑graph tasks (i.e., `len(active_graphs)`).
 - `parallel_workers` — effective workers used, i.e. `min(max_workers, task_count)`.
 
@@ -126,7 +178,7 @@ These fields are **observational only** and do not alter execution. They are hel
 
 **Microbench (local only).** `clematis/scripts/bench_t1.py` produces a tiny, deterministic run to inspect shape and metrics:
 ```bash
-python clematis/scripts/bench_t1.py \
+python -m clematis.scripts.bench_t1 \
   --graphs 32 --iters 3 --workers 8 --parallel --json
 ```
 Output includes elapsed time and the stage metrics. For convenience, the bench mirrors
@@ -135,7 +187,7 @@ printed metrics when the metrics gate is on, so they are visible in JSON runs ev
 wasn’t configured to emit them in your environment.
 
 **Troubleshooting.**
-- Not seeing the two fields? Ensure `perf.enabled=true` and `perf.metrics.report_memory=true` in your config.
+- Not seeing the two fields? Ensure `perf.metrics.enabled=true` and `perf.metrics.report_memory=true` in your config.
 - `parallel_workers` smaller than `workers`? That is expected when `task_count < workers`.
 - No speedups? T1’s per‑task work is small in this microbench and Python‑bound; the goal here is observability, not perf claims.
 
@@ -173,7 +225,7 @@ t2:
 
 **Caches.** Uses the **shared, lock‑wrapped** caches from PR65. Isolated per‑worker caches are **not** used in PR68.
 
-**Metrics (gated).** When `perf.enabled=true` and `perf.metrics.report_memory=true`, T2 emits:
+**Metrics (gated).** When `perf.metrics.enabled=true` and `perf.metrics.report_memory=true`, T2 emits:
 - `t2.task_count` — number of shard tasks.
 - `t2.parallel_workers` — `min(max_workers, task_count)`.
 
@@ -193,10 +245,7 @@ t2:
 - Optional mode: per‑worker isolated caches with deterministic post‑merge using `merge_caches_deterministic` (use the same `order_key` as in `run_parallel`).
 - Determinism: worker order = `order_key(worker_key)` (stable); keys within worker sorted; conflict policy explicit (`first_wins` or `assert_equal`).
 
-See **[cache_safety.md](./cache_safety.md)** for API, wiring patterns, and tests.
-
----
-*This page will be expanded in PR75/PR74 with bench notes, expected shapes, and realistic performance guidance.*
+See **docs/m9/benchmarks.md** for bench usage, shapes, and caveats.
 
 ## Cross‑references
 - PR63 surface (this page): config keys, normalization, and identity guarantees.
@@ -233,7 +282,7 @@ See **[cache_safety.md](./cache_safety.md)** for API, wiring patterns, and tests
 - **Stable sort within tier**: score (quantized) **desc**, then `id` **asc**.
 - **De‑duplicate** by `id` across shards; **global K‑clamp** after merge.
 
-**Metrics (gated).** When `perf.enabled=true` and `perf.metrics.report_memory=true`:
+**Metrics (gated).** When `perf.metrics.enabled=true` and `perf.metrics.report_memory=true`:
 - `t2.task_count` — number of shard tasks (both backends)
 - `t2.parallel_workers` — effective workers used (both backends)
 - `t2.partition_count` — **Lance‑only**, number of partitions observed when parallel path is active
@@ -303,7 +352,7 @@ perf:
 ```
 
 **Metrics (optional, gated).**
-- When `perf.enabled=true` and `perf.metrics.report_memory=true`, drivers may emit `driver.agents_parallel_batch_size` to observe effective batch sizes. No schema changes when the gate is off.
+- When `perf.metrics.enabled=true` and `perf.metrics.report_memory=true`, drivers may emit `driver.agents_parallel_batch_size` to observe effective batch sizes. No schema changes when the gate is off.
 
 **Invariants.**
 - **OFF path:** outputs/logs remain **byte‑identical** to PR69 baseline.
@@ -399,12 +448,13 @@ perf:
 ```yaml
 # examples/perf/parallel_on.yaml
 perf:
-  enabled: true
-  metrics:
-    report_memory: false
   parallel:
     enabled: true
     max_workers: 2
     t1: true
     t2: true
     agents: true
+  metrics:
+    enabled: true
+    report_memory: false
+```

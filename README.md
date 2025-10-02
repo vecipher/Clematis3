@@ -97,7 +97,7 @@ See **[docs/m9/benchmarks.md](docs/m9/benchmarks.md)** for usage, flags, and out
 
 ```bash
 # T1 microbench
-python -m clematis.scripts.bench_t1.py --graphs 32 --iters 3 --workers 8 --parallel --json
+python -m clematis.scripts.bench_t1 --graphs 32 --iters 3 --workers 8 --parallel --json
 
 # T2 microbench (in‑memory)
 python -m clematis.scripts.bench_t2 --iters 3 --workers 4 --backend inmemory --parallel --json
@@ -105,6 +105,40 @@ python -m clematis.scripts.bench_t2 --iters 3 --workers 4 --backend inmemory --p
 # T2 microbench (LanceDB; falls back if extras missing)
 python -m clematis.scripts.bench_t2 --iters 3 --workers 4 --backend lancedb --parallel --json
 ```
+
+#### M9 knobs — quick reference
+
+Use these example configs to toggle deterministic parallelism. With all knobs **OFF**, outputs are byte‑identical to sequential.
+
+```yaml
+# examples/perf/parallel_off.yaml  (sequential baseline)
+perf:
+  parallel:
+    enabled: false
+    max_workers: 1
+    t1: false
+    t2: false
+    agents: false
+  metrics:
+    enabled: false
+    report_memory: false
+```
+
+```yaml
+# examples/perf/parallel_on.yaml  (opt‑in parallel)
+perf:
+  parallel:
+    enabled: true
+    max_workers: 2
+    t1: true
+    t2: true
+    agents: true
+  metrics:
+    enabled: true
+    report_memory: true
+```
+
+See **docs/m9/overview.md** for determinism rules, identity guarantees, and troubleshooting.
 
 *Cache safety:* PR65 adds thread-safe wrappers for shared caches and an optional isolate+merge strategy. See **[docs/m9/cache_safety.md](docs/m9/cache_safety.md)**.
 
