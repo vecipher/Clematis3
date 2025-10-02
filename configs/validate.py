@@ -195,13 +195,8 @@ DEFAULTS: Dict[str, Any] = {
         "t1": {},
         "t2": {},
         "snapshots": {},
-        "metrics": {
-            "report_memory": False
-        },
-        "parallel": {
-            "enabled": False,
-            "max_workers": 0
-        },
+        "metrics": {"report_memory": False},
+        "parallel": {"enabled": False, "max_workers": 0},
     },
 }
 

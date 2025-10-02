@@ -106,7 +106,11 @@ class InMemoryIndex:
                 by_cluster.setdefault(cid, []).append(e)
             cluster_scores: List[Tuple[str, float]] = []
             for cid, items in by_cluster.items():
-                vecs = [np.asarray(it.get("vec_full"), dtype=np.float32) for it in items if it.get("vec_full") is not None]
+                vecs = [
+                    np.asarray(it.get("vec_full"), dtype=np.float32)
+                    for it in items
+                    if it.get("vec_full") is not None
+                ]
                 if not vecs:
                     continue
                 centroid = np.mean(np.stack(vecs, axis=0), axis=0)
@@ -139,7 +143,6 @@ class InMemoryIndex:
             )
         return out
 
-
     # ------------------------------------------------------------------
     # PR68 support: deterministic shard affordance for parallel fan-out
     # ------------------------------------------------------------------
@@ -164,9 +167,7 @@ class InMemoryIndex:
             tier: str,
             hints: Dict[str, Any],
         ) -> List[EpisodeRef]:
-            return self._parent._search_with_episodes(
-                self._episodes, owner, q_vec, k, tier, hints
-            )
+            return self._parent._search_with_episodes(self._episodes, owner, q_vec, k, tier, hints)
 
         def __getattr__(self, name: str) -> Any:
             # Forward other attribute access to the parent; needed for methods

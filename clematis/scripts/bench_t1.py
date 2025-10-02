@@ -1,4 +1,3 @@
-
 #!/usr/bin/env python3
 from __future__ import annotations
 
@@ -70,9 +69,15 @@ def main() -> None:
     )
     ap.add_argument("--graphs", type=int, default=24, help="Number of tiny graphs (default: 24)")
     ap.add_argument("--iters", type=int, default=5, help="Repetitions (default: 5)")
-    ap.add_argument("--workers", type=int, default=4, help="Worker hint when --parallel (default: 4)")
-    ap.add_argument("--parallel", action="store_true", help="Enable perf.parallel for T1 (advisory)")
-    ap.add_argument("--warmup", type=int, default=1, help="Warmup iterations before timing (default: 1)")
+    ap.add_argument(
+        "--workers", type=int, default=4, help="Worker hint when --parallel (default: 4)"
+    )
+    ap.add_argument(
+        "--parallel", action="store_true", help="Enable perf.parallel for T1 (advisory)"
+    )
+    ap.add_argument(
+        "--warmup", type=int, default=1, help="Warmup iterations before timing (default: 1)"
+    )
     ap.add_argument("--json", action="store_true", help="Emit a single stable JSON line")
     args = ap.parse_args()
 
@@ -103,9 +108,7 @@ def main() -> None:
     cfg.perf["metrics"].setdefault("report_memory", True)
     if args.parallel:
         cfg.perf.setdefault("parallel", {})
-        cfg.perf["parallel"].update(
-            {"enabled": True, "t1": True, "max_workers": args.workers}
-        )
+        cfg.perf["parallel"].update({"enabled": True, "t1": True, "max_workers": args.workers})
 
     # Minimal ctx: only fields T1 actually touches
     ctx = SimpleNamespace(cfg=cfg, append_jsonl=lambda rec: None)

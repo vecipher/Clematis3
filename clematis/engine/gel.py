@@ -26,6 +26,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
+
 # Helper: gate all behavior when GEL is disabled
 def _graph_enabled(ctx: Any) -> bool:
     try:

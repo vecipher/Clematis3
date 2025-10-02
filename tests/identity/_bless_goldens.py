@@ -16,9 +16,9 @@ EXPECT = ("apply.jsonl", "t1.jsonl", "t2.jsonl", "t4.jsonl", "turn.jsonl")
 def _pick_logs_dir(preferred: Path) -> Path:
     candidates = [
         preferred,
-        Path(".") / ".data" / "logs",   # older default
-        Path(".") / ".logs",            # current default printed by demo
-        Path("clematis") / ".logs",     # package-local fallback
+        Path(".") / ".data" / "logs",  # older default
+        Path(".") / ".logs",  # current default printed by demo
+        Path("clematis") / ".logs",  # package-local fallback
     ]
     for d in candidates:
         if all((d / n).exists() for n in EXPECT):
@@ -55,6 +55,7 @@ def main():
 
     # Ensure no stale logs: remove entire directories used by the demo
     import shutil as _sh
+
     for d in (tmp, Path(".") / ".data" / "logs", Path(".") / ".logs", Path("clematis") / ".logs"):
         try:
             if d.exists():
@@ -67,6 +68,7 @@ def main():
     for snapdir in (Path(".") / ".data" / "snapshots",):
         try:
             import shutil as _sh
+
             _sh.rmtree(snapdir)
         except FileNotFoundError:
             pass

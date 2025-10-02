@@ -861,7 +861,7 @@ def make_planner_prompt(ctx) -> str:
     return (
         "SYSTEM: Return ONLY valid JSON with keys {plan: list[str], rationale: str}. "
         "No prose. No markdown. No trailing commas.\n"
-        f"STATE: {_json.dumps(summary, separators=(',',':'))}\n"
+        f"STATE: {_json.dumps(summary, separators=(',', ':'))}\n"
         "USER: Propose up to 4 next steps as short strings; include a brief rationale."
     )
 

@@ -1,5 +1,3 @@
-
-
 from __future__ import annotations
 
 from typing import Dict, Any
@@ -48,11 +46,13 @@ def make_cfg_par(workers: int = 2) -> Dict[str, Any]:
     if workers <= 1:
         workers = 2
     cfg = _base()
-    cfg["perf"]["parallel"].update({
-        "enabled": True,
-        "max_workers": int(workers),
-        "t1": True,
-        "t2": True,
-        "agents": True,
-    })
+    cfg["perf"]["parallel"].update(
+        {
+            "enabled": True,
+            "max_workers": int(workers),
+            "t1": True,
+            "t2": True,
+            "agents": True,
+        }
+    )
     return cfg

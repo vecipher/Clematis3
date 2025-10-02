@@ -1,7 +1,13 @@
 import threading
 import pytest
 
-from clematis.engine.cache import CacheManager, stable_key, LRUCache, ThreadSafeCache, ThreadSafeBytesCache
+from clematis.engine.cache import (
+    CacheManager,
+    stable_key,
+    LRUCache,
+    ThreadSafeCache,
+    ThreadSafeBytesCache,
+)
 from clematis.engine.util.lru_bytes import LRUBytes
 
 
@@ -14,6 +20,7 @@ class FakeClock:
 
     def advance(self, dt: float) -> None:
         self._t += float(dt)
+
 
 #
 # Legacy LRU behavior: capacity eviction and MRU promotion remain correct.
@@ -47,6 +54,7 @@ def test_lru_capacity_and_eviction_order():
         hit, val = cm.get(ns, ("v", k))
         assert hit and val == v
 
+
 #
 # TTL pruning occurs on access; expired entries are removed when read.
 #
@@ -65,6 +73,7 @@ def test_ttl_expiry_removes_on_get():
 
     # Entry should have been removed on access
     assert cm.stats["size"] == 0
+
 
 #
 # Namespaced invalidation removes entries deterministically.
@@ -87,6 +96,7 @@ def test_invalidate_namespace_and_all():
     removed_all = cm.invalidate_all()
     assert removed_all == 1
     assert cm.stats["size"] == 0
+
 
 #
 # stable_key normalizes unhashable composite keys (dicts/lists) to a deterministic string.
@@ -111,6 +121,7 @@ def test_stable_key_handles_unhashable_tuples_with_dicts():
 
 # --- PR65 guardrails: thread-safe wrappers are crash-free and deterministic (no timing asserts) ---
 
+
 def test_threadsafe_cache_basic_concurrency():
     """
     Shared LRUCache wrapped with a lock: concurrent writers/readers must not crash.
@@ -125,7 +136,7 @@ def test_threadsafe_cache_basic_concurrency():
     def worker(start: int):
         for i in range(N_WRITES):
             k = ("k", start + i)
-            v = f"v-{start+i}"
+            v = f"v-{start + i}"
             cache.put(k, v)
             got = cache.get(k)
             assert got == v
@@ -154,8 +165,8 @@ def test_threadsafe_bytes_cache_basic_concurrency():
 
     def worker(start: int):
         for i in range(N_WRITES):
-            k = f"kb-{start+i}".encode()
-            v = (f"vb-{start+i}").encode()
+            k = f"kb-{start + i}".encode()
+            v = (f"vb-{start + i}").encode()
             cache.put(k, v, cost=len(v))
             _ = cache.get(k)  # may be None if evicted; that's fine
 

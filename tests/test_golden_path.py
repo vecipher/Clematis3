@@ -6,7 +6,12 @@ import os
 from clematis.world.scenario import run_one_turn
 from clematis.engine.types import Config
 from clematis.io.log import _append_jsonl_unbuffered
-from clematis.engine.util.io_logging import enable_staging, disable_staging, default_key_for, STAGE_ORD
+from clematis.engine.util.io_logging import (
+    enable_staging,
+    disable_staging,
+    default_key_for,
+    STAGE_ORD,
+)
 
 
 def test_golden_path(tmp_path, monkeypatch):
@@ -35,6 +40,7 @@ def test_golden_path(tmp_path, monkeypatch):
             line = f.readline().strip()
             assert line, f"{n} should contain at least one record"
 
+
 def _write_sequential(monkeypatch, logs_dir: Path, records: list[tuple[str, int, int, dict]]):
     """Baseline: write logs in canonical order without staging (sequential run)."""
     monkeypatch.setattr("clematis.io.paths.logs_dir", lambda: str(logs_dir))
@@ -44,7 +50,9 @@ def _write_sequential(monkeypatch, logs_dir: Path, records: list[tuple[str, int,
     ):
         _append_jsonl_unbuffered(filename, payload)
 
+
 essential_streams = ("turn.jsonl", "scheduler.jsonl")
+
 
 def _write_parallel_staged(monkeypatch, logs_dir: Path, records: list[tuple[str, int, int, dict]]):
     """Parallel path: stage in reverse order, then flush deterministically via stager."""
@@ -58,6 +66,7 @@ def _write_parallel_staged(monkeypatch, logs_dir: Path, records: list[tuple[str,
             _append_jsonl_unbuffered(rec.file_path, rec.payload)
     finally:
         disable_staging()
+
 
 def test_turn_and_scheduler_stable_vs_sequential(monkeypatch, tmp_path):
     # Same logical events; two agents (slice 0/1) for a single turn.

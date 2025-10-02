@@ -1,5 +1,3 @@
-
-
 """PR70: Deterministic log capture for agent-level parallel driver.
 
 This module provides a tiny buffered logger (LogMux) and helpers to allow
@@ -8,6 +6,7 @@ turn, then flushes in a deterministic order during the commit phase.
 
 Default behavior (no mux set) writes through to the real append_jsonl.
 """
+
 from __future__ import annotations
 
 from contextlib import contextmanager

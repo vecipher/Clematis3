@@ -93,22 +93,33 @@ def _gen_ops(N: int, seed: int = 1337):
 # --------------------------
 try:
     from clematis.graph.store import InMemoryGraphStore, Node, Edge
-except Exception:  # pragma: no cover — if the module layout differs, the entire module is already importorskip'ed
+except (
+    Exception
+):  # pragma: no cover — if the module layout differs, the entire module is already importorskip'ed
     InMemoryGraphStore = None  # type: ignore
     Node = None  # type: ignore
     Edge = None  # type: ignore
+
 
 def _store_three():
     store = InMemoryGraphStore()
     for gid in ("A", "B", "C"):
         store.ensure(gid)
-        store.upsert_nodes(gid, [
-            Node(id=f"{gid}:seed", label="seed"),
-            Node(id=f"{gid}:n1", label="n1"),
-        ])
-        store.upsert_edges(gid, [
-            Edge(id=f"{gid}:e1", src=f"{gid}:seed", dst=f"{gid}:n1", weight=1.0, rel="supports"),
-        ])
+        store.upsert_nodes(
+            gid,
+            [
+                Node(id=f"{gid}:seed", label="seed"),
+                Node(id=f"{gid}:n1", label="n1"),
+            ],
+        )
+        store.upsert_edges(
+            gid,
+            [
+                Edge(
+                    id=f"{gid}:e1", src=f"{gid}:seed", dst=f"{gid}:n1", weight=1.0, rel="supports"
+                ),
+            ],
+        )
     return store, ["A", "B", "C"]
 
 
@@ -217,12 +228,15 @@ def test_t1_parallel_metrics_require_report_memory_and_gate_on():
 def test_bench_t1_script_smoke(capsys):
     """Smoke: bench prints JSON when requested; no assertions on perf."""
     try:
-        mod = __import__("clematis.scripts.bench_t1", fromlist=["main"])  # prefer package import under clematis
+        mod = __import__(
+            "clematis.scripts.bench_t1", fromlist=["main"]
+        )  # prefer package import under clematis
     except ModuleNotFoundError:
         import importlib.util
         import sys
         from pathlib import Path
         import clematis as _c
+
         base = Path(_c.__file__).resolve().parents[0]  # clematis package directory
         bench_path = base / "scripts" / "bench_t1.py"
         if not bench_path.exists():
@@ -233,10 +247,19 @@ def test_bench_t1_script_smoke(capsys):
         assert spec.loader is not None
         spec.loader.exec_module(mod)
     import sys
+
     argv_bak = sys.argv[:]
     try:
         sys.argv = [
-            "bench_t1.py", "--graphs", "3", "--iters", "2", "--workers", "4", "--parallel", "--json",
+            "bench_t1.py",
+            "--graphs",
+            "3",
+            "--iters",
+            "2",
+            "--workers",
+            "4",
+            "--parallel",
+            "--json",
         ]
         mod.main()
         out = capsys.readouterr().out.strip()

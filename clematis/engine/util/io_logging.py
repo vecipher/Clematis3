@@ -1,5 +1,3 @@
-
-
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -44,6 +42,7 @@ _IDENTITY_LOGS = {
     "apply.jsonl",
     "turn.jsonl",
 }
+
 
 def normalize_for_identity(name: str, rec: Dict[str, Any]) -> Dict[str, Any]:
     """
@@ -155,6 +154,7 @@ class LogStager:
 
 
 # ---- module helpers ----
+
 
 def enable_staging(byte_limit: int = 32 * 1024 * 1024) -> LogStager:
     """Enable staging in the current context and return the stager instance."""

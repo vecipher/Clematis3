@@ -18,9 +18,9 @@ def _ensure_outputs_dir(out_dir: Path) -> Path:
     # Prefer env-directed logs directory; otherwise search known defaults
     candidates = [
         out_dir,
-        Path(".") / ".data" / "logs",   # older default
-        Path(".") / ".logs",            # current default printed by demo
-        Path("clematis") / ".logs",     # package-local fallback
+        Path(".") / ".data" / "logs",  # older default
+        Path(".") / ".logs",  # current default printed by demo
+        Path("clematis") / ".logs",  # package-local fallback
     ]
     for d in candidates:
         if all((d / name).exists() for name in EXPECT):
@@ -41,7 +41,13 @@ def test_disabled_path_identity(tmp_path: Path):
 
     # Ensure no stale logs: remove entire directories used by the demo
     import shutil as _sh
-    for d in (out_dir, Path(".") / ".data" / "logs", Path(".") / ".logs", Path("clematis") / ".logs"):
+
+    for d in (
+        out_dir,
+        Path(".") / ".data" / "logs",
+        Path(".") / ".logs",
+        Path("clematis") / ".logs",
+    ):
         try:
             if d.exists():
                 _sh.rmtree(d)
@@ -53,6 +59,7 @@ def test_disabled_path_identity(tmp_path: Path):
     for snapdir in (Path(".") / ".data" / "snapshots",):
         try:
             import shutil as _sh
+
             _sh.rmtree(snapdir)
         except FileNotFoundError:
             pass

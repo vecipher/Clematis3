@@ -1,5 +1,3 @@
-
-
 import json
 
 import pytest
@@ -71,16 +69,24 @@ def test_run_bench_inmemory_parallel_backfills_metrics():
 def test_cli_json_smoke(capsys):
     from clematis.scripts import bench_t2
 
-    rc = bench_t2.main([
-        "--iters", "1",
-        "--workers", "2",
-        "--backend", "inmemory",
-        "--rows", "24",
-        "--dim", "8",
-        "--k", "8",
-        "--parallel",
-        "--json",
-    ])
+    rc = bench_t2.main(
+        [
+            "--iters",
+            "1",
+            "--workers",
+            "2",
+            "--backend",
+            "inmemory",
+            "--rows",
+            "24",
+            "--dim",
+            "8",
+            "--k",
+            "8",
+            "--parallel",
+            "--json",
+        ]
+    )
     assert rc == 0
     captured = capsys.readouterr().out.strip()
     data = json.loads(captured)

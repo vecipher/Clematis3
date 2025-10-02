@@ -28,9 +28,9 @@ def test_explicit_dir_bypass_for_inspect_snapshot(tmp_path):
     out = json.loads(p.stdout)
     expected_path = str((snapdir / "snap_000001.json").resolve())
     reported = out.get("input_path") or out.get("source") or out.get("path")
-    assert (
-        reported == expected_path
-    ), f"expected path {expected_path}, got {reported}; keys={sorted(out.keys())}"
+    assert reported == expected_path, (
+        f"expected path {expected_path}, got {reported}; keys={sorted(out.keys())}"
+    )
 
 
 def test_explicit_dir_bypass_for_rotate_logs(tmp_path):

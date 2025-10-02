@@ -71,9 +71,9 @@ def test_partition_owner_quarter_parity_fp16(tmp_path: Path):
         for qi, q in enumerate(qs):
             base_ids_k, base_scores_k = _topk(u_ids, u_vecs, u_norms, q, k)
             part_ids_k, part_scores_k = _topk(p_ids, p_vecs, p_norms, q, k)
-            assert (
-                part_ids_k == base_ids_k
-            ), f"Top-{k} mismatch for query {qi}:\nunpart={base_ids_k}\npart=  {part_ids_k}"
+            assert part_ids_k == base_ids_k, (
+                f"Top-{k} mismatch for query {qi}:\nunpart={base_ids_k}\npart=  {part_ids_k}"
+            )
             max_delta = (
                 float(np.max(np.abs(part_scores_k - base_scores_k))) if len(base_scores_k) else 0.0
             )

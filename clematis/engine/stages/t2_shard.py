@@ -14,6 +14,7 @@ __all__ = [
 @dataclass(frozen=True)
 class RawHit:
     """Lightweight candidate used by sharded T2 helpers."""
+
     episode_id: str
     score: float
     payload: Dict[str, Any]

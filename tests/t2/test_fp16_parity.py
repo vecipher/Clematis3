@@ -71,9 +71,9 @@ def test_fp16_store_fp32_math_parity(tmp_path: Path, precompute_norms: bool):
         for qi, q in enumerate(qs):
             base_ids_k, base_scores_k = _topk(ids, base_vecs, base_norms, q, k)
             read_ids_k, read_scores_k = _topk(r_ids, r_vecs, r_norms, q, k)
-            assert (
-                read_ids_k == base_ids_k
-            ), f"Top-{k} mismatch for query {qi}:\nbase={base_ids_k}\nread={read_ids_k}"
+            assert read_ids_k == base_ids_k, (
+                f"Top-{k} mismatch for query {qi}:\nbase={base_ids_k}\nread={read_ids_k}"
+            )
             # Scores should match to within 1e-6 due to fp16-aligned grid
             max_delta = (
                 float(np.max(np.abs(read_scores_k - base_scores_k))) if len(base_scores_k) else 0.0

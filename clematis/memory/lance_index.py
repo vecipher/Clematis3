@@ -408,7 +408,9 @@ class LanceIndex:
             parts = []
             for q in sorted(quarters.keys()):
                 ids = sorted(set(quarters[q]))
-                parts.append(_LancePartition(parent=self, id_whitelist=set(ids), label=f"quarter:{q}"))
+                parts.append(
+                    _LancePartition(parent=self, id_whitelist=set(ids), label=f"quarter:{q}")
+                )
             return parts
 
         # Otherwise, create deterministic hash buckets by id to form logical shards.

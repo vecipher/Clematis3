@@ -32,9 +32,9 @@ def test_perf_defaults_off_identity():
         "t2": {"k_retrieval": 16},
     }
     norm = validate_config(base)
-    assert (
-        "perf" not in norm
-    ), "validator must not inject a perf section when user did not provide one"
+    assert "perf" not in norm, (
+        "validator must not inject a perf section when user did not provide one"
+    )
     # quality block also absent unless explicitly provided
     assert "quality" not in norm.get("t2", {})
 

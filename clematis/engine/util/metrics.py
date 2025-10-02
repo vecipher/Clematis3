@@ -48,7 +48,9 @@ def emit_many(
 
 
 # Update a metrics dict in-place with items if the metrics gate is ON.
-def update_gated(cfg: Any, dst: MutableMapping[str, Any], items: Mapping[str, Any] | None) -> MutableMapping[str, Any]:
+def update_gated(
+    cfg: Any, dst: MutableMapping[str, Any], items: Mapping[str, Any] | None
+) -> MutableMapping[str, Any]:
     """
     Update a metrics dict in-place with `items` if the metrics gate is ON.
     Unlike `emit_many`, this expects `dst` to be the metrics mapping itself.

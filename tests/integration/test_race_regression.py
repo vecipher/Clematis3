@@ -73,7 +73,14 @@ def patched_apply_changes(monkeypatch):
 
 
 def _compare_artifacts(seq_dir, par_dir):
-    for name in ("t1.jsonl", "t2.jsonl", "t4.jsonl", "apply.jsonl", "turn.jsonl", "scheduler.jsonl"):
+    for name in (
+        "t1.jsonl",
+        "t2.jsonl",
+        "t4.jsonl",
+        "apply.jsonl",
+        "turn.jsonl",
+        "scheduler.jsonl",
+    ):
         seq_lines = read_lines(seq_dir, name)
         par_lines = read_lines(par_dir, name)
         assert seq_lines == par_lines, f"Mismatch in {name}"
@@ -83,7 +90,9 @@ def _compare_artifacts(seq_dir, par_dir):
     assert hash_snapshots(seq_snaps) == hash_snapshots(par_snaps)
 
 
-def test_deterministic_contention_toggle_identity(patched_run_turn, patched_apply_changes, monkeypatch, tmp_path):
+def test_deterministic_contention_toggle_identity(
+    patched_run_turn, patched_apply_changes, monkeypatch, tmp_path
+):
     # Disjoint world (A,B)
     state1 = make_state_disjoint(2)
     state2 = make_state_disjoint(2)
@@ -101,6 +110,7 @@ def test_deterministic_contention_toggle_identity(patched_run_turn, patched_appl
     # Monkeypatch the parallel helper to deterministically flip task order inside the pool
     try:
         import clematis.engine.util.parallel as par
+
         orig = par.run_parallel
 
         def wrapped(jobs, *args, **kwargs):  # noqa: ANN001 - signature passthrough
@@ -124,7 +134,9 @@ def test_deterministic_contention_toggle_identity(patched_run_turn, patched_appl
     _compare_artifacts(base_dir, alt_dir)
 
 
-def test_stager_backpressure_does_not_change_artifacts(patched_run_turn, patched_apply_changes, monkeypatch, tmp_path):
+def test_stager_backpressure_does_not_change_artifacts(
+    patched_run_turn, patched_apply_changes, monkeypatch, tmp_path
+):
     # Same tasks/world; run twice: default staging vs tiny byte_limit staging.
     state1 = make_state_disjoint(2)
     state2 = make_state_disjoint(2)

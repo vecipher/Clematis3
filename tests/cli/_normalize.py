@@ -97,7 +97,6 @@ def normalize_help(text: str) -> str:
     return text
 
 
-
 def normalize_completion(text: str) -> str:
     # Completions are already fairly stable; just normalize newlines and strip trailing spaces
     text = _normalize_newlines(text)

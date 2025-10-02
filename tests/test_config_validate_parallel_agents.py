@@ -1,5 +1,3 @@
-
-
 import types
 import pytest
 
@@ -30,7 +28,9 @@ def _run_validate(raw_cfg):
     elif isinstance(res, (list, tuple)):
         warnings = list(res)
 
-    assert warnings is not None, "validate_config_verbose did not return warnings in a recognized shape"
+    assert warnings is not None, (
+        "validate_config_verbose did not return warnings in a recognized shape"
+    )
     return warnings
 
 

@@ -74,6 +74,6 @@ def test_reader_not_used_when_perf_disabled():
     assert "embed_store" not in tier_sequence, f"Reader tier engaged unexpectedly: {tier_sequence}"
 
     # 2) No reader-specific metrics blob should be present
-    assert (
-        "reader" not in metrics
-    ), f"Reader metrics leaked in disabled mode: {list(metrics.keys())}"
+    assert "reader" not in metrics, (
+        f"Reader metrics leaked in disabled mode: {list(metrics.keys())}"
+    )

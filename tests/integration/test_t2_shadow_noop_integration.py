@@ -172,6 +172,6 @@ def test_shadow_noop_integration(tmp_path, monkeypatch):
     assert _read_trace_last(trace_dir_shadow) is not None, "shadow should produce rq_traces.jsonl"
 
     # And baseline did not produce a trace in its own directory
-    assert not (
-        trace_dir_base / "rq_traces.jsonl"
-    ).exists(), "baseline must not produce rq_traces.jsonl when gates are off"
+    assert not (trace_dir_base / "rq_traces.jsonl").exists(), (
+        "baseline must not produce rq_traces.jsonl when gates are off"
+    )

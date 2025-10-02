@@ -253,22 +253,25 @@ def t1_propagate(ctx, state, text: str) -> T1Result:
         if cache is not None:
             hit = cache.get(ckey)
             if hit is not None:
-                return hit["deltas"], {
-                    "pops": hit["metrics"]["pops"],
-                    "iters": hit["metrics"].get("iters", 0),
-                    "propagations": hit["metrics"].get("propagations", 0),
-                    "radius_cap_hits": hit["metrics"].get("radius_cap_hits", 0),
-                    "layer_cap_hits": hit["metrics"].get("layer_cap_hits", 0),
-                    "node_budget_hits": hit["metrics"].get("node_budget_hits", 0),
-                    "_max_delta_local": 0.0,  # cached path does not affect max_delta in current design
-                    "_cache_hit": 1,
-                    "_cache_miss": 0,
-                    "_t1_frontier_evicted": 0,
-                    "_t1_dedup_hits": 0,
-                    "_t1_visited_evicted": 0,
-                    "_t1_cache_evicted": 0,
-                    "_t1_cache_bytes": 0,
-                }
+                return (
+                    hit["deltas"],
+                    {
+                        "pops": hit["metrics"]["pops"],
+                        "iters": hit["metrics"].get("iters", 0),
+                        "propagations": hit["metrics"].get("propagations", 0),
+                        "radius_cap_hits": hit["metrics"].get("radius_cap_hits", 0),
+                        "layer_cap_hits": hit["metrics"].get("layer_cap_hits", 0),
+                        "node_budget_hits": hit["metrics"].get("node_budget_hits", 0),
+                        "_max_delta_local": 0.0,  # cached path does not affect max_delta in current design
+                        "_cache_hit": 1,
+                        "_cache_miss": 0,
+                        "_t1_frontier_evicted": 0,
+                        "_t1_dedup_hits": 0,
+                        "_t1_visited_evicted": 0,
+                        "_t1_cache_evicted": 0,
+                        "_t1_cache_bytes": 0,
+                    },
+                )
 
         # --- Compute fresh ---
         csr = store.csr(gid)  # dict[src] -> list[(dst, Edge)]
@@ -449,11 +452,15 @@ def t1_propagate(ctx, state, text: str) -> T1Result:
         # Build (key, thunk) with a stable order key that preserves the original active_graphs order.
         tasks: List[Tuple[Tuple[int, str], Any]] = []
         for idx, gid in enumerate(active_graphs):
+
             def make_thunk(_gid=gid):
                 def _():
                     return _t1_one_graph(_gid)
+
                 return _
+
             tasks.append(((idx, str(gid)), make_thunk()))
+
         def merge_fn(pairs):
             # pairs sorted by (index, gid)
             agg_deltas = []
@@ -482,12 +489,41 @@ def t1_propagate(ctx, state, text: str) -> T1Result:
                     agg_visited_ev += m["_t1_visited_evicted"]
                     agg_cache_ev += m["_t1_cache_evicted"]
                     agg_cache_b += m["_t1_cache_bytes"]
-            return (agg_deltas, agg_pops, agg_iters, agg_props, agg_radius_hits, agg_layer_hits, agg_node_hits,
-                    agg_max_delta, agg_cache_hits, agg_cache_miss, agg_frontier_ev, agg_dedup, agg_visited_ev,
-                    agg_cache_ev, agg_cache_b)
-        (all_deltas, total_pops, total_iters, total_propagations, radius_hits, layer_hits, node_hits,
-         max_delta, cache_hits, cache_misses, t1_frontier_evicted, t1_dedup_hits, t1_visited_evicted,
-         t1_cache_evicted, t1_cache_bytes) = run_parallel(
+            return (
+                agg_deltas,
+                agg_pops,
+                agg_iters,
+                agg_props,
+                agg_radius_hits,
+                agg_layer_hits,
+                agg_node_hits,
+                agg_max_delta,
+                agg_cache_hits,
+                agg_cache_miss,
+                agg_frontier_ev,
+                agg_dedup,
+                agg_visited_ev,
+                agg_cache_ev,
+                agg_cache_b,
+            )
+
+        (
+            all_deltas,
+            total_pops,
+            total_iters,
+            total_propagations,
+            radius_hits,
+            layer_hits,
+            node_hits,
+            max_delta,
+            cache_hits,
+            cache_misses,
+            t1_frontier_evicted,
+            t1_dedup_hits,
+            t1_visited_evicted,
+            t1_cache_evicted,
+            t1_cache_bytes,
+        ) = run_parallel(
             tasks,
             max_workers=int(_cfg_get(ctx.cfg, ["perf", "parallel", "max_workers"], 0) or 0),
             merge_fn=merge_fn,

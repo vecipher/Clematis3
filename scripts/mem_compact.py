@@ -75,7 +75,7 @@ def run(
         hdr["level"] = lvl
         # destination name
         stem = ip.name.replace(".json.zst", ".json").replace(".json", "")
-        opath = dst / f"{stem}.json{'.zst' if compression=='zstd' else ''}"
+        opath = dst / f"{stem}.json{'.zst' if compression == 'zstd' else ''}"
         plan.append((ip, opath, hdr, body))
     if dry_run:
         out = [{"src": str(i), "dst": str(o)} for (i, o, _, _) in plan]

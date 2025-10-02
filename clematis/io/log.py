@@ -40,6 +40,7 @@ def append_jsonl(filename: str, record: dict, *, feature_guard: bool | None = No
     mux = None
     try:  # best-effort, safe if module missing
         from ..engine.util.logmux import LOG_MUX  # type: ignore
+
         try:
             mux = LOG_MUX.get()
         except Exception:

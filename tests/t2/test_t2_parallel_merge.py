@@ -14,22 +14,28 @@ from clematis.engine.stages.t2 import (
 # Helpers / test doubles
 # -------------------------
 
+
 class DummyIndex:
     """Minimal index stub exposing the private shard iterator attribute."""
+
     def __init__(self, has_shards=True):
         if has_shards:
             # Only attribute presence matters for the gate; callable not invoked here.
             self._iter_shards_for_t2 = lambda *a, **kw: iter([object(), object()])
 
+
 class Ep:
     """Episode-like object for _collect_shard_hits normalization tests."""
+
     def __init__(self, id, score, text=""):
         self.id = id
         self.score = score
         self.text = text
 
+
 class DummyShard:
     """Shard with deterministic search_tiered behavior used by _collect_shard_hits."""
+
     def __init__(self, tier_to_hits):
         # tier_to_hits: dict[tier -> list[dict|Ep]]
         self.tier_to_hits = tier_to_hits
@@ -42,6 +48,7 @@ class DummyShard:
 # -------------------------
 # Tests
 # -------------------------
+
 
 def test_gate_semantics_variants():
     # default disabled -> False
@@ -103,7 +110,9 @@ def _sequential_emulation(shard_dicts, tiers, k):
         bucket = []
         for d in shard_dicts:
             bucket.extend(d.get(tier, []))
-        bucket.sort(key=lambda h: (-_qscore(h.get("score", h.get("_score", 0.0))), str(h.get("id"))))
+        bucket.sort(
+            key=lambda h: (-_qscore(h.get("score", h.get("_score", 0.0))), str(h.get("id")))
+        )
         for h in bucket:
             hid = str(h.get("id"))
             if hid in seen:

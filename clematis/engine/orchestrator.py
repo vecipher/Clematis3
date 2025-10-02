@@ -3,8 +3,12 @@ from typing import Any, Dict
 import time
 from datetime import datetime, timezone
 import os as _os
+
+
 def _iso_from_ms(ms: int) -> str:
     return datetime.fromtimestamp(ms / 1000.0, tz=timezone.utc).isoformat()
+
+
 from types import SimpleNamespace
 from .types import TurnCtx, TurnResult
 from .stages.t1 import t1_propagate
@@ -65,7 +69,9 @@ def _extract_dryrun_artifacts(ctx: TurnCtx) -> tuple[list, str, dict, dict]:
     return deltas, utter, t1_info, t2_info
 
 
-def _run_turn_compute(ctx: TurnCtx, base_state: Any, agent_id: str, input_text: str) -> "_TurnBuffer":
+def _run_turn_compute(
+    ctx: TurnCtx, base_state: Any, agent_id: str, input_text: str
+) -> "_TurnBuffer":
     """Compute phase: run stages up to T4 on a read-only snapshot, capturing logs.
     The underlying `append_jsonl` is ctx-aware and will buffer to the active LogMux.
     """
@@ -103,7 +109,9 @@ def _run_turn_compute(ctx: TurnCtx, base_state: Any, agent_id: str, input_text: 
         _end_log_capture(token)
 
 
-def _run_agents_parallel_batch(ctx: TurnCtx, state: dict, tasks: list[tuple[str, str]]) -> list[TurnResult]:
+def _run_agents_parallel_batch(
+    ctx: TurnCtx, state: dict, tasks: list[tuple[str, str]]
+) -> list[TurnResult]:
     """Run a batch of (agent_id, input_text) with compute-then-commit semantics.
     This function is gated by the caller; it does not alter default run_turn behavior.
     """
@@ -122,7 +130,9 @@ def _run_agents_parallel_batch(ctx: TurnCtx, state: dict, tasks: list[tuple[str,
     stager = enable_staging()
 
     # Select independent batch in input order
-    max_workers = int(((_get_cfg(ctx).get("perf") or {}).get("parallel") or {}).get("max_workers", 2))
+    max_workers = int(
+        ((_get_cfg(ctx).get("perf") or {}).get("parallel") or {}).get("max_workers", 2)
+    )
     agent_ids = [aid for aid, _ in tasks]
     picked = _select_independent_batch(agent_ids, state, max_workers)
 
@@ -155,7 +165,12 @@ def _run_agents_parallel_batch(ctx: TurnCtx, state: dict, tasks: list[tuple[str,
     # Apply deltas sequentially in deterministic order and stage apply logs
     results: list[TurnResult] = []
     for buf in _sort_turn_buffers(buffers):
-        t4_like = _SNS(approved_deltas=list(buf["deltas"]), rejected_ops=[], reasons=["PR70_COMMIT"], metrics={"counts": {"approved": len(buf["deltas"])}})
+        t4_like = _SNS(
+            approved_deltas=list(buf["deltas"]),
+            rejected_ops=[],
+            reasons=["PR70_COMMIT"],
+            metrics={"counts": {"approved": len(buf["deltas"])}},
+        )
         apply = apply_changes(ctx, state, t4_like)
         apply_payload = {
             "turn": buf["turn_id"],
@@ -164,10 +179,16 @@ def _run_agents_parallel_batch(ctx: TurnCtx, state: dict, tasks: list[tuple[str,
             "clamps": apply.clamps,
             "version_etag": apply.version_etag,
             "snapshot": apply.snapshot_path,
-            "cache_invalidations": int((getattr(apply, "metrics", {}) or {}).get("cache_invalidations", 0)),
+            "cache_invalidations": int(
+                (getattr(apply, "metrics", {}) or {}).get("cache_invalidations", 0)
+            ),
             "ms": 0.0,
         }
-        key = default_key_for(file_path="apply.jsonl", turn_id=buf["turn_id"], slice_idx=int(buf.get("slice_idx", 0) or 0))
+        key = default_key_for(
+            file_path="apply.jsonl",
+            turn_id=buf["turn_id"],
+            slice_idx=int(buf.get("slice_idx", 0) or 0),
+        )
         # PR76: stabilize identity fields before logging
         _ap = dict(apply_payload)
         # Deterministic timestamp: prefer ctx.now_ms; else drop 'now'
@@ -197,11 +218,13 @@ def _run_agents_parallel_batch(ctx: TurnCtx, state: dict, tasks: list[tuple[str,
 
     return results
 
+
 # --- M5: Scheduler wiring (PR26 — helpers & scaffolding; yields gated) ---
 from typing import TypedDict
 
 _sched_next_turn = None
 _sched_on_yield = None
+
 
 def _maybe_load_scheduler():
     """Import engine scheduler lazily to avoid any side-effects in identity path."""
@@ -211,6 +234,7 @@ def _maybe_load_scheduler():
     try:
         # PR25 path: engine-local scheduler
         from .scheduler import next_turn as _nt, on_yield as _oy  # type: ignore
+
         _sched_next_turn, _sched_on_yield = _nt, _oy
     except Exception:
         _sched_next_turn, _sched_on_yield = None, None
@@ -222,14 +246,15 @@ class _SliceCtx(TypedDict):
     budgets: Dict[str, int]
     agent_id: str
 
+
 # --- PR70: Turn buffer type for parallel driver scaffolding ---
 class _TurnBuffer(TypedDict):
     turn_id: int | str
     slice_idx: int
     agent_id: str
     logs: list[tuple[str, dict]]  # (stream, obj) pairs captured during compute
-    deltas: Any                    # placeholder for T4-approved deltas (PR70 wiring)
-    dialogue: str                  # the utterance string (if any)
+    deltas: Any  # placeholder for T4-approved deltas (PR70 wiring)
+    dialogue: str  # the utterance string (if any)
     graphs_touched: set[str]
     graph_versions: Dict[str, str]
 
@@ -303,7 +328,6 @@ def agent_ready(ctx, state, agent_id: str) -> tuple[bool, str]:
 # --- Config accessor for harmonized config usage ---
 
 
-
 def _get_cfg(ctx) -> Dict[str, Any]:
     """Normalize config access across ctx.cfg / ctx.config; always returns a dict."""
     cfg = getattr(ctx, "cfg", None)
@@ -318,7 +342,9 @@ def _get_cfg(ctx) -> Dict[str, Any]:
         return dict(cfg2.__dict__)
     return {}
 
+
 # --- PR70 minimal driver helpers (scaffolding; not yet wired to run_turn) ---
+
 
 def _resolve_graphs_for_agent(state: Any, agent_id: str) -> set[str]:
     """Best-effort resolver for graphs an agent may touch.
@@ -337,7 +363,11 @@ def _resolve_graphs_for_agent(state: Any, agent_id: str) -> set[str]:
             if g is not None:
                 return {str(x) for x in g}
         # 2) state["graphs_by_agent"][agent_id] -> iterable
-        gba = state.get("graphs_by_agent") if isinstance(state, dict) else getattr(state, "graphs_by_agent", None)
+        gba = (
+            state.get("graphs_by_agent")
+            if isinstance(state, dict)
+            else getattr(state, "graphs_by_agent", None)
+        )
         if isinstance(gba, dict) and agent_id in gba:
             return {str(x) for x in (gba.get(agent_id) or [])}
     except Exception:
@@ -380,6 +410,7 @@ def _sort_turn_buffers(buffers: list[_TurnBuffer]) -> list[_TurnBuffer]:
     """Sort buffers deterministically by (turn_id, slice_idx).
     turn_id is compared as int when possible, else as string.
     """
+
     def _key(b: _TurnBuffer):
         tid = b.get("turn_id")
         try:
@@ -387,6 +418,7 @@ def _sort_turn_buffers(buffers: list[_TurnBuffer]) -> list[_TurnBuffer]:
             return (0, tid_i, int(b.get("slice_idx", 0)))
         except Exception:
             return (1, str(tid), int(b.get("slice_idx", 0)))
+
     return sorted(buffers, key=_key)
 
 
@@ -394,7 +426,9 @@ def _make_readonly_snapshot(state: Any) -> Any:
     """Create a read-only snapshot facade used by the compute phase."""
     return readonly_snapshot(state)
 
+
 # --- PR70: agent-level parallel driver gate ---
+
 
 def _agents_parallel_enabled(ctx) -> bool:
     cfg = _get_cfg(ctx)
@@ -1014,16 +1048,24 @@ class Orchestrator:
                     setattr(ctx, "_dryrun_t4", t4)
                     setattr(ctx, "_dryrun_utter", utter if 'utter' in locals() else "")
                     # also stash a few fields used by the batch driver
-                    setattr(ctx, "_dryrun_t1", {
-                        "pops": t1.metrics.get("pops"),
-                        "iters": t1.metrics.get("iters"),
-                        "graphs_touched": t1.metrics.get("graphs_touched"),
-                    })
-                    setattr(ctx, "_dryrun_t2", {
-                        "k_returned": t2.metrics.get("k_returned"),
-                        "k_used": t2.metrics.get("k_used"),
-                        "cache_hit": bool(cache_hit),
-                    })
+                    setattr(
+                        ctx,
+                        "_dryrun_t1",
+                        {
+                            "pops": t1.metrics.get("pops"),
+                            "iters": t1.metrics.get("iters"),
+                            "graphs_touched": t1.metrics.get("graphs_touched"),
+                        },
+                    )
+                    setattr(
+                        ctx,
+                        "_dryrun_t2",
+                        {
+                            "k_returned": t2.metrics.get("k_returned"),
+                            "k_used": t2.metrics.get("k_used"),
+                            "cache_hit": bool(cache_hit),
+                        },
+                    )
                 except Exception:
                     pass
                 return TurnResult(line=utter if 'utter' in locals() else "", events=[])
@@ -1193,7 +1235,9 @@ class Orchestrator:
                 "clamps": apply.clamps,
                 "version_etag": apply.version_etag,
                 "snapshot": apply.snapshot_path,
-                "cache_invalidations": int((getattr(apply, "metrics", {}) or {}).get("cache_invalidations", 0)),
+                "cache_invalidations": int(
+                    (getattr(apply, "metrics", {}) or {}).get("cache_invalidations", 0)
+                ),
                 "ms": apply_ms,
                 **({"now": now} if now else {}),
             }

@@ -1,7 +1,19 @@
 from __future__ import annotations
 from collections import OrderedDict
 from dataclasses import dataclass
-from typing import Any, Dict, Hashable, Tuple, Protocol, TypeVar, Generic, Optional, Iterable, List, Callable
+from typing import (
+    Any,
+    Dict,
+    Hashable,
+    Tuple,
+    Protocol,
+    TypeVar,
+    Generic,
+    Optional,
+    Iterable,
+    List,
+    Callable,
+)
 import time
 import json
 import threading
@@ -70,18 +82,22 @@ def stable_key(obj: Any) -> str:
 K = TypeVar("K")
 V = TypeVar("V")
 
+
 class CacheProtocol(Protocol[K, V]):
     """Minimal cache protocol used by parallel-safe wrappers & merges."""
+
     def get(self, key: K) -> Optional[V]: ...
     def put(self, key: K, value: V) -> None: ...
     def __contains__(self, key: K) -> bool: ...
     def items(self) -> Iterable[Tuple[K, V]]: ...
+
 
 class ThreadSafeCache(Generic[K, V]):
     """
     Thin lock wrapper providing thread-safety for a CacheProtocol.
     Does not change semantics of the underlying cache; only serializes access.
     """
+
     __slots__ = ("_inner", "_lock")
 
     def __init__(self, inner: CacheProtocol[K, V], lock: Optional[threading.RLock] = None) -> None:
@@ -105,11 +121,13 @@ class ThreadSafeCache(Generic[K, V]):
         with self._lock:
             return list(self._inner.items())
 
+
 class ThreadSafeBytesCache(Generic[K, V]):
     """
     Thin lock wrapper for size-aware caches (e.g., LRUBytes) whose `put` takes (key, value, cost).
     Preserves the underlying cache's return signature (e.g., eviction counts/bytes).
     """
+
     __slots__ = ("_inner", "_lock")
 
     def __init__(self, inner: Any, lock: Optional[threading.RLock] = None) -> None:
@@ -132,6 +150,7 @@ class ThreadSafeBytesCache(Generic[K, V]):
     def items(self) -> Iterable[Tuple[K, V]]:
         with self._lock:
             return list(self._inner.items())
+
 
 def merge_caches_deterministic(
     target: CacheProtocol[K, V],
@@ -160,6 +179,8 @@ def merge_caches_deterministic(
                 # first_wins → skip later value
                 continue
             target.put(k, v)
+
+
 # -----------------------------------------------------------------------------
 
 

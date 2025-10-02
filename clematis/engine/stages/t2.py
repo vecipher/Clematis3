@@ -217,7 +217,9 @@ def _collect_shard_hits(
         if now_str:
             hints["now"] = now_str
         try:
-            hits = shard.search_tiered(owner=owner_query, q_vec=q_vec, k=k_retrieval, tier=tier, hints=hints)
+            hits = shard.search_tiered(
+                owner=owner_query, q_vec=q_vec, k=k_retrieval, tier=tier, hints=hints
+            )
         except Exception:
             hits = []
         normed: List[Dict[str, Any]] = []
@@ -619,11 +621,19 @@ def t2_semantic(ctx, state, text: str, t1) -> T2Result:
                 # PR69: expose partition count for LanceDB path (gated metrics only)
                 if str(backend_selected).lower() == "lancedb":
                     t2_partition_count = len(shards)
+
                 def _task(sh):
                     return _collect_shard_hits(
-                        sh, tiers, owner_query, q_vec, k_retrieval, now_str,
-                        float(sim_threshold), int(clusters_top_m)
+                        sh,
+                        tiers,
+                        owner_query,
+                        q_vec,
+                        k_retrieval,
+                        now_str,
+                        float(sim_threshold),
+                        int(clusters_top_m),
                     )
+
                 tasks = [(i, (lambda S=sh: _task(S))) for i, sh in enumerate(shards)]
                 shard_hits = run_parallel(
                     tasks,
@@ -835,7 +845,9 @@ def t2_semantic(ctx, state, text: str, t1) -> T2Result:
                 except Exception:
                     quality_mmr = None
                 try:
-                    mmr_enabled = bool(_cfg_get(cfg_root, ["t2", "quality", "mmr", "enabled"], False))
+                    mmr_enabled = bool(
+                        _cfg_get(cfg_root, ["t2", "quality", "mmr", "enabled"], False)
+                    )
                 except Exception:
                     mmr_enabled = False
                 if quality_mmr is not None and mmr_enabled:
