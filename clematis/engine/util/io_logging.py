@@ -15,11 +15,13 @@ __all__ = [
     "disable_staging",
     "staging_enabled",
     "default_key_for",
+    "normalize_for_identity",
 ]
 
 # Context flags/state (kept local to avoid global side effects when disabled)
 STAGING_ENABLED: ContextVar[bool] = ContextVar("STAGING_ENABLED", default=False)
 STAGING_STATE: ContextVar[Optional["LogStager"]] = ContextVar("STAGING_STATE", default=None)
+
 
 # Stable within-turn stream order. Unknown streams are ordered last (ord=99).
 STAGE_ORD: Dict[str, int] = {
@@ -33,6 +35,32 @@ STAGE_ORD: Dict[str, int] = {
     "turn.jsonl": 8,
     "scheduler.jsonl": 9,
 }
+
+# Logs that participate in byte-for-byte identity checks
+_IDENTITY_LOGS = {
+    "t1.jsonl",
+    "t2.jsonl",
+    "t4.jsonl",
+    "apply.jsonl",
+    "turn.jsonl",
+}
+
+def normalize_for_identity(name: str, rec: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    For CI identity checks, strip runtime noise from known identity logs:
+    - zero `ms`
+    - drop `now`
+    No-op when CI is not set.
+    """
+    if os.environ.get("CI", "").lower() != "true":
+        return rec
+    if name not in _IDENTITY_LOGS:
+        return rec
+    out = dict(rec)
+    if "ms" in out:
+        out["ms"] = 0.0
+    out.pop("now", None)
+    return out
 
 
 @dataclass(frozen=True)
@@ -96,10 +124,12 @@ class LogStager:
         # Use repr-like size without non-deterministic dict ordering by relying
         # on a structural bound: keys + values length (approx).
         # This is deliberately conservative; correctness does not depend on it.
-        est = sum(len(str(k)) + len(str(v)) for k, v in payload.items()) + 2
+        name = os.path.basename(file_path)
+        payload_norm = normalize_for_identity(name, payload)
+        est = sum(len(str(k)) + len(str(v)) for k, v in payload_norm.items()) + 2
         if self._bytes + est > self.byte_limit:
             raise RuntimeError("LOG_STAGING_BACKPRESSURE")
-        self._buf.append(StagedRecord(file_path, key, payload, est))
+        self._buf.append(StagedRecord(file_path, key, payload_norm, est))
         self._bytes += est
 
     # ---- draining ----

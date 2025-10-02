@@ -744,28 +744,31 @@ def t2_semantic(ctx, state, text: str, t1) -> T2Result:
 
     # --- Optional GEL-based hybrid re-ranking (feature-flagged) ---
     # Prepare hybrid placeholders; we will attach them to `metrics` later
-    hybrid_used = False
-    hybrid_info: Dict[str, Any] = {}
-    try:
-        new_items, hmetrics = rerank_with_gel(ctx, state, retrieved)
-        retrieved = new_items
-        hybrid_used = bool(hmetrics.get("hybrid_used", False))
-        hybrid_info = {
-            k: hmetrics.get(k)
-            for k in (
-                "anchor_top_m",
-                "walk_hops",
-                "edge_threshold",
-                "lambda_graph",
-                "damping",
-                "degree_norm",
-                "k_max",
-                "k_considered",
-                "k_reordered",
-            )
-            if k in hmetrics
-        }
-    except Exception:
+    hcfg = (cfg_t2.get("hybrid", {}) or {}) if isinstance(cfg_t2, dict) else getattr(cfg_t2, "hybrid", {}) or {}
+    if bool(hcfg.get("enabled", False)):
+        try:
+            new_items, hmetrics = rerank_with_gel(ctx, state, retrieved)
+            retrieved = new_items
+            hybrid_used = bool(hmetrics.get("hybrid_used", False))
+            hybrid_info = {
+                k: hmetrics.get(k)
+                for k in (
+                    "anchor_top_m",
+                    "walk_hops",
+                    "edge_threshold",
+                    "lambda_graph",
+                    "damping",
+                    "degree_norm",
+                    "k_max",
+                    "k_considered",
+                    "k_reordered",
+                )
+                if k in hmetrics
+            }
+        except Exception:
+            hybrid_used = False
+            hybrid_info = {}
+    else:
         hybrid_used = False
         hybrid_info = {}
 

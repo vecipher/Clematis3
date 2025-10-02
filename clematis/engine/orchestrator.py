@@ -1,6 +1,10 @@
 from __future__ import annotations
 from typing import Any, Dict
 import time
+from datetime import datetime, timezone
+import os as _os
+def _iso_from_ms(ms: int) -> str:
+    return datetime.fromtimestamp(ms / 1000.0, tz=timezone.utc).isoformat()
 from types import SimpleNamespace
 from .types import TurnCtx, TurnResult
 from .stages.t1 import t1_propagate
@@ -164,13 +168,24 @@ def _run_agents_parallel_batch(ctx: TurnCtx, state: dict, tasks: list[tuple[str,
             "ms": 0.0,
         }
         key = default_key_for(file_path="apply.jsonl", turn_id=buf["turn_id"], slice_idx=int(buf.get("slice_idx", 0) or 0))
+        # PR76: stabilize identity fields before logging
+        _ap = dict(apply_payload)
+        # Deterministic timestamp: prefer ctx.now_ms; else drop 'now'
+        if "now" in _ap:
+            if getattr(ctx, "now_ms", None) is not None:
+                _ap["now"] = _iso_from_ms(int(ctx.now_ms))
+            else:
+                _ap.pop("now", None)
+        # Elapsed wall time is noisy; zero it on CI to keep byte identity
+        if _os.environ.get("CI", "").lower() == "true":
+            _ap["ms"] = 0.0
         try:
-            stager.stage("apply.jsonl", key, apply_payload)
+            stager.stage("apply.jsonl", key, _ap)
         except RuntimeError as e:
             if str(e) == "LOG_STAGING_BACKPRESSURE":
                 for rec in stager.drain_sorted():
                     _append_jsonl_unbuffered(rec.file_path, rec.payload)
-                stager.stage("apply.jsonl", key, apply_payload)
+                stager.stage("apply.jsonl", key, _ap)
             else:
                 raise
         results.append(TurnResult(line=buf["dialogue"], events=[]))
@@ -185,12 +200,20 @@ def _run_agents_parallel_batch(ctx: TurnCtx, state: dict, tasks: list[tuple[str,
 # --- M5: Scheduler wiring (PR26 — helpers & scaffolding; yields gated) ---
 from typing import TypedDict
 
-try:
-    # Core from PR25 (pure, deterministic)
-    from clematis.scheduler import next_turn as _sched_next_turn, on_yield as _sched_on_yield
-except Exception:
-    _sched_next_turn = None
-    _sched_on_yield = None
+_sched_next_turn = None
+_sched_on_yield = None
+
+def _maybe_load_scheduler():
+    """Import engine scheduler lazily to avoid any side-effects in identity path."""
+    global _sched_next_turn, _sched_on_yield
+    if _sched_next_turn is not None or _sched_on_yield is not None:
+        return
+    try:
+        # PR25 path: engine-local scheduler
+        from .scheduler import next_turn as _nt, on_yield as _oy  # type: ignore
+        _sched_next_turn, _sched_on_yield = _nt, _oy
+    except Exception:
+        _sched_next_turn, _sched_on_yield = None, None
 
 
 class _SliceCtx(TypedDict):
@@ -441,6 +464,7 @@ class Orchestrator:
         sched_enabled = _m5_enabled(ctx)
         slice_ctx: _SliceCtx | None = None
         if sched_enabled:
+            _maybe_load_scheduler()
             budgets = _derive_budgets(ctx)
             # If PR25 core is available, record the pick (no enforcement here).
             if _sched_next_turn is not None:
@@ -1162,22 +1186,26 @@ class Orchestrator:
             t0 = time.perf_counter()
             apply = apply_changes(ctx, state, t4)
             apply_ms = round((time.perf_counter() - t0) * 1000.0, 3)
-            append_jsonl(
-                "apply.jsonl",
-                {
-                    "turn": turn_id,
-                    "agent": agent_id,
-                    "applied": apply.applied,
-                    "clamps": apply.clamps,
-                    "version_etag": apply.version_etag,
-                    "snapshot": apply.snapshot_path,
-                    "cache_invalidations": int(
-                        (getattr(apply, "metrics", {}) or {}).get("cache_invalidations", 0)
-                    ),
-                    "ms": apply_ms,
-                    **({"now": now} if now else {}),
-                },
-            )
+            _ap = {
+                "turn": turn_id,
+                "agent": agent_id,
+                "applied": apply.applied,
+                "clamps": apply.clamps,
+                "version_etag": apply.version_etag,
+                "snapshot": apply.snapshot_path,
+                "cache_invalidations": int((getattr(apply, "metrics", {}) or {}).get("cache_invalidations", 0)),
+                "ms": apply_ms,
+                **({"now": now} if now else {}),
+            }
+            # PR76: stabilize identity fields before logging
+            if "now" in _ap:
+                if getattr(ctx, "now_ms", None) is not None:
+                    _ap["now"] = _iso_from_ms(int(ctx.now_ms))
+                else:
+                    _ap.pop("now", None)
+            if _os.environ.get("CI", "").lower() == "true":
+                _ap["ms"] = 0.0
+            append_jsonl("apply.jsonl", _ap)
             # --- M5 boundary check after Apply ---
             if slice_ctx is not None:
                 consumed = {
