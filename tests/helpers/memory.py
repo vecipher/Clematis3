@@ -1,5 +1,3 @@
-
-
 from __future__ import annotations
 
 from typing import List, Dict, Iterable, Tuple
@@ -62,7 +60,9 @@ def shard_by_hash(rows: Iterable[Dict[str, object]], buckets: int) -> List[List[
     return out
 
 
-def partition_rows_round_robin(rows: Iterable[Dict[str, object]], k: int) -> List[List[Dict[str, object]]]:
+def partition_rows_round_robin(
+    rows: Iterable[Dict[str, object]], k: int
+) -> List[List[Dict[str, object]]]:
     """Deterministically split rows into `k` partitions in round-robin order."""
     kk = max(1, int(k))
     parts: List[List[Dict[str, object]]] = [[] for _ in range(kk)]

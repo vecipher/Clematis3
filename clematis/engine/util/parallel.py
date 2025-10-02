@@ -4,9 +4,10 @@ from dataclasses import dataclass
 from concurrent.futures import ThreadPoolExecutor, as_completed, Future
 from typing import Callable, Iterable, List, Sequence, Tuple, TypeVar, Generic, Any
 
-K = TypeVar("K")   # task key (e.g., graph_id, shard_id)
-R = TypeVar("R")   # task result
-A = TypeVar("A")   # aggregated (merged) result
+K = TypeVar("K")  # task key (e.g., graph_id, shard_id)
+R = TypeVar("R")  # task result
+A = TypeVar("A")  # aggregated (merged) result
+
 
 @dataclass(frozen=True)
 class TaskError(Generic[K]):
@@ -14,12 +15,15 @@ class TaskError(Generic[K]):
     exc_type: str
     message: str
 
+
 class ParallelError(Exception):
     """Deterministic container for parallel task failures."""
+
     def __init__(self, errors: Sequence[TaskError[Any]]):
         self.errors: List[TaskError[Any]] = list(errors)
         msg = "; ".join(f"[{e.key}] {e.exc_type}: {e.message}" for e in self.errors)
         super().__init__(f"{len(self.errors)} parallel task(s) failed: {msg}")
+
 
 def run_parallel(
     tasks: Sequence[Tuple[K, Callable[[], R]]],

@@ -3,7 +3,7 @@ import tempfile
 
 import pytest
 
-from clematis.engine.stages.t2_quality_norm import (
+from clematis.engine.stages.t2.quality_norm import (
     normalize_text,
     tokenize,
     load_alias_map,

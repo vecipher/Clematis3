@@ -20,12 +20,15 @@ t1 = pytest.importorskip("clematis.engine.stages.t1")
 
 # --- Gate semantics -----------------------------------------------------------
 
+
 def _ns(obj: dict) -> SimpleNamespace:
     """Recursively wrap dicts as SimpleNamespace for cfg-style access."""
+
     def wrap(x):
         if isinstance(x, dict):
             return SimpleNamespace(**{k: wrap(v) for k, v in x.items()})
         return x
+
     return wrap(obj)  # type: ignore[return-value]
 
 
@@ -64,6 +67,7 @@ def test_t1_parallel_gate_true_only_when_expected():
 
 # --- Integration: functional equivalence test for parallel ON vs sequential ---
 
+
 def _mk_cfg(workers: int, enabled: bool = True, t1_gate: bool = True) -> Config:
     cfg = Config()
     # Ensure perf exists and is a dict
@@ -78,13 +82,15 @@ def _mk_cfg(workers: int, enabled: bool = True, t1_gate: bool = True) -> Config:
     # Ensure nested parallel dict
     if "parallel" not in cfg.perf or not isinstance(cfg.perf["parallel"], dict):
         cfg.perf["parallel"] = {}
-    cfg.perf["parallel"].update({
-        "enabled": enabled,
-        "t1": t1_gate,
-        "t2": False,
-        "agents": False,
-        "max_workers": workers,
-    })
+    cfg.perf["parallel"].update(
+        {
+            "enabled": enabled,
+            "t1": t1_gate,
+            "t2": False,
+            "agents": False,
+            "max_workers": workers,
+        }
+    )
     return cfg
 
 
@@ -96,13 +102,19 @@ def _mk_ctx_with_log_buffer(cfg):
 def _build_tiny_store():
     # Import minimal graph primitives from the public API the rest of the tests use
     from clematis.graph.store import InMemoryGraphStore, Node, Edge
+
     store = InMemoryGraphStore()
     # Three small graphs A,B,C with simple single-edge structure
     for gid in ("A", "B", "C"):
         store.ensure(gid)
-        store.upsert_nodes(gid, [Node(id=f"{gid}:seed", label=f"{gid}-seed"),
-                                 Node(id=f"{gid}:n1", label=f"{gid}-n1")])
-        store.upsert_edges(gid, [Edge(id=f"{gid}:e1", src=f"{gid}:seed", dst=f"{gid}:n1", weight=1.0, rel="supports")])
+        store.upsert_nodes(
+            gid,
+            [Node(id=f"{gid}:seed", label=f"{gid}-seed"), Node(id=f"{gid}:n1", label=f"{gid}-n1")],
+        )
+        store.upsert_edges(
+            gid,
+            [Edge(id=f"{gid}:e1", src=f"{gid}:seed", dst=f"{gid}:n1", weight=1.0, rel="supports")],
+        )
     return store
 
 

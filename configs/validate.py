@@ -189,6 +189,15 @@ DEFAULTS: Dict[str, Any] = {
             "aging_ms": 200,  # bucket size for fair-queue priority
         },
     },
+    "perf": {
+        "enabled": False,
+        # M6/M9 defaults: keep everything OFF to preserve identity path
+        "t1": {},
+        "t2": {},
+        "snapshots": {},
+        "metrics": {"report_memory": False},
+        "parallel": {"enabled": False, "max_workers": 0},
+    },
 }
 
 
@@ -685,7 +694,13 @@ def _validate_config_normalize_impl(cfg: Dict[str, Any]) -> Dict[str, Any]:
                 hint = f" (did you mean '{sug}')" if sug else ""
                 _err(errors, f"t2.quality.cache.{k}", f"unknown key{hint}")
 
-    merged = _deep_merge(cfg_in, DEFAULTS)
+    # Merge defaults non-destructively, but do NOT inject 'perf' unless user supplied it.
+    defaults = dict(DEFAULTS)
+    if "perf" not in cfg_in:
+        # Exclude perf defaults entirely when user didn't specify a perf section
+        defaults = dict(defaults)
+        defaults.pop("perf", None)
+    merged = _deep_merge(cfg_in, defaults)
 
     # Keep raw user-provided subdicts for precedence-sensitive fields
     raw_t4_cache = _ensure_dict(raw_t4.get("cache"))

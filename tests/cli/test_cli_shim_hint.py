@@ -35,14 +35,14 @@ def _run_file(path, *args, **env):
 def _assert_single_hint(stderr: str):
     # Expect exactly one shim hint line that starts with "[clematis]".
     lines = [ln for ln in stderr.splitlines() if ln.strip().startswith("[clematis]")]
-    assert (
-        len(lines) == 1
-    ), f"expected single shim hint line starting with [clematis], got {len(lines)}: {stderr!r}"
+    assert len(lines) == 1, (
+        f"expected single shim hint line starting with [clematis], got {len(lines)}: {stderr!r}"
+    )
     hint = lines[0]
     # Allow either the PR47/umbrella-style "delegate ->" breadcrumb or the deprecation note text.
-    assert ("delegate ->" in hint) or (
-        "note: direct script is deprecated" in hint
-    ), f"unexpected shim hint content: {hint!r}"
+    assert ("delegate ->" in hint) or ("note: direct script is deprecated" in hint), (
+        f"unexpected shim hint content: {hint!r}"
+    )
 
 
 def test_rotate_logs_shim_single_hint(tmp_path: Path):

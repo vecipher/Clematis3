@@ -1,36 +1,6 @@
 from __future__ import annotations
 
-"""
-PR40 — Partition-aware reader shim (optional; flat remains default)
-
-This module provides a *deterministic* partitioned reader wrapper that can be
-used to iterate an existing flat reader in partition order without changing
-content or scores. If no partition metadata is available, it degrades to the
-original flat iteration (parity preserved).
-
-Design goals
-  • No hard dependency on external storage libs. If a Lance/Arrow dataset or
-    on-disk fixture is required by your environment, gate availability via
-    simple file/dir checks and fall back to the flat reader.
-  • Determinism: no RNG/wall‑clock. Partition keys are ordered lexicographically;
-    items keep their original within‑partition order.
-  • Safety: never raise during capability checks; callers decide to fall back.
-
-Intended usage (from t2.py):
-  spec = LancePartitionSpec(root=FIXTURE_ROOT, by=("owner", "quarter"))
-  preader = PartitionedReader(spec, flat_iter=open_reader_iter, id_to_meta=meta_map)
-  if preader.available():
-      for ids, embeds, norms in preader.iter_blocks(batch=1024):
-          ...  # identical content to flat reader, grouped by partition
-  else:
-      ...  # use flat reader directly
-
-Notes
-  • `open_reader_iter` is any zero-arg callable returning an iterator of
-    (ids: List[str], embeds: np.ndarray, norms: np.ndarray) blocks.
-  • `id_to_meta` is an optional mapping from id -> dict of metadata fields used
-    to compute partition keys. If omitted, the wrapper yields the flat order.
-"""
+"""Partition-aware wrapper for optional Lance fixtures; falls back to flat order."""
 
 from dataclasses import dataclass
 from typing import (
@@ -118,8 +88,7 @@ class PartitionedReader:
             if not ok and not __WARNED_PARTITION_UNAVAILABLE:
                 try:
                     _logger.warning(
-                        "t2_lance_reader: partition root not available (%r); falling back to flat reader (one-time warning).",
-                        root,
+                        "t2_lance_reader: partition root unavailable; falling back to flat reader (one-time warning)."
                     )
                 finally:
                     __WARNED_PARTITION_UNAVAILABLE = True
@@ -130,7 +99,7 @@ class PartitionedReader:
             if not __WARNED_PARTITION_UNAVAILABLE:
                 try:
                     _logger.warning(
-                        "t2_lance_reader: exception during availability check; falling back to flat reader (one-time warning)."
+                        "t2_lance_reader: availability check failed; falling back to flat reader (one-time warning)."
                     )
                 finally:
                     __WARNED_PARTITION_UNAVAILABLE = True

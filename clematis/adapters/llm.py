@@ -84,7 +84,7 @@ class FixtureLLMAdapter:
     def __init__(self, path: str):
         p = pathlib.Path(path)
         if not p.exists():
-            raise LLMAdapterError(f"Fixture file not found: {p}")
+            raise LLMAdapterError("Fixture file not found")
         self._map: Dict[str, str] = {}
         with p.open("r", encoding="utf-8") as f:
             for i, line in enumerate(f, 1):
@@ -93,10 +93,14 @@ class FixtureLLMAdapter:
                     continue
                 try:
                     rec = json.loads(line)
-                    key = rec["prompt_hash"]
-                    comp = rec["completion"]
-                except Exception as e:
-                    raise LLMAdapterError(f"Bad fixture JSONL at line {i}: {e}")
+                except json.JSONDecodeError:
+                    raise LLMAdapterError(f"Invalid fixture JSONL at line {i}") from None
+                if not isinstance(rec, dict):
+                    raise LLMAdapterError(f"Invalid fixture JSONL at line {i}") from None
+                if "prompt_hash" not in rec or "completion" not in rec:
+                    raise LLMAdapterError(f"Invalid fixture JSONL at line {i}") from None
+                key = rec["prompt_hash"]
+                comp = rec["completion"]
                 # Last-write-wins to allow local overrides later in the file
                 self._map[str(key)] = str(comp)
 

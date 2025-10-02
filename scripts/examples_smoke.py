@@ -179,7 +179,7 @@ def _run_example(
                 ref_ids, ref_metrics = ids, mets
             else:
                 if ids != ref_ids:
-                    return False, f"non-deterministic ids for query='{q}' (run {r+1} vs 1)"
+                    return False, f"non-deterministic ids for query='{q}' (run {r + 1} vs 1)"
                 # metrics dict can include counters; compare keys presence for stability
                 if set(mets.keys()) != set(ref_metrics.keys()):
                     return False, f"non-deterministic metric keys for query='{q}'"

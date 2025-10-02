@@ -17,18 +17,42 @@ def patched_run_turn(monkeypatch, tmp_path):
 
     def _stub(self, ctx, state, text):  # noqa: ANN001 - test stub
         from clematis.io.log import append_jsonl
+
         # ensure the stub writes some logs to be captured
         if getattr(ctx, "_dry_run_until_t4", False):
-            append_jsonl("t1.jsonl", {"agent": getattr(ctx, "agent_id", "?"), "turn": getattr(ctx, "turn_id", 0), "msg": "t1"})
+            append_jsonl(
+                "t1.jsonl",
+                {
+                    "agent": getattr(ctx, "agent_id", "?"),
+                    "turn": getattr(ctx, "turn_id", 0),
+                    "msg": "t1",
+                },
+            )
             # stash artifacts expected by the batch driver
-            ctx._dryrun_t4 = SNS(approved_deltas=[{"op": "add", "id": f"{getattr(ctx, 'agent_id', '')}-1"}])
+            ctx._dryrun_t4 = SNS(
+                approved_deltas=[{"op": "add", "id": f"{getattr(ctx, 'agent_id', '')}-1"}]
+            )
             ctx._dryrun_utter = f"dry:{getattr(ctx, 'agent_id', '')}:{text}"
             ctx._dryrun_t1 = {"graphs_touched": [f"G-{getattr(ctx, 'agent_id', '')}"]}
             ctx._dryrun_t2 = {"k_returned": 0, "k_used": 0}
-            append_jsonl("t4.jsonl", {"agent": getattr(ctx, "agent_id", "?"), "turn": getattr(ctx, "turn_id", 0), "msg": "t4"})
+            append_jsonl(
+                "t4.jsonl",
+                {
+                    "agent": getattr(ctx, "agent_id", "?"),
+                    "turn": getattr(ctx, "turn_id", 0),
+                    "msg": "t4",
+                },
+            )
             return SNS(line=ctx._dryrun_utter, events=[])
         else:
-            append_jsonl("t1.jsonl", {"agent": getattr(ctx, "agent_id", "?"), "turn": getattr(ctx, "turn_id", 0), "msg": "t1_seq"})
+            append_jsonl(
+                "t1.jsonl",
+                {
+                    "agent": getattr(ctx, "agent_id", "?"),
+                    "turn": getattr(ctx, "turn_id", 0),
+                    "msg": "t1_seq",
+                },
+            )
             return SNS(line=f"seq:{getattr(ctx, 'agent_id', '')}:{text}", events=[])
 
     monkeypatch.setattr(Orchestrator, "run_turn", _stub)
@@ -91,7 +115,9 @@ def test_off_path_sequential_fallback_returns_all(patched_run_turn):
     assert [r.line for r in results] == ["seq:A:hi", "seq:B:yo"]
 
 
-def test_on_path_independent_batch_flushes_logs_and_applies(patched_run_turn, patched_apply_changes):
+def test_on_path_independent_batch_flushes_logs_and_applies(
+    patched_run_turn, patched_apply_changes
+):
     from clematis.engine.orchestrator import _run_agents_parallel_batch
 
     ctx = _ctx(enabled=True, agents=True, max_workers=2, turn_id=123)

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Tuple
 
@@ -72,3 +73,73 @@ def inject_default_from_packaged_or_cwd(
     if position == "append":
         return list(argv) + pair
     return pair + list(argv)
+
+
+@dataclass
+class WrapperArgs:
+    argv: List[str]
+    wants_json: bool
+    wants_table: bool
+    quiet: bool
+    verbose: bool
+    help_requested: bool
+
+
+def prepare_wrapper_args(ns, *, passthrough: Tuple[str, ...] = ()) -> WrapperArgs:
+    raw = list(getattr(ns, "args", []) or [])
+    if raw and raw[0] == "--":
+        raw = raw[1:]
+
+    wants_json = bool(getattr(ns, "json", False))
+    wants_table = bool(getattr(ns, "table", False))
+    quiet = bool(getattr(ns, "quiet", False))
+    verbose = bool(getattr(ns, "verbose", False))
+    help_requested = False
+
+    passthrough_flags = set(passthrough)
+    filtered: List[str] = []
+    i = 0
+    while i < len(raw):
+        tok = raw[i]
+        if tok == "--":
+            i += 1
+            continue
+        if tok in ("-h", "--help"):
+            help_requested = True
+            i += 1
+            continue
+        if tok in passthrough_flags:
+            filtered.append(tok)
+            if i + 1 < len(raw) and not raw[i + 1].startswith("-"):
+                filtered.append(raw[i + 1])
+                i += 2
+            else:
+                i += 1
+            continue
+        if tok == "--json":
+            wants_json = True
+            i += 1
+            continue
+        if tok == "--table":
+            wants_table = True
+            i += 1
+            continue
+        if tok == "--quiet":
+            quiet = True
+            i += 1
+            continue
+        if tok == "--verbose":
+            verbose = True
+            i += 1
+            continue
+        filtered.append(tok)
+        i += 1
+
+    return WrapperArgs(
+        argv=filtered,
+        wants_json=wants_json,
+        wants_table=wants_table,
+        quiet=quiet,
+        verbose=verbose,
+        help_requested=help_requested,
+    )

@@ -25,9 +25,11 @@ Provide a stable, validated config contract for later PRs (PR64+). Teams can sta
 ## Determinism & identity (summary)
 
 - **Ordered logs.** Parallel paths **stage** logs with a stable composite key *(turn_id, stage_ord, slice_idx, seq)*, then **ordered‑write** → results are **sequential‑identical** for `t1/t2/t4/apply/turn/scheduler`.
+- **Identity normalization (CI).** All `append_jsonl` calls flow through `clematis/io/log.py` → `clematis/engine/util/io_logging.normalize_for_identity`, zeroing `ms`/`durations_ms` and dropping `now` when `CI=true` so goldens stay byte‑identical.
 - **Back‑pressure.** When stager buffers hit the cap, we raise `LOG_STAGING_BACKPRESSURE` and deterministically **drain → flush → retry**.
 - **Pools & merges.** Work submission uses a fixed order; merges tie‑break lexicographically by ID (and tier‑stable in T2) to remove nondeterminism.
 - **Tests.** `tests/integration/test_identity_parallel.py` asserts byte equality vs sequential; contention and tiny‑stager cases also remain identical.
+- **Log directory overrides.** `clematis/io/paths.logs_dir()` honors `CLEMATIS_LOG_DIR` first, then the legacy `CLEMATIS_LOGS_DIR`, falling back to `<repo>/.logs` and creating the directory on demand.
 
 ## Known limitations
 
@@ -197,6 +199,8 @@ wasn’t configured to emit them in your environment.
 
 **What changed.** T2 can now fan‑out semantic retrieval across **in‑memory** shards and deterministically merge results. This preserves the sequential policy: walk tiers in order, sort within a tier (score desc, id asc), de‑duplicate by `id`, and stop at `k` (post‑merge clamp). When parallel is **OFF** (or `max_workers<=1`) behavior/logs remain byte‑for‑byte identical to sequential.
 
+`clematis.memory.index.InMemoryIndex` now exposes `_iter_shards_for_t2(tier, suggested)` which yields lightweight shard views (≤1 shard ⇒ yields `self`). T2 uses this affordance to detect when sharding is worthwhile; the sequential path keeps identity when shards or workers collapse to one.
+
 **Gate & backend.**
 - Enabled only when **all** are true:
   - `perf.parallel.enabled: true`
@@ -247,7 +251,9 @@ t2:
 
 See **docs/m9/benchmarks.md** for bench usage, shapes, and caveats.
 
-## Cross‑references
+-## Cross‑references
+- PR76 — T2 refactor: extraction of quality/state/metrics and file moves under
+		t2/; see [docs/refactors/PR76](../refactors/PR76) for details.
 - PR63 surface (this page): config keys, normalization, and identity guarantees.
 - PR64 helper: [`parallel_helper.md`](./parallel_helper.md) — deterministic runner API and usage.
 - PR65 cache safety: [`cache_safety.md`](./cache_safety.md) — wrappers + deterministic merge policies.

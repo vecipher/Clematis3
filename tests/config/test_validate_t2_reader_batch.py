@@ -71,9 +71,9 @@ def test_cli_validator_rejects_invalid_reader_batch_and_embed_root(tmp_path: Pat
     )
     assert res.returncode != 0
     # Errors are printed to STDOUT by the validator
-    assert (
-        "t2.reader_batch" in res.stdout or "t2.embed_root" in res.stdout
-    ), f"STDOUT:\n{res.stdout}\nSTDERR:\n{res.stderr}"
+    assert "t2.reader_batch" in res.stdout or "t2.embed_root" in res.stdout, (
+        f"STDOUT:\n{res.stdout}\nSTDERR:\n{res.stderr}"
+    )
 
 
 @pytest.mark.skipif(not SCRIPT.exists(), reason="validator CLI not found")
@@ -108,6 +108,6 @@ def test_cli_validator_warns_partitions_with_perf_disabled(tmp_path: Path):
 
     res = subprocess.run([sys.executable, str(SCRIPT), str(cfg)], capture_output=True, text=True)
     assert res.returncode == 0
-    assert (
-        "W[perf.t2.reader]" in res.stdout
-    ), f"Expected partitions+perf.disabled warning. STDOUT:\n{res.stdout}\nSTDERR:\n{res.stderr}"
+    assert "W[perf.t2.reader]" in res.stdout, (
+        f"Expected partitions+perf.disabled warning. STDOUT:\n{res.stdout}\nSTDERR:\n{res.stderr}"
+    )

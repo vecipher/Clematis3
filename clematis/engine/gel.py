@@ -27,6 +27,14 @@ from __future__ import annotations
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 
+# Helper: gate all behavior when GEL is disabled
+def _graph_enabled(ctx: Any) -> bool:
+    try:
+        return bool((_graph_cfg(ctx) or {}).get("enabled", False))
+    except Exception:
+        return False
+
+
 # ---------------------------
 # Config handling (with defaults)
 # ---------------------------
@@ -275,6 +283,8 @@ def _diameter_unweighted(adj: Dict[str, List[str]], nodes: List[str]) -> int:
 
 
 def merge_candidates(ctx: Any, state: Any) -> List[Dict[str, Any]]:
+    if not _graph_enabled(ctx):
+        return []
     cfg = _graph_cfg(ctx)
     mg = cfg.get("merge", {})
     edges = _ensure_graph_store(state).get("edges", {})
@@ -314,6 +324,8 @@ def merge_candidates(ctx: Any, state: Any) -> List[Dict[str, Any]]:
 
 
 def apply_merge(ctx: Any, state: Any, cluster: Dict[str, Any]) -> Dict[str, Any]:
+    if not _graph_enabled(ctx):
+        return {"event": "merge_applied", "size": 0, "avg_w": 0.0, "diameter": 0}
     g = _ensure_graph_store(state)
     meta = g.setdefault("meta", {})
     merges = meta.setdefault("merges", [])
@@ -334,6 +346,8 @@ def apply_merge(ctx: Any, state: Any, cluster: Dict[str, Any]) -> Dict[str, Any]
 
 
 def split_candidates(ctx: Any, state: Any) -> List[Dict[str, Any]]:
+    if not _graph_enabled(ctx):
+        return []
     cfg = _graph_cfg(ctx)
     sp = cfg.get("split", {})
     edges = _ensure_graph_store(state).get("edges", {})
@@ -389,6 +403,8 @@ def split_candidates(ctx: Any, state: Any) -> List[Dict[str, Any]]:
 
 
 def apply_split(ctx: Any, state: Any, split: Dict[str, Any]) -> Dict[str, Any]:
+    if not _graph_enabled(ctx):
+        return {"event": "split_applied", "removed_edges": 0, "parts": 0}
     g = _ensure_graph_store(state)
     meta = g.setdefault("meta", {})
     splits = meta.setdefault("splits", [])
@@ -408,6 +424,8 @@ def apply_split(ctx: Any, state: Any, split: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def promote_clusters(ctx: Any, state: Any, clusters: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    if not _graph_enabled(ctx):
+        return []
     cfg = _graph_cfg(ctx)
     pr = cfg.get("promotion", {})
     mode = str(pr.get("label_mode", "lexmin"))
@@ -444,6 +462,8 @@ def promote_clusters(ctx: Any, state: Any, clusters: List[Dict[str, Any]]) -> Li
 
 
 def apply_promotion(ctx: Any, state: Any, promo: Dict[str, Any]) -> Dict[str, Any]:
+    if not _graph_enabled(ctx):
+        return {"event": "promotion_applied", "concept": "", "members": 0}
     g = _ensure_graph_store(state)
     nodes = g.setdefault("nodes", {})
     edges = g.setdefault("edges", {})
@@ -511,6 +531,20 @@ def observe_retrieval(
     Returns metrics suitable for logging.
     """
     cfg = _graph_cfg(ctx)
+    if not bool(cfg.get("enabled", False)):
+        # Fast no-op: do not touch state; return minimal, deterministic metrics.
+        upd = cfg.get("update", {}) or {}
+        return {
+            "event": "observe_retrieval",
+            "agent": agent,
+            "k_in": 0,
+            "k_used": 0,
+            "pairs_updated": 0,
+            "threshold": float(cfg.get("coactivation_threshold", 0.20)),
+            "mode": str(upd.get("mode", "additive")),
+            "alpha": float(upd.get("alpha", 0.02)),
+        }
+
     gstore = _ensure_graph_store(state)
 
     threshold = float(cfg["coactivation_threshold"])
@@ -614,6 +648,16 @@ def tick(
     Returns metrics including counts of decayed and dropped edges.
     """
     cfg = _graph_cfg(ctx)
+    if not bool(cfg.get("enabled", False)):
+        return {
+            "event": "edge_decay",
+            "agent": agent,
+            "decayed_edges": 0,
+            "dropped_edges": 0,
+            "half_life_turns": float(cfg.get("decay", {}).get("half_life_turns", 200)),
+            "floor": float(cfg.get("decay", {}).get("floor", 0.0)),
+        }
+
     gstore = _ensure_graph_store(state)
     edges = gstore.get("edges", {})
 

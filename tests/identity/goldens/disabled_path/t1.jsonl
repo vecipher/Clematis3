@@ -1,0 +1,2 @@
+{"turn": "demo-1", "agent": "AgentA", "pops": 0, "iters": 0, "propagations": 0, "radius_cap_hits": 0, "layer_cap_hits": 0, "node_budget_hits": 0, "max_delta": 0.0, "graphs_touched": 1, "cache_hits": 0, "cache_misses": 0, "cache_used": false, "cache_enabled": true, "ms": 0.0}
+{"turn": "demo-1", "agent": "AgentA", "pops": 0, "iters": 0, "propagations": 0, "radius_cap_hits": 0, "layer_cap_hits": 0, "node_budget_hits": 0, "max_delta": 0.0, "graphs_touched": 1, "cache_hits": 0, "cache_misses": 0, "cache_used": false, "cache_enabled": true, "ms": 0.0}

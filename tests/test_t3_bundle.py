@@ -94,9 +94,9 @@ def test_t1_touched_nodes_sorted_and_capped():
     assert len(nodes) == 32, "Touched nodes must be capped at 32"
 
     ids = [n["id"] for n in nodes]
-    assert (
-        ids[0] == "n08" and ids[-1] == "n39"
-    ), f"Unexpected ID range/order: {ids[:5]}...{ids[-5:]}"
+    assert ids[0] == "n08" and ids[-1] == "n39", (
+        f"Unexpected ID range/order: {ids[:5]}...{ids[-5:]}"
+    )
 
 
 def test_t2_retrieved_sorted_and_trimmed():

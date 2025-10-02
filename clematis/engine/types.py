@@ -288,34 +288,40 @@ class Config:
     # M5: scheduler config (feature-flagged; defaults merged by validate.py)
     scheduler: Dict[str, Any] = field(default_factory=dict)
 
+
 # --- M9: deterministic parallelism config typing --------------------------------
 
 try:  # Python 3.11+
     from typing import TypedDict, NotRequired  # type: ignore[attr-defined]
 except Exception:  # fallback for older typing support
     from typing_extensions import TypedDict  # type: ignore[assignment]
+
     try:
         from typing_extensions import NotRequired  # type: ignore[assignment]
     except Exception:
         # For very old environments, NotRequired may not exist; keep types permissive.
         NotRequired = None  # type: ignore
 
+
 class PerfParallelConfig(TypedDict, total=False):
     """Config surface for deterministic parallel execution (PR63/M9).
 
     All fields are optional from the type system's POV; validation enforces shape.
     """
+
     enabled: bool
     max_workers: int  # 0 or 1 => sequential; negative normalized to 0
     t1: bool
     t2: bool
     agents: bool
 
+
 class PerfMetricsConfig(TypedDict, total=False):
     """Minimal metrics config surface referenced by PR63.
 
     Only keys surfaced by validate.py today; extended in later PRs.
     """
+
     report_memory: bool
 
 
@@ -326,6 +332,7 @@ class PerfConfig(TypedDict, total=False):
     type is intentionally permissive (total=False) so adding future fields
     does not break imports.
     """
+
     enabled: bool
     metrics: PerfMetricsConfig
     parallel: PerfParallelConfig

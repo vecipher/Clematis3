@@ -51,7 +51,7 @@ def rotate_one(path: str, backups: int, dry_run: bool = False) -> bool:
     # Cascade: path.(k) -> path.(k+1)
     for k in range(backups - 1, 0, -1):
         src = f"{path}.{k}"
-        dst = f"{path}.{k+1}"
+        dst = f"{path}.{k + 1}"
         if os.path.exists(src):
             if dry_run:
                 print(f"mv {src} {dst}")

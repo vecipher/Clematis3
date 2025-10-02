@@ -120,7 +120,14 @@ def test_seq_vs_par_identity_basic(patched_run_turn, patched_apply_changes, seed
     _ = _run_agents_parallel_batch(ctx_par, state_par, tasks)
 
     # Compare key artifacts (raw bytes)
-    for name in ("t1.jsonl", "t2.jsonl", "t4.jsonl", "apply.jsonl", "turn.jsonl", "scheduler.jsonl"):
+    for name in (
+        "t1.jsonl",
+        "t2.jsonl",
+        "t4.jsonl",
+        "apply.jsonl",
+        "turn.jsonl",
+        "scheduler.jsonl",
+    ):
         seq_lines = read_lines(seq_dir, name)
         par_lines = read_lines(par_dir, name)
         assert seq_lines == par_lines, f"Mismatch in {name} for seed={seed}"

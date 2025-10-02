@@ -1,0 +1,121 @@
+# PR76 — T2 Refactor (M7/PR37–38 extraction)
+
+**Goal:** Make `t2/core.py` lean by extracting self‑contained concerns (quality gating, state/labels, metrics assembly), without changing identity‑path behavior.
+
+## Impactful refactors (focus)
+These change where logic lives and what modules own what. They reduce churn in `core.py`, isolate feature‑gated code, and improve testability.
+
+1. **Quality layer → `t2/quality.py`**
+   - Orchestrates **GEL hybrid**, **fusion**, and **MMR** behind `t2.quality.enabled`.
+   - Owns **PR36 shadow tracing** (triple‑gated; SHADOW‐only; no ranking mutation).
+   - Accepts `(ctx, state, retrieved, q_text, cfg_root, cfg_t2)` and returns the reordered list plus compact quality metrics.
+   - Fix: shadow trace **reason** now prefers `ctx["trace_reason"]` and falls back to `cfg["perf"]["metrics"]["trace_reason"]`.
+
+2. **Graph/labels utilities → `t2/state.py`**
+   - `_init_index_from_cfg` (LanceDB w/ safe fallback to InMemory), `gather_changed_labels`, `build_label_map`.
+   - `helpers.py` re‑exports the two label helpers to avoid import churn.
+
+3. **Gated metrics assembly → `t2/metrics.py`**
+   - Adds `assemble_metrics(...)` and `finalize(...)` (phase‑1: assemble only; no emit/caching).
+   - `core.py` now calls `finalize(...)` instead of assembling a big dict inline.
+
+4. **File relocations under `t2/` package (structure clean‑up)**
+   ```
+   stages/t2_lance_reader.py  → stages/t2/lance_reader.py
+   stages/t2_quality_mmr.py   → stages/t2/quality_mmr.py
+   stages/t2_quality_norm.py  → stages/t2/quality_norm.py
+   stages/t2_quality_trace.py → stages/t2/quality_trace.py
+   stages/t2_quality.py       → stages/t2/quality_ops.py   # avoid name clash with t2/quality.py
+   stages/t2_shard.py         → stages/t2/shard.py
+   ```
+   - Imports updated. Optional shim files may be kept temporarily for back‑compat if external callers reference old paths.
+
+---
+
+## API / import surface changes
+**Core integration**
+```python
+# quality orchestration
+from clematis.engine.stages.t2.quality import apply_quality
+
+# metrics assembly
+from clematis.engine.stages.t2.metrics import finalize as finalize_metrics
+```
+
+**MMR helpers used by core for the diversity metric**
+```python
+from clematis.engine.stages.t2.quality_mmr import MMRItem, avg_pairwise_distance
+```
+
+**Internal moves (if you import these directly)**
+```python
+# OLD → NEW
+from clematis.engine.stages.t2_quality_mmr import ...   → from clematis.engine.stages.t2.quality_mmr import ...
+from clematis.engine.stages.t2_quality_norm import ...  → from clematis.engine.stages.t2.quality_norm import ...
+from clematis.engine.stages.t2_quality_trace import ... → from clematis.engine.stages.t2.quality_trace import ...
+from clematis.engine.stages.t2_quality import ...       → from clematis.engine.stages.t2.quality_ops import ...
+from clematis.engine.stages.t2_shard import ...         → from clematis.engine.stages.t2.shard import ...
+from clematis.engine.stages.t2_lance_reader import ...  → from clematis.engine.stages.t2.lance_reader import ...
+```
+
+---
+
+## Behavior & gates (unchanged semantics)
+- **Identity path:** With `t2.quality.enabled=false` (default), rankings and metrics are byte‑identical to pre‑refactor.
+- **Shadow trace:** Fires only if **all** are true:
+  - `perf.enabled`
+  - `perf.metrics.report_memory`
+  - `t2.quality.shadow`
+  - `t2.quality.enabled == false`
+- **MMR diversity metric:** Still computed in `core.py` using `quality_mmr.MMRItem/avg_pairwise_distance` on the selected head.
+
+---
+
+## Tests
+Covered:
+- `tests/integration/test_traces_write_path.py::test_traces_written_to_custom_dir_and_first_line_parses` (shadow trace path; reason plumbing fix)
+- `tests/t2/test_t2_parallel_merge.py`
+- `tests/test_t2_stage.py`
+- Identity & CLI: `tests/identity`, `tests/cli`
+
+Result: green.
+
+---
+
+## Risks & mitigations
+- **Import path drift:** We updated in‑repo imports; add **shim re‑exports** at the old locations if external users import legacy paths.
+- **Trace write failures:** Shadow trace is wrapped in `try/except` and never mutates results or crashes the pipeline.
+- **Backend fallback:** `_init_index_from_cfg` retains LanceDB→InMemory fallback with a recorded `backend_fallback_reason`.
+
+---
+
+## Migration notes (short)
+- Update any direct imports per the mapping above. Internal modules already updated.
+- If you rely on `ctx.trace_reason`, you can also set `perf.metrics.trace_reason` in cfg; quality’s shadow trace will use it.
+
+---
+
+## Acceptance checklist
+- [x] `core.py` contains **no** hybrid/fusion/MMR/shadow logic
+- [x] `t2/quality.py` owns quality orchestration + shadow tracing (triple‑gated)
+- [x] `t2/state.py` owns index/labels helpers; `helpers.py` only re‑exports
+- [x] `t2/metrics.py` owns metrics assembly (`finalize` used by core)
+- [x] File relocations complete; imports updated
+- [x] Identity & CLI suites green
+
+---
+
+## Module map (post‑refactor)
+```text
+clematis/engine/stages/t2/
+  core.py          # lean pipeline; calls quality + metrics.finalize
+  quality.py       # orchestration + shadow trace (no ranking mutation in shadow)
+  state.py         # index/labels helpers
+  metrics.py       # assemble_metrics + finalize
+  lance_reader.py  # optional Lance backend
+  quality_ops.py   # fusion/MMR primitives (ex‑t2_quality.py)
+  quality_mmr.py   # MMRItem, avg_pairwise_distance
+  quality_norm.py  # lexical/BM25 normalization
+  quality_trace.py # rq_traces.jsonl writer
+  shard.py         # shard/partition helpers
+```

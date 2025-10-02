@@ -25,8 +25,8 @@ import math
 import unicodedata
 from typing import Any, Dict, List, Tuple, FrozenSet
 
-from .t2_quality_mmr import MMRItem, mmr_reorder_full
-from .t2_quality_norm import (
+from .quality_mmr import MMRItem, mmr_reorder_full
+from .quality_norm import (
     normalize_text as _qnorm,
     tokenize as _qtokenize,
     load_alias_map as _load_alias_map,

@@ -10,6 +10,8 @@ import json
 import os
 import sys
 import time
+import tempfile
+import shutil
 from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
@@ -26,14 +28,17 @@ except Exception as e:  # pragma: no cover
 
 # ------------------------------ utilities ----------------------------------
 
+
 def _stable_json(data: Dict[str, Any], pretty: bool = False) -> str:
     if pretty:
         return json.dumps(data, sort_keys=True, indent=2, ensure_ascii=True)
     return json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
 
+
 def _seeded_rng(seed: int):
     rs = np.random.RandomState(int(seed))
     return rs
+
 
 def _cosine(a: np.ndarray, b: np.ndarray) -> float:
     if a.size == 0 or b.size == 0:
@@ -44,7 +49,9 @@ def _cosine(a: np.ndarray, b: np.ndarray) -> float:
         return 0.0
     return float(np.dot(a, b) / (na * nb))
 
+
 # ------------------------------ corpus -------------------------------------
+
 
 @dataclass
 class Episode:
@@ -53,6 +60,16 @@ class Episode:
     ts: str  # ISO8601 UTC
     vec_full: Sequence[float]
     aux: Dict[str, Any]
+
+
+def _episode_to_dict(ep: Episode) -> Dict[str, Any]:
+    return {
+        "id": ep.id,
+        "owner": ep.owner,
+        "ts": ep.ts,
+        "vec_full": list(ep.vec_full),
+        "aux": dict(ep.aux),
+    }
 
 
 def _make_ts(base: datetime, days_offset: int) -> str:
@@ -75,14 +92,17 @@ def build_corpus(n_rows: int, dim: int, seed: int) -> List[Episode]:
         rows.append(Episode(id=eid, owner=None, ts=ts, vec_full=vec.tolist(), aux={}))
     return rows
 
+
 # ------------------------------ shard adapter ------------------------------
+
 
 class _Shard:
     def __init__(self, rows: List[Episode]):
         self._rows = rows
 
-    def search_tiered(self, owner: Optional[str], q_vec: Iterable[float], k: int,
-                      tier: str, hints: Dict[str, Any]) -> List[Dict[str, Any]]:
+    def search_tiered(
+        self, owner: Optional[str], q_vec: Iterable[float], k: int, tier: str, hints: Dict[str, Any]
+    ) -> List[Dict[str, Any]]:
         # Mirror Lance/InMemory search: normalize, filter, score, tie-break by id
         q = np.asarray(q_vec, dtype=np.float32)
         now = hints.get("now")
@@ -98,24 +118,30 @@ class _Shard:
         for e in self._rows:
             if owner is not None and e.owner != owner:
                 continue
-            eps.append({
-                "id": e.id,
-                "owner": e.owner,
-                "ts": e.ts,
-                "vec_full": e.vec_full,
-                "aux": e.aux,
-            })
+            eps.append(
+                {
+                    "id": e.id,
+                    "owner": e.owner,
+                    "ts": e.ts,
+                    "vec_full": e.vec_full,
+                    "aux": e.aux,
+                }
+            )
 
         tier = str(tier)
         if tier == "exact_semantic":
             recent_days = hints.get("recent_days")
             if isinstance(recent_days, (int, float)) and recent_days > 0:
                 cutoff = now_dt - timedelta(days=float(recent_days))
+
                 def _dt(ts: str) -> datetime:
                     try:
-                        return datetime.fromisoformat(ts.replace("Z", "+00:00")).astimezone(timezone.utc)
+                        return datetime.fromisoformat(ts.replace("Z", "+00:00")).astimezone(
+                            timezone.utc
+                        )
                     except Exception:
                         return now_dt
+
                 eps = [e for e in eps if _dt(e["ts"]) >= cutoff]
         elif tier == "archive":
             # No-op here; corpus small
@@ -146,6 +172,7 @@ class BenchIndex:
     """Import-robust index providing `_iter_shards_for_t2` and `search_tiered`.
     Used only for the micro-bench; does not change runtime behavior.
     """
+
     def __init__(self, rows: List[Episode]):
         self._rows = rows
 
@@ -158,12 +185,14 @@ class BenchIndex:
                 dt = datetime.now(timezone.utc)
             q = (dt.month - 1) // 3 + 1
             return f"{dt.year}-Q{q}"
+
         buckets: Dict[str, List[Episode]] = {}
         for e in self._rows:
             buckets.setdefault(quarter_of(e.ts), []).append(e)
         if len(buckets) <= 1:
             # Two hash buckets by id for stability
             import hashlib
+
             b0: List[Episode] = []
             b1: List[Episode] = []
             for e in self._rows:
@@ -173,42 +202,64 @@ class BenchIndex:
         else:
             parts = [buckets[k] for k in sorted(buckets.keys())]
         # Map to shard objects, drop empties
-        shards = [ _Shard(p) for p in parts if p ]
-        return shards if len(shards) > 0 else [ _Shard(self._rows) ]
+        shards = [_Shard(p) for p in parts if p]
+        return shards if len(shards) > 0 else [_Shard(self._rows)]
 
     # Fallback single-shard exact search (not used by bench when shards>1)
-    def search_tiered(self, owner: Optional[str], q_vec: Iterable[float], k: int,
-                      tier: str, hints: Dict[str, Any]) -> List[Dict[str, Any]]:
+    def search_tiered(
+        self, owner: Optional[str], q_vec: Iterable[float], k: int, tier: str, hints: Dict[str, Any]
+    ) -> List[Dict[str, Any]]:
         return _Shard(self._rows).search_tiered(owner, q_vec, k, tier, hints)
+
 
 # ------------------------------ bench core ----------------------------------
 
-def run_bench(iters: int, workers: int, backend: str, dim: int, n_rows: int,
-              parallel: bool, seed: int, k: int = 32, warmup: int = 1) -> Dict[str, Any]:
+
+def run_bench(
+    iters: int,
+    workers: int,
+    backend: str,
+    dim: int,
+    n_rows: int,
+    parallel: bool,
+    seed: int,
+    k: int = 32,
+    warmup: int = 1,
+) -> Dict[str, Any]:
     rows = build_corpus(n_rows=n_rows, dim=dim, seed=seed)
 
     # Index: try to import real backends; otherwise fall back to BenchIndex
     index_backend = backend.lower()
     index: Any = None
     used_fallback = False
+    lance_tmpdir: Optional[str] = None
 
     if index_backend == "inmemory":
         try:
-            from clematis.memory.inmemory import InMemoryIndex  # type: ignore
-            index = InMemoryIndex()
-            if hasattr(index, "add"):
-                index.add([e.__dict__ for e in rows])
-            else:
-                used_fallback = True
+            from clematis.memory.index import InMemoryIndex  # type: ignore
+
+            idx = InMemoryIndex()
+            for ep in rows:
+                idx.add(_episode_to_dict(ep))
+            index = idx
         except Exception:
             used_fallback = True
+            index = None
     elif index_backend == "lancedb":
         try:
             from clematis.memory.lance_index import LanceIndex  # type: ignore
-            index = LanceIndex(db_path=":memory:")
-            index.add([e.__dict__ for e in rows])
+
+            lance_tmpdir = tempfile.mkdtemp(prefix="bench_t2_lance_")
+            idx = LanceIndex(uri=lance_tmpdir)
+            for ep in rows:
+                idx.add(_episode_to_dict(ep))
+            index = idx
         except Exception:
+            if lance_tmpdir is not None:
+                shutil.rmtree(lance_tmpdir, ignore_errors=True)
+                lance_tmpdir = None
             used_fallback = True
+            index = None
     else:
         used_fallback = True
 
@@ -233,7 +284,7 @@ def run_bench(iters: int, workers: int, backend: str, dim: int, n_rows: int,
 
     hints = {
         "now": datetime(2025, 10, 1, tzinfo=timezone.utc).isoformat(),
-        "sim_threshold": None,
+        "sim_threshold": 0.0,
         "clusters_top_m": 3,
         "recent_days": 365,
     }
@@ -248,22 +299,29 @@ def run_bench(iters: int, workers: int, backend: str, dim: int, n_rows: int,
         if parallel and shard_count > 1 and effective_workers > 1:
             # Execute per-shard searches concurrently (read-only)
             with ThreadPoolExecutor(max_workers=effective_workers) as ex:
-                results = [ex.submit(s.search_tiered, None, q, k, "exact_semantic", hints).result() for s in shards]
+                results = [
+                    ex.submit(s.search_tiered, None, q, k, "exact_semantic", hints).result()
+                    for s in shards
+                ]
             # Merge (deterministic by score desc then id asc)
-            merged: List[Tuple[float, str, Dict[str, Any]]] = []
+            merged: List[Tuple[float, str, Any]] = []
             for lst in results:
                 for e in lst:
-                    merged.append((float(e.get("_score", 0.0)), str(e.get("id")), e))
+                    score = float(getattr(e, "score", 0.0))
+                    eid = str(getattr(e, "id", ""))
+                    merged.append((score, eid, e))
             merged.sort(key=lambda t: (-t[0], t[1]))
             top = [e for (_, _, e) in merged[:k]]
         else:
             # Sequential across shards, equivalent order
-            merged: List[Tuple[float, str, Dict[str, Any]]] = []
+            merged: List[Tuple[float, str, Any]] = []
             for s in shards:
                 for e in s.search_tiered(None, q, k, "exact_semantic", hints):
-                    merged.append((float(e.get("_score", 0.0)), str(e.get("id")), e))
-            merged.sort(key=lambda t: (-t[0], t[1]))
-            top = [e for (_, _, e) in merged[:k]]
+                    score = float(getattr(e, "score", 0.0))
+                    eid = str(getattr(e, "id", ""))
+                    merged.append((score, eid, e))
+                merged.sort(key=lambda t: (-t[0], t[1]))
+                top = [e for (_, _, e) in merged[:k]]
         total_returned += len(top)
     t1 = time.perf_counter()
 
@@ -297,9 +355,13 @@ def run_bench(iters: int, workers: int, backend: str, dim: int, n_rows: int,
             "t2_partition_count": int(t2_partition_count),
         },
     }
+    if lance_tmpdir is not None:
+        shutil.rmtree(lance_tmpdir, ignore_errors=True)
     return out
 
+
 # ------------------------------ CLI ----------------------------------------
+
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
     p = argparse.ArgumentParser(
@@ -307,13 +369,27 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         description="Deterministic micro-bench for T2 retrieval (PR74). Delegates to scripts/...",
     )
     p.add_argument("--iters", type=int, default=3, help="Number of query iterations (default: 3)")
-    p.add_argument("--workers", type=int, default=max(1, (os.cpu_count() or 4) // 2), help="Worker cap for parallel path (default: half cores)")
-    p.add_argument("--backend", choices=["inmemory", "lancedb"], default="inmemory", help="Index backend to simulate/use (default: inmemory)")
+    p.add_argument(
+        "--workers",
+        type=int,
+        default=max(1, (os.cpu_count() or 4) // 2),
+        help="Worker cap for parallel path (default: half cores)",
+    )
+    p.add_argument(
+        "--backend",
+        choices=["inmemory", "lancedb"],
+        default="inmemory",
+        help="Index backend to simulate/use (default: inmemory)",
+    )
     p.add_argument("--dim", type=int, default=32, help="Embedding dimension (default: 32)")
     p.add_argument("--rows", type=int, default=256, help="Corpus size (default: 256)")
     p.add_argument("--seed", type=int, default=1337, help="Deterministic seed (default: 1337)")
     p.add_argument("--k", type=int, default=32, help="Top-K to retrieve (default: 32)")
-    p.add_argument("--parallel", action="store_true", help="Enable parallel execution across shards (mirrors stage gate)")
+    p.add_argument(
+        "--parallel",
+        action="store_true",
+        help="Enable parallel execution across shards (mirrors stage gate)",
+    )
     p.add_argument("--warmup", type=int, default=1, help="Warmup runs before timing (default: 1)")
     p.add_argument("--json", action="store_true", help="Emit JSON only (stable, single line)")
 

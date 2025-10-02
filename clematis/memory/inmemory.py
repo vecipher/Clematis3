@@ -29,7 +29,7 @@ def _iter_shards_for_t2(self, tier: str, suggested: int | None = None):
 
     for i in range(0, n, size):
         # _view should return a lightweight subset index with search_tiered()
-        view = self._view(episodes[i:i + size])
+        view = self._view(episodes[i : i + size])
         if view is None:
             # Defensive: if view construction fails, collapse to single shard.
             yield self

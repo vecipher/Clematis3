@@ -238,9 +238,9 @@ def test_t2_owner_scope_agent_filters_other_owners():
 
     r = t2_semantic(ctx, state, "apple", t1)
     assert r.retrieved, "expected some hits for owner A"
-    assert all(
-        h.owner == "A" for h in r.retrieved
-    ), f"unexpected owners in hits: {[h.owner for h in r.retrieved]}"
+    assert all(h.owner == "A" for h in r.retrieved), (
+        f"unexpected owners in hits: {[h.owner for h in r.retrieved]}"
+    )
     assert r.metrics.get("owner_scope") == "agent"
 
 

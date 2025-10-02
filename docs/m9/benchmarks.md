@@ -49,10 +49,11 @@ python -m clematis.scripts.bench_t1 --graphs 4 --iters 3
 
 ## T2 bench
 
-Builds a deterministic synthetic corpus and runs semantic retrieval with a simple, import‑robust index:
+Builds a deterministic synthetic corpus and runs semantic retrieval with a simple, import-robust index:
 - **Default backend:** `inmemory` (no extras)
 - **Optional:** `--backend lancedb` if Lance extras are present
 - Parallel path (`--parallel`) searches shards concurrently and merges results deterministically.
+- **Index selection:** When available we import `clematis.memory.index.InMemoryIndex`, which now exposes `_iter_shards_for_t2(tier, suggested)` so the bench reflects real shard behavior. If the import fails (or extras are missing) we fall back to the bundled bench index. The Lance path likewise prefers `clematis.memory.lance_index.LanceIndex` and only falls back when extras are absent.
 
 ```bash
 # Compact, stable JSON (default: inmemory)
@@ -74,6 +75,7 @@ python -m clematis.scripts.bench_t2 --rows 512 --iters 5 --parallel --workers 3
 **Caveats**
 - Micro sizes are GIL/allocator sensitive; compare **ratios** on the same machine.
 - Bench index partitions by quarter timestamps; if only one bucket, it falls back to two hash buckets to keep shard semantics.
+- Real engine indices create shards deterministically; the fallback index mirrors the same ordering so repeated runs stay reproducible.
 
 ---
 

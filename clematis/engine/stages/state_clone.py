@@ -1,5 +1,3 @@
-
-
 """Read-only state snapshot utilities (PR70 support).
 
 These helpers produce a lightweight, *read-only* view over the engine State so
@@ -13,6 +11,7 @@ Design goals:
 
 This module does not depend on LanceDB or any optional extras.
 """
+
 from __future__ import annotations
 
 from collections.abc import Mapping, MutableMapping, Sequence

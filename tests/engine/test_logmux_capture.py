@@ -1,5 +1,3 @@
-
-
 import json
 from pathlib import Path
 
@@ -38,9 +36,7 @@ def test_logmux_write_through_when_inactive(tmp_path, monkeypatch):
         pass
 
     # Route logs to a temporary directory
-    monkeypatch.setattr(
-        "clematis.io.paths.logs_dir", lambda: str(tmp_path)
-    )
+    monkeypatch.setattr("clematis.io.paths.logs_dir", lambda: str(tmp_path))
 
     append_jsonl("foo.jsonl", {"x": 1})
 
@@ -57,9 +53,7 @@ def test_logmux_flush_writes_in_order(tmp_path, monkeypatch):
     from clematis.io.log import append_jsonl
 
     # Route logs to a temporary directory
-    monkeypatch.setattr(
-        "clematis.io.paths.logs_dir", lambda: str(tmp_path)
-    )
+    monkeypatch.setattr("clematis.io.paths.logs_dir", lambda: str(tmp_path))
 
     mux = LogMux()
     with use_mux(mux):

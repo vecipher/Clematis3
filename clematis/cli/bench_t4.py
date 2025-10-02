@@ -7,7 +7,7 @@ from pathlib import Path
 
 from ._exit import IO_ERR, OK, USER_ERR
 from ._io import eprint_once, set_verbosity
-from ._wrapper_common import maybe_debug
+from ._wrapper_common import maybe_debug, prepare_wrapper_args
 
 _CANDIDATES = ("clematis.scripts.bench_t4", "scripts.bench_t4")
 
@@ -47,52 +47,27 @@ def _delegate(argv):
 
 
 def _entrypoint(ns: argparse.Namespace) -> int:
-    argv = list(getattr(ns, "args", []) or [])
-    orig_argv = list(argv)
-    if argv and argv[0] == "--":
-        argv = argv[1:]
-    # Intercept help for wrapper
-    if "-h" in argv or "--help" in argv:
+    opts = prepare_wrapper_args(ns)
+
+    if opts.help_requested:
         parser = getattr(ns, "_parser", None)
         if parser is not None:
             parser.print_help()
             return OK
 
-    # Configure verbosity (stderr only); stdout remains reserved for command output
-    set_verbosity(getattr(ns, "verbose", False), getattr(ns, "quiet", False))
-    quiet = bool(getattr(ns, "quiet", False) or ("--quiet" in orig_argv))
+    set_verbosity(opts.verbose, opts.quiet)
 
-    # Hoist wrapper-only flags that users might put after `--`
-    hoisted_json = False
-    hoisted_table = False
-    filtered = []
-    for tok in argv:
-        if tok == "--json":
-            hoisted_json = True
-            continue
-        if tok == "--table":
-            hoisted_table = True
-            continue
-        if tok == "--":  # drop stray option-terminator if present mid-argv
-            continue
-        filtered.append(tok)
-    argv = filtered
-
-    # Unified wants_* across both positions (before or after `--`)
-    wants_json = bool(getattr(ns, "json", False) or hoisted_json)
-    wants_table = bool(getattr(ns, "table", False) or hoisted_table)
-
-    if wants_json and wants_table:
-        if not quiet:
+    if opts.wants_json and opts.wants_table:
+        if not opts.quiet:
             eprint_once("Choose exactly one of --json or --table.")
         return USER_ERR
-    if wants_json or wants_table:
-        if not quiet:
+    if opts.wants_json or opts.wants_table:
+        if not opts.quiet:
             eprint_once("`bench-t4` currently does not support --json/--table.")
         return USER_ERR
 
-    maybe_debug(ns, resolved="scripts.bench_t4", argv=argv)
-    return int(_delegate(argv) or 0)
+    maybe_debug(ns, resolved="scripts.bench_t4", argv=opts.argv)
+    return int(_delegate(opts.argv) or 0)
 
 
 def register(subparsers: argparse._SubParsersAction) -> None:

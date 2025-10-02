@@ -11,7 +11,11 @@ from pathlib import Path
 
 from ._exit import INTERNAL, IO_ERR, OK, USER_ERR
 from ._io import eprint_once, print_table, set_verbosity
-from ._wrapper_common import inject_default_from_packaged_or_cwd, maybe_debug
+from ._wrapper_common import (
+    inject_default_from_packaged_or_cwd,
+    maybe_debug,
+    prepare_wrapper_args,
+)
 
 _CANDIDATES = ("clematis.scripts.inspect_snapshot", "scripts.inspect_snapshot")
 
@@ -54,13 +58,9 @@ def _delegate(argv):
 
 
 def _entrypoint(ns: argparse.Namespace) -> int:
-    argv = list(getattr(ns, "args", []) or [])
+    opts = prepare_wrapper_args(ns)
 
-    if argv and argv[0] == "--":
-        argv = argv[1:]
-
-    # Intercept help for the wrapper itself (REMAINDER would swallow it)
-    if "-h" in argv or "--help" in argv:
+    if opts.help_requested:
         parser = getattr(ns, "_parser", None)
         if parser is not None:
             parser.print_help()
@@ -77,29 +77,12 @@ def _entrypoint(ns: argparse.Namespace) -> int:
         return INTERNAL
 
     # Configure verbosity (stderr only); stdout remains reserved for command output
-    set_verbosity(getattr(ns, "verbose", False), getattr(ns, "quiet", False))
-    orig_argv = list(getattr(ns, "args", []) or [])
-    quiet = bool(getattr(ns, "quiet", False) or ("--quiet" in orig_argv))
+    set_verbosity(opts.verbose, opts.quiet)
 
-    # Hoist wrapper-only flags that users might put after `--`
-    hoisted_json = False
-    hoisted_table = False
-    filtered = []
-    for tok in argv:
-        if tok == "--json":
-            hoisted_json = True
-            continue
-        if tok == "--table":
-            hoisted_table = True
-            continue
-        if tok == "--":  # drop stray option-terminator if present mid-argv
-            continue
-        filtered.append(tok)
-    argv = filtered
-
-    # Output format handling: support --json by forwarding to underlying --format json.
-    wants_json = bool(getattr(ns, "json", False) or hoisted_json)
-    wants_table = bool(getattr(ns, "table", False) or hoisted_table)
+    argv = opts.argv
+    wants_json = opts.wants_json
+    wants_table = opts.wants_table
+    quiet = opts.quiet
 
     if wants_json and wants_table:
         if not quiet:
