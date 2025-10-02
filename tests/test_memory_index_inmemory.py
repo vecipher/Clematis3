@@ -150,3 +150,34 @@ def test_deterministic_ranking_tiebreak_by_id():
     ids = [h.id for h in hits]
     # With equal scores, tie-breaker is id ascending
     assert ids[:2] == ["ep1", "ep2"]
+
+
+def test_shard_view_search_mirrors_parent_results():
+    idx = InMemoryIndex()
+    owner = "A"
+    texts = ["apple", "banana", "cherry", "date"]
+    for i, text in enumerate(texts):
+        _add_ep(
+            idx,
+            eid=f"ep{i}",
+            owner=owner,
+            text=text,
+            ts="2025-08-10T00:00:00Z",
+        )
+
+    enc = BGEAdapter(dim=32)
+    q_vec = enc.encode(["fruit query"])[0]
+    hints = {"recent_days": 365, "sim_threshold": -1.0, "now": "2025-09-01T00:00:00Z"}
+
+    parent_hits = idx.search_tiered(owner, q_vec, k=10, tier="exact_semantic", hints=hints)
+
+    shards = list(idx._iter_shards_for_t2("exact_semantic", suggested=4))
+    assert len(shards) > 1
+
+    shard_ids = {
+        hit.id
+        for shard in shards
+        for hit in shard.search_tiered(owner, q_vec, k=10, tier="exact_semantic", hints=hints)
+    }
+
+    assert shard_ids == {hit.id for hit in parent_hits}

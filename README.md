@@ -160,6 +160,13 @@ See **docs/m9/overview.md** for determinism rules, identity guarantees, and trou
 - `CLEMATIS_NETWORK_BAN=1` — enforce no network (recommended in CI).
 - `CLEMATIS_DEBUG=1` — enable a single stderr breadcrumb for wrapper delegation.
   Exit codes and stdout remain identical.
+- `CLEMATIS_LOG_DIR` / `CLEMATIS_LOGS_DIR` — override the logs output directory.
+  If both are set, `CLEMATIS_LOG_DIR` wins; otherwise we fall back to `<repo>/.logs`.
+  The directory is created on demand so wrappers/scripts can log immediately.
+
+When `CI=true`, all log sinks route through `clematis/io/log.append_jsonl`, which
+normalizes payloads via `clematis/engine/util/io_logging.normalize_for_identity`
+to zero `ms`, drop `now`, and keep byte identity across runs.
 
 ## Milestones snapshot
 - **M1–M4:** core stages + apply/persist + logs.

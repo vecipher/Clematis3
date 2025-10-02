@@ -20,17 +20,6 @@ class InMemoryIndex:
         """Monotonic version that increments on each mutation (add)."""
         return self._ver
 
-    def search_tiered(
-        self,
-        owner: Optional[str],
-        q_vec: NDArray[np.float32],
-        k: int,
-        tier: str,
-        hints: Dict[str, Any],
-    ) -> List[EpisodeRef]:
-        # Placeholder: returns empty list
-        return []
-
     def _filter_owner(
         self, eps: List[Dict[str, Any]], owner: Optional[str]
     ) -> List[Dict[str, Any]]:
@@ -68,7 +57,8 @@ class InMemoryIndex:
             v = e.get("vec_full")
             if v is None:
                 continue
-            s = _cosine(q_vec, v)
+            vec = np.asarray(v, dtype=np.float32)
+            s = _cosine(q_vec, vec)
             if s >= sim_threshold:
                 scored.append((e, s))
         # Deterministic: sort by (-score, id)
@@ -83,23 +73,23 @@ class InMemoryIndex:
         tier: str,
         hints: Dict[str, Any],
     ) -> List[EpisodeRef]:
-        """
-        Deterministic, in-memory retrieval with three modes:
-          - exact_semantic: owner + recent_days filter, threshold on cosine
-          - cluster_semantic: route to top-M clusters by centroid sim, then rank within those clusters
-          - archive: optional quarter filter (hints['archive_quarters'])
-        Hints (all optional, with sensible defaults):
-          - recent_days: int (default 30)
-          - sim_threshold: float (default 0.0)
-          - clusters_top_m: int (default 3)
-          - archive_quarters: List[str], e.g., ["2024Q1","2023Q4"]
-          - now: ISO8601 "now" for tests (default: current UTC)
-        """
-        all_eps = self._filter_owner(self._eps, owner)
+        return self._search_with_episodes(self._eps, owner, q_vec, k, tier, hints)
+
+    def _search_with_episodes(
+        self,
+        episodes: List[Dict[str, Any]],
+        owner: Optional[str],
+        q_vec: NDArray[np.float32],
+        k: int,
+        tier: str,
+        hints: Dict[str, Any],
+    ) -> List[EpisodeRef]:
+        all_eps = self._filter_owner(episodes, owner)
         if not all_eps:
             return []
         recent_days = int(hints.get("recent_days", 30))
-        sim_threshold = float(hints.get("sim_threshold", 0.0))
+        sim_threshold_hint = hints.get("sim_threshold", 0.0)
+        sim_threshold = float(sim_threshold_hint if sim_threshold_hint is not None else 0.0)
         clusters_top_m = int(hints.get("clusters_top_m", 3))
         archive_quarters = hints.get("archive_quarters")
         now = hints.get("now")
@@ -110,24 +100,21 @@ class InMemoryIndex:
             results = self._rank_by_cosine(eps, q_vec, k, sim_threshold)
 
         elif tier == "cluster_semantic":
-            # Group by cluster id
             by_cluster: Dict[str, List[Dict[str, Any]]] = {}
             for e in all_eps:
                 cid = _stable_cluster_id(e)
                 by_cluster.setdefault(cid, []).append(e)
-            # Compute centroids and choose top-M clusters by centroid similarity
             cluster_scores: List[Tuple[str, float]] = []
             for cid, items in by_cluster.items():
-                vecs = [it.get("vec_full") for it in items if it.get("vec_full") is not None]
+                vecs = [np.asarray(it.get("vec_full"), dtype=np.float32) for it in items if it.get("vec_full") is not None]
                 if not vecs:
                     continue
-                centroid = np.mean(np.stack(vecs, axis=0), axis=0).astype(np.float32)
+                centroid = np.mean(np.stack(vecs, axis=0), axis=0)
                 cs = _cosine(q_vec, centroid)
                 cluster_scores.append((cid, cs))
             cluster_scores.sort(key=lambda t: (-t[1], t[0]))
             chosen = {cid for cid, _ in cluster_scores[:clusters_top_m]}
 
-            # Rank within chosen clusters
             pool: List[Dict[str, Any]] = []
             for cid in sorted(chosen):
                 pool.extend(by_cluster.get(cid, []))
@@ -138,18 +125,85 @@ class InMemoryIndex:
             results = self._rank_by_cosine(eps, q_vec, k, sim_threshold)
 
         else:
-            # Unknown tier: return empty deterministic list
             results = []
 
-        return [
-            EpisodeRef(
-                id=str(e["id"]),
-                owner=str(e.get("owner", "")),
-                score=float(s),
-                text=str(e.get("text", "")),
+        out: List[EpisodeRef] = []
+        for e, s in results:
+            out.append(
+                EpisodeRef(
+                    id=str(e["id"]),
+                    owner=str(e.get("owner", "")),
+                    score=float(s),
+                    text=str(e.get("text", "")),
+                )
             )
-            for e, s in results
-        ]
+        return out
+
+
+    # ------------------------------------------------------------------
+    # PR68 support: deterministic shard affordance for parallel fan-out
+    # ------------------------------------------------------------------
+
+    class _ShardView:
+        """Lightweight view over a contiguous slice of episodes.
+
+        The view references the parent index's storage without copying vectors,
+        ensuring parallel reads see the same objects and identity paths remain
+        unchanged when the gate is OFF.
+        """
+
+        def __init__(self, parent: "InMemoryIndex", episodes: List[Dict[str, Any]]):
+            self._parent = parent
+            self._episodes = episodes
+
+        def search_tiered(
+            self,
+            owner: Optional[str],
+            q_vec: NDArray[np.float32],
+            k: int,
+            tier: str,
+            hints: Dict[str, Any],
+        ) -> List[EpisodeRef]:
+            return self._parent._search_with_episodes(
+                self._episodes, owner, q_vec, k, tier, hints
+            )
+
+        def __getattr__(self, name: str) -> Any:
+            # Forward other attribute access to the parent; needed for methods
+            # such as index_version that parallel merge code may touch.
+            return getattr(self._parent, name)
+
+    def _iter_shards_for_t2(self, tier: str, suggested: int | None = None):
+        """Yield deterministic shard views for T2 parallel fan-out.
+
+        When no sharding is beneficial (<=1 episode or suggested <=1), yield the
+        index itself to preserve the sequential path. Otherwise, partition the
+        backing list into contiguous chunks with stable ordering.
+        """
+        count = len(self._eps)
+        if count <= 1:
+            yield self
+            return
+
+        if suggested is None or suggested <= 1:
+            yield self
+            return
+
+        chunks = int(suggested)
+        if chunks <= 1:
+            yield self
+            return
+
+        chunks = min(chunks, count)
+        size = max(1, (count + chunks - 1) // chunks)
+
+        for start in range(0, count, size):
+            end = min(start + size, count)
+            if end - start >= count:
+                yield self
+                return
+            view = InMemoryIndex._ShardView(self, self._eps[start:end])
+            yield view
 
 
 def _cosine(a: NDArray[np.float32], b: NDArray[np.float32]) -> float:

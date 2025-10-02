@@ -5,10 +5,16 @@ from numpy.typing import NDArray
 import hashlib
 
 
-class DummyEmbeddingAdapter:
+class _DevDummyEmbeddingAdapter:
+    """Legacy adapter kept for documentation examples (not exported).
+
+    Prefer ``DeterministicEmbeddingAdapter`` / ``BGEAdapter`` in code so embeddings
+    remain content-dependent and stable across runs.
+    """
+
     def encode(self, texts: List[str]) -> List[NDArray[np.float32]]:
-        # Deterministic dummy vectors
-        return [np.random.default_rng(0).random(32, dtype=np.float32) for _ in texts]
+        rng = np.random.default_rng(0)
+        return [rng.random(32, dtype=np.float32) for _ in texts]
 
 
 # Deterministic, content-dependent embedding stub.
@@ -44,3 +50,5 @@ class DeterministicEmbeddingAdapter:
 
 # Alias for clarity with planned BGE usage in T2
 BGEAdapter = DeterministicEmbeddingAdapter
+
+__all__ = ["DeterministicEmbeddingAdapter", "BGEAdapter"]

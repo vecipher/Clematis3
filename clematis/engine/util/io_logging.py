@@ -60,6 +60,10 @@ def normalize_for_identity(name: str, rec: Dict[str, Any]) -> Dict[str, Any]:
     if "ms" in out:
         out["ms"] = 0.0
     out.pop("now", None)
+    if name == "turn.jsonl":
+        durations = out.get("durations_ms")
+        if isinstance(durations, dict):
+            out["durations_ms"] = {k: 0.0 for k in durations.keys()}
     return out
 
 

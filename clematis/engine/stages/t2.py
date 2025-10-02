@@ -9,7 +9,6 @@ from ...adapters.embeddings import BGEAdapter
 from ...memory.index import InMemoryIndex
 import numpy as np
 import datetime as dt
-from types import SimpleNamespace as NS
 from .hybrid import rerank_with_gel
 from .t2_quality_trace import emit_trace as emit_quality_trace
 from .t2_quality_mmr import MMRItem, avg_pairwise_distance
@@ -65,6 +64,17 @@ def _quality_cfg_snapshot(cfg_obj) -> Dict[str, Any]:
             }
         },
     }
+
+
+def _ensure_dict(obj: Any) -> Dict[str, Any]:
+    if isinstance(obj, dict):
+        return dict(obj)
+    if hasattr(obj, "__dict__"):
+        try:
+            return dict(obj.__dict__)
+        except Exception:
+            return {}
+    return {}
 
 
 # Helper: build a deterministic items list for quality fusion based on current ordering
@@ -400,18 +410,19 @@ def _quality_digest(qcfg: dict) -> str:
 
 
 def t2_semantic(ctx, state, text: str, t1) -> T2Result:
-    cfg = ctx.cfg
-    # Accept both dict-based and namespace configs (tests use a namespace; CLIs may pass dicts)
-    if isinstance(cfg, dict):
-        cfg = NS(**cfg)
-    cfg_t2 = cfg.t2
+    cfg_root_raw = _cfg_get(ctx, ["cfg"], getattr(ctx, "cfg", {}))
+    if cfg_root_raw is None:
+        cfg_root_raw = {}
+    cfg = cfg_root_raw
+    cfg_root = _ensure_dict(cfg_root_raw)
+    cfg_t2 = _ensure_dict(cfg_root.get("t2", {}))
     # PR33 config (identity-safe; metrics only unless explicitly wired)
     embed_store_dtype_cfg = str(
         _cfg_get(ctx, ["cfg", "perf", "t2", "embed_store_dtype"], "fp32") or "fp32"
     ).lower()
     precompute_norms_cfg = bool(_cfg_get(ctx, ["cfg", "perf", "t2", "precompute_norms"], False))
     partitions_cfg = _cfg_get(ctx, ["cfg", "perf", "t2", "reader", "partitions"], {}) or {}
-    embed_root = str(getattr(cfg_t2, "embed_root", "./.data/t2"))
+    embed_root = str(cfg_t2.get("embed_root", "./.data/t2"))
     # PR40: determine requested reader mode (flat|partition|auto), default flat
     reader_mode_req = str(_cfg_get(ctx, ["cfg", "t2", "reader", "mode"], "flat") or "flat").lower()
     reader_mode_sel = "flat"
@@ -448,7 +459,7 @@ def t2_semantic(ctx, state, text: str, t1) -> T2Result:
     if t1_labels:
         q_text = (q_text + " " + " ".join(sorted(t1_labels))).strip()
     # Deterministic embedding
-    enc = BGEAdapter(dim=int(cfg.k_surface) if hasattr(cfg, 'k_surface') else 32)
+    enc = BGEAdapter(dim=int(cfg_root.get("k_surface", 32)))
     enc_obj = getattr(ctx, "enc", None) or enc
     q_vec = enc_obj.encode([q_text])[0]
     # PR33: discover shards (for metrics only; retrieval path remains unchanged)
@@ -502,7 +513,7 @@ def t2_semantic(ctx, state, text: str, t1) -> T2Result:
         "sim_threshold": sim_threshold,
         "clusters_top_m": clusters_top_m,
     }
-    qcfg = _cfg_get(cfg, ["t2", "quality"], {}) or {}
+    qcfg = _ensure_dict(cfg_t2.get("quality", {}))
     if bool(qcfg.get("enabled", False)):
         ckey_payload["q_digest"] = _quality_digest(qcfg)
     if use_reader:
@@ -529,7 +540,7 @@ def t2_semantic(ctx, state, text: str, t1) -> T2Result:
         hit = cache.get(ckey)
         if hit is not None:
             # Mark cache hit only when metrics gate is ON
-            if _metrics_gate_on(ctx.cfg):
+            if _metrics_gate_on(cfg_root):
                 try:
                     hit.metrics["cache_used"] = True
                     hit.metrics["cache_hits"] = hit.metrics.get("cache_hits", 0) + 1
@@ -589,7 +600,7 @@ def t2_semantic(ctx, state, text: str, t1) -> T2Result:
         owner_query = _owner_for_query(ctx, cfg_t2)
         tier_sequence: List[str] = []
         # PR68: parallel T2 across in-memory shards, gated
-        if _t2_parallel_enabled(ctx.cfg, backend_selected, index):
+        if _t2_parallel_enabled(cfg_root, backend_selected, index):
             try:
                 suggested = int(_cfg_get(ctx, ["cfg", "perf", "parallel", "max_workers"], 1) or 1)
             except Exception:
@@ -744,7 +755,7 @@ def t2_semantic(ctx, state, text: str, t1) -> T2Result:
 
     # --- Optional GEL-based hybrid re-ranking (feature-flagged) ---
     # Prepare hybrid placeholders; we will attach them to `metrics` later
-    hcfg = (cfg_t2.get("hybrid", {}) or {}) if isinstance(cfg_t2, dict) else getattr(cfg_t2, "hybrid", {}) or {}
+    hcfg = _ensure_dict(cfg_t2.get("hybrid", {}))
     if bool(hcfg.get("enabled", False)):
         try:
             new_items, hmetrics = rerank_with_gel(ctx, state, retrieved)
@@ -781,7 +792,7 @@ def t2_semantic(ctx, state, text: str, t1) -> T2Result:
 
     # --- PR37: Optional lexical BM25 + fusion (alpha), behind t2.quality.enabled ---
     try:
-        q_enabled_cfg = bool(_cfg_get(cfg, ["t2", "quality", "enabled"], False))
+        q_enabled_cfg = bool(_cfg_get(cfg_root, ["t2", "quality", "enabled"], False))
         if q_enabled_cfg:
             # Import lazily to avoid hard dependency before PR37 lands
             try:
@@ -791,7 +802,7 @@ def t2_semantic(ctx, state, text: str, t1) -> T2Result:
             if quality_fuse is not None:
                 # Build fusion input from the *current* ordering
                 items_for_fusion = _items_for_fusion(retrieved)
-                fused_out = quality_fuse(q_text, items_for_fusion, cfg=cfg)
+                fused_out = quality_fuse(q_text, items_for_fusion, cfg=cfg_root)
                 # Allow either a list or (list, meta) return
                 if isinstance(fused_out, tuple):
                     fused_items, q_fusion_meta = fused_out
@@ -824,11 +835,11 @@ def t2_semantic(ctx, state, text: str, t1) -> T2Result:
                 except Exception:
                     quality_mmr = None
                 try:
-                    mmr_enabled = bool(_cfg_get(cfg, ["t2", "quality", "mmr", "enabled"], False))
+                    mmr_enabled = bool(_cfg_get(cfg_root, ["t2", "quality", "mmr", "enabled"], False))
                 except Exception:
                     mmr_enabled = False
                 if quality_mmr is not None and mmr_enabled:
-                    qcfg = _cfg_get(cfg, ["t2", "quality"], {}) or {}
+                    qcfg = _cfg_get(cfg_root, ["t2", "quality"], {}) or {}
                     mmr_items = quality_mmr(fused_items, qcfg)
                     # Mark that MMR executed, even if it yields an empty/no-op selection
                     q_mmr_used = True
@@ -854,10 +865,10 @@ def t2_semantic(ctx, state, text: str, t1) -> T2Result:
                 from .t2_quality import maybe_apply_mmr as _quality_mmr_fallback  # type: ignore
             except Exception:
                 _quality_mmr_fallback = None
-            _mmr_enabled_fb = bool(_cfg_get(cfg, ["t2", "quality", "mmr", "enabled"], False))
+            _mmr_enabled_fb = bool(_cfg_get(cfg_root, ["t2", "quality", "mmr", "enabled"], False))
             if _quality_mmr_fallback is not None and _mmr_enabled_fb:
                 _items_fb = _items_for_fusion(retrieved)
-                _qcfg_fb = _cfg_get(cfg, ["t2", "quality"], {}) or {}
+                _qcfg_fb = _cfg_get(cfg_root, ["t2", "quality"], {}) or {}
                 _mmr_items_fb = _quality_mmr_fallback(_items_fb, _qcfg_fb)
                 q_mmr_used = True
                 id_to_ref_fb = {r.id: r for r in retrieved}

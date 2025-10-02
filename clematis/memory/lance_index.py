@@ -9,7 +9,7 @@
 #   preserve determinism and parity with InMemoryIndex.
 # - We intentionally keep the API surface identical to InMemoryIndex:
 #     * add(ep: dict) -> None
-#     * search_tiered(owner, q_vec, k, tier, hints) -> List[dict-like EpisodeRef]
+#     * search_tiered(owner, q_vec, k, tier, hints) -> List[EpisodeRef]
 #     * index_version() -> int
 # - The adapter stores a small `meta` table with a single counter row for a
 #   monotonic version; it is incremented on each successful add().
@@ -27,6 +27,8 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 import numpy as np
 
 logger = logging.getLogger(__name__)
+
+from ..engine.types import EpisodeRef
 
 
 # ----------------------------- helper utilities -----------------------------
@@ -68,10 +70,15 @@ def _cosine(a: np.ndarray, b: np.ndarray) -> float:
 
 
 class LanceIndex:
-    """
-    LanceDB-backed implementation of the InMemoryIndex interface.
-    Import of lancedb/pyarrow is deferred to construction time to allow the
-    caller to gracefully handle environments where Lance is unavailable.
+    """LanceDB-backed implementation of the in-memory index contract.
+
+    Import of ``lancedb`` / ``pyarrow`` is deferred to construction time so import side
+    effects are avoided. Public methods intentionally mirror ``InMemoryIndex``:
+
+    ``add(ep)``                     – add/overwrite an episode dictionary.
+    ``search_tiered(...)``          – return a ``List[EpisodeRef]`` with identical
+                                       scoring/tie-break semantics.
+    ``index_version()``             – monotonically increasing version counter.
     """
 
     def __init__(
@@ -220,7 +227,7 @@ class LanceIndex:
         k: int,
         tier: str,
         hints: Dict[str, Any],
-    ) -> List[Dict[str, Any]]:
+    ) -> List[EpisodeRef]:
         """Search episodes using deterministic cosine + tie by id.
 
         Tier behaviors:
@@ -331,13 +338,19 @@ class LanceIndex:
             scored.append((s, eid, e))
 
         scored.sort(key=lambda t: (-t[0], t[1]))
-        top = [e for (_, _, e) in scored[: max(int(k), 0)]]
+        limit = max(int(k), 0)
+        out: List[EpisodeRef] = []
+        for score, eid, record in scored[:limit]:
+            out.append(
+                EpisodeRef(
+                    id=eid,
+                    owner=str(record.get("owner", "")),
+                    score=float(score),
+                    text=str(record.get("text", "")),
+                )
+            )
 
-        # Optionally attach the score for downstream debugging (harmless extra key)
-        for s, eid, e in scored[: max(int(k), 0)]:
-            e.setdefault("_score", s)
-
-        return top
+        return out
 
     def index_version(self) -> int:
         if self._version_cache is not None:
@@ -556,7 +569,15 @@ class _LancePartition:
             scored.append((s, eid, e))
 
         scored.sort(key=lambda t: (-t[0], t[1]))
-        top = [e for (_, _, e) in scored[: max(int(k), 0)]]
-        for s, eid, e in scored[: max(int(k), 0)]:
-            e.setdefault("_score", s)
-        return top
+        limit = max(int(k), 0)
+        out: List[EpisodeRef] = []
+        for score, eid, record in scored[:limit]:
+            out.append(
+                EpisodeRef(
+                    id=eid,
+                    owner=str(record.get("owner", "")),
+                    score=float(score),
+                    text=str(record.get("text", "")),
+                )
+            )
+        return out

@@ -14,6 +14,7 @@ import argparse
 from ._exit import OK, USER_ERR
 from ._io import eprint_once, set_verbosity
 from ._util import add_passthrough_subparser
+from ._wrapper_common import prepare_wrapper_args
 
 _HELP = "Delegates to scripts/"
 _DESC = "Delegates to scripts/run_demo.py"
@@ -31,54 +32,28 @@ def register(subparsers: argparse._SubParsersAction):
 
 
 def _run(ns: argparse.Namespace) -> int:
-    # REMAINDER swallows -h/--help; intercept explicitly for deterministic output
-    rest = list(getattr(ns, "args", []) or [])
-    orig_rest = list(rest)
-    if any(x in ("-h", "--help") for x in rest):
+    opts = prepare_wrapper_args(ns)
+
+    if opts.help_requested:
         print(_HELP)
         return OK
-    if rest and rest[0] == "--":
-        rest = rest[1:]
 
-    # Configure verbosity (stderr only); stdout remains reserved for command output
-    set_verbosity(getattr(ns, "verbose", False), getattr(ns, "quiet", False))
-    quiet = bool(getattr(ns, "quiet", False) or ("--quiet" in orig_rest))
+    set_verbosity(opts.verbose, opts.quiet)
 
-    # Hoist wrapper-only flags that users might put after `--`
-    hoisted_json = False
-    hoisted_table = False
-    filtered: list[str] = []
-    for tok in rest:
-        if tok == "--json":
-            hoisted_json = True
-            continue
-        if tok == "--table":
-            hoisted_table = True
-            continue
-        if tok == "--":  # drop stray option-terminator if present mid-argv
-            continue
-        filtered.append(tok)
-    rest = filtered
-
-    # Unified wants_* across both positions (before or after `--`)
-    wants_json = bool(getattr(ns, "json", False) or hoisted_json)
-    wants_table = bool(getattr(ns, "table", False) or hoisted_table)
-
-    if wants_json and wants_table:
-        if not quiet:
+    if opts.wants_json and opts.wants_table:
+        if not opts.quiet:
             eprint_once("Choose exactly one of --json or --table.")
         return USER_ERR
-    if wants_json or wants_table:
-        if not quiet:
+    if opts.wants_json or opts.wants_table:
+        if not opts.quiet:
             eprint_once("`demo` currently does not support --json/--table.")
         return USER_ERR
 
-    # Delegate to the packaged shim. We set sys.argv to support zero‑arg main().
     import sys as _sys
 
     _orig_argv = list(_sys.argv)
     try:
-        _sys.argv = ["clematis.scripts.demo"] + rest
+        _sys.argv = ["clematis.scripts.demo"] + opts.argv
         from clematis.scripts.demo import main as _main
 
         return _main()  # shim adapts to run_demo main()

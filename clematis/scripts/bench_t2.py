@@ -10,6 +10,8 @@ import json
 import os
 import sys
 import time
+import tempfile
+import shutil
 from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
@@ -53,6 +55,16 @@ class Episode:
     ts: str  # ISO8601 UTC
     vec_full: Sequence[float]
     aux: Dict[str, Any]
+
+
+def _episode_to_dict(ep: Episode) -> Dict[str, Any]:
+    return {
+        "id": ep.id,
+        "owner": ep.owner,
+        "ts": ep.ts,
+        "vec_full": list(ep.vec_full),
+        "aux": dict(ep.aux),
+    }
 
 
 def _make_ts(base: datetime, days_offset: int) -> str:
@@ -191,24 +203,34 @@ def run_bench(iters: int, workers: int, backend: str, dim: int, n_rows: int,
     index_backend = backend.lower()
     index: Any = None
     used_fallback = False
+    lance_tmpdir: Optional[str] = None
 
     if index_backend == "inmemory":
         try:
-            from clematis.memory.inmemory import InMemoryIndex  # type: ignore
-            index = InMemoryIndex()
-            if hasattr(index, "add"):
-                index.add([e.__dict__ for e in rows])
-            else:
-                used_fallback = True
+            from clematis.memory.index import InMemoryIndex  # type: ignore
+
+            idx = InMemoryIndex()
+            for ep in rows:
+                idx.add(_episode_to_dict(ep))
+            index = idx
         except Exception:
             used_fallback = True
+            index = None
     elif index_backend == "lancedb":
         try:
             from clematis.memory.lance_index import LanceIndex  # type: ignore
-            index = LanceIndex(db_path=":memory:")
-            index.add([e.__dict__ for e in rows])
+
+            lance_tmpdir = tempfile.mkdtemp(prefix="bench_t2_lance_")
+            idx = LanceIndex(uri=lance_tmpdir)
+            for ep in rows:
+                idx.add(_episode_to_dict(ep))
+            index = idx
         except Exception:
+            if lance_tmpdir is not None:
+                shutil.rmtree(lance_tmpdir, ignore_errors=True)
+                lance_tmpdir = None
             used_fallback = True
+            index = None
     else:
         used_fallback = True
 
@@ -233,7 +255,7 @@ def run_bench(iters: int, workers: int, backend: str, dim: int, n_rows: int,
 
     hints = {
         "now": datetime(2025, 10, 1, tzinfo=timezone.utc).isoformat(),
-        "sim_threshold": None,
+        "sim_threshold": 0.0,
         "clusters_top_m": 3,
         "recent_days": 365,
     }
@@ -248,22 +270,29 @@ def run_bench(iters: int, workers: int, backend: str, dim: int, n_rows: int,
         if parallel and shard_count > 1 and effective_workers > 1:
             # Execute per-shard searches concurrently (read-only)
             with ThreadPoolExecutor(max_workers=effective_workers) as ex:
-                results = [ex.submit(s.search_tiered, None, q, k, "exact_semantic", hints).result() for s in shards]
+                results = [
+                    ex.submit(s.search_tiered, None, q, k, "exact_semantic", hints).result()
+                    for s in shards
+                ]
             # Merge (deterministic by score desc then id asc)
-            merged: List[Tuple[float, str, Dict[str, Any]]] = []
+            merged: List[Tuple[float, str, Any]] = []
             for lst in results:
                 for e in lst:
-                    merged.append((float(e.get("_score", 0.0)), str(e.get("id")), e))
+                    score = float(getattr(e, "score", 0.0))
+                    eid = str(getattr(e, "id", ""))
+                    merged.append((score, eid, e))
             merged.sort(key=lambda t: (-t[0], t[1]))
             top = [e for (_, _, e) in merged[:k]]
         else:
             # Sequential across shards, equivalent order
-            merged: List[Tuple[float, str, Dict[str, Any]]] = []
+            merged: List[Tuple[float, str, Any]] = []
             for s in shards:
                 for e in s.search_tiered(None, q, k, "exact_semantic", hints):
-                    merged.append((float(e.get("_score", 0.0)), str(e.get("id")), e))
-            merged.sort(key=lambda t: (-t[0], t[1]))
-            top = [e for (_, _, e) in merged[:k]]
+                        score = float(getattr(e, "score", 0.0))
+                        eid = str(getattr(e, "id", ""))
+                        merged.append((score, eid, e))
+                merged.sort(key=lambda t: (-t[0], t[1]))
+                top = [e for (_, _, e) in merged[:k]]
         total_returned += len(top)
     t1 = time.perf_counter()
 
@@ -297,6 +326,8 @@ def run_bench(iters: int, workers: int, backend: str, dim: int, n_rows: int,
             "t2_partition_count": int(t2_partition_count),
         },
     }
+    if lance_tmpdir is not None:
+        shutil.rmtree(lance_tmpdir, ignore_errors=True)
     return out
 
 # ------------------------------ CLI ----------------------------------------

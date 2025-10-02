@@ -1,3 +1,1 @@
-{"turn": "demo-1", "agent": "AgentA", "tokens": 4, "truncated": false, "style_prefix_used": false, "snippet_count": 0, "ms": 0.021, "backend": "rulebased", "now": "2025-10-02T10:57:47.458070+00:00"}
-{"turn": "demo-1", "agent": "AgentA", "tokens": 4, "truncated": false, "style_prefix_used": false, "snippet_count": 0, "ms": 0.016, "backend": "rulebased", "now": "2025-10-02T10:57:47.460131+00:00"}
-{"turn": "demo-1", "agent": "AgentA", "tokens": 6, "truncated": false, "style_prefix_used": false, "snippet_count": 0, "ms": 0.024, "backend": "rulebased", "now": "2025-10-02T10:57:48.750820+00:00"}
+{"turn": "demo-1", "agent": "AgentA", "tokens": 6, "truncated": false, "style_prefix_used": false, "snippet_count": 0, "ms": 0.029, "backend": "rulebased", "now": "2025-10-02T12:48:35.680950+00:00"}
