@@ -155,7 +155,7 @@ def _run_agents_parallel_batch(
                 stager.stage(file_path, key, payload)
             except RuntimeError as e:
                 if str(e) == "LOG_STAGING_BACKPRESSURE":
-                    # Drain and flush, then retry once
+                    # Backpressure is expected; drain deterministically and retry without surfacing stderr noise.
                     for rec in stager.drain_sorted():
                         _append_jsonl_unbuffered(rec.file_path, rec.payload)
                     stager.stage(file_path, key, payload)
@@ -204,6 +204,7 @@ def _run_agents_parallel_batch(
             stager.stage("apply.jsonl", key, _ap)
         except RuntimeError as e:
             if str(e) == "LOG_STAGING_BACKPRESSURE":
+                # Same fallback as above: flush staged logs and retry, keeping stderr quiet and behavior deterministic.
                 for rec in stager.drain_sorted():
                     _append_jsonl_unbuffered(rec.file_path, rec.payload)
                 stager.stage("apply.jsonl", key, _ap)

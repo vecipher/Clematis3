@@ -4,15 +4,17 @@ from clematis.adapters.llm import FixtureLLMAdapter, LLMAdapterError, _prompt_ha
 
 
 def test_missing_file_raises():
-    with pytest.raises(LLMAdapterError):
+    with pytest.raises(LLMAdapterError) as exc:
         FixtureLLMAdapter("this/does/not/exist.jsonl")
+    assert str(exc.value) == "Fixture file not found"
 
 
 def test_bad_jsonl_line_raises(tmp_path):
     p = tmp_path / "fx.jsonl"
     p.write_text("{bad json}\n", encoding="utf-8")
-    with pytest.raises(LLMAdapterError):
+    with pytest.raises(LLMAdapterError) as exc:
         FixtureLLMAdapter(str(p))
+    assert str(exc.value) == "Invalid fixture JSONL at line 1"
 
 
 def test_missing_mapping_raises(tmp_path):
@@ -20,8 +22,9 @@ def test_missing_mapping_raises(tmp_path):
     line = {"prompt_hash": "deadbeef", "completion": "ok"}
     p.write_text(json.dumps(line) + "\n", encoding="utf-8")
     fx = FixtureLLMAdapter(str(p))
-    with pytest.raises(LLMAdapterError):
+    with pytest.raises(LLMAdapterError) as exc:
         fx.generate("some other prompt", max_tokens=16, temperature=0.0)
+    assert str(exc.value) == "No fixture for prompt hash"
 
 
 def test_canonical_newlines_match(tmp_path):

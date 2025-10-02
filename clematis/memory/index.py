@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 import numpy as np
 from numpy.typing import NDArray
 from ..engine.types import EpisodeRef
@@ -174,7 +174,9 @@ class InMemoryIndex:
             # such as index_version that parallel merge code may touch.
             return getattr(self._parent, name)
 
-    def _iter_shards_for_t2(self, tier: str, suggested: int | None = None):
+    def _iter_shards_for_t2(
+        self, tier: str, suggested: int | None = None
+    ) -> Iterator["InMemoryIndex | InMemoryIndex._ShardView"]:
         """Yield deterministic shard views for T2 parallel fan-out.
 
         When no sharding is beneficial (<=1 episode or suggested <=1), yield the

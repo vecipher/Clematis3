@@ -39,7 +39,7 @@ def sort_key(hit: RawHit) -> Tuple[int, str]:
     return (-_qscore(hit.score), str(hit.episode_id))
 
 
-def merge_hits(buckets: Iterable[List[RawHit]]) -> List[RawHit]:
+def merge_hits(buckets: Iterable[Iterable[RawHit]]) -> List[RawHit]:
     """
     Deterministically merge multiple RawHit buckets:
     - keep the best by (score desc, id asc) per episode_id
@@ -79,7 +79,8 @@ def merge_tier_hits_across_shards_dict(
         # collect all hits for this tier across shards
         bucket: List[Dict[str, Any]] = []
         for d in shard_hits_by_tier:
-            bucket.extend((d.get(tier) or []))
+            hits = d.get(tier) or []
+            bucket.extend(hits)
 
         # Append tier to sequence regardless (mirrors sequential walk)
         used_tiers.append(tier)

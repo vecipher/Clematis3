@@ -1,24 +1,9 @@
-# Copyright (c) Clematis Project
-# PR3: Optional LanceDB-backed index adapter
-#
-# Notes
-# - This module **defers** importing `lancedb`/`pyarrow` until runtime in __init__
-#   so that importing the module itself never raises ImportError. The T2 factory
-#   can catch ImportError from constructing LanceIndex and cleanly fall back.
-# - Cosine similarity and tie-breaking are done on the Python side (numpy) to
-#   preserve determinism and parity with InMemoryIndex.
-# - We intentionally keep the API surface identical to InMemoryIndex:
-#     * add(ep: dict) -> None
-#     * search_tiered(owner, q_vec, k, tier, hints) -> List[EpisodeRef]
-#     * index_version() -> int
-# - The adapter stores a small `meta` table with a single counter row for a
-#   monotonic version; it is incremented on each successful add().
+"""Optional LanceDB-backed index that mirrors the InMemoryIndex surface."""
 
 from __future__ import annotations
 
 import json
 import logging
-import math
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta

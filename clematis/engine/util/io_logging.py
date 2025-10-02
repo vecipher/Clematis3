@@ -35,7 +35,7 @@ STAGE_ORD: Dict[str, int] = {
 }
 
 # Logs that participate in byte-for-byte identity checks
-_IDENTITY_LOGS = {
+_IDENTITY_LOGS: set[str] = {
     "t1.jsonl",
     "t2.jsonl",
     "t4.jsonl",
@@ -112,8 +112,8 @@ class LogStager:
 
     def __init__(self, byte_limit: int = 32 * 1024 * 1024) -> None:
         self._buf: List[StagedRecord] = []
-        self._seq = 0
-        self._bytes = 0
+        self._seq: int = 0
+        self._bytes: int = 0
         self.byte_limit = int(byte_limit)
 
     # ---- sequencing ----
