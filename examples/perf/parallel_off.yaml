@@ -1,0 +1,12 @@
+# Minimal sequential baseline (M9 default-off identity path)
+# Outputs must be byte-identical to pre-M9 when used.
+perf:
+  parallel:
+    enabled: false
+    max_workers: 1
+    t1: false
+    t2: false
+    agents: false
+  metrics:
+    enabled: false
+    report_memory: false

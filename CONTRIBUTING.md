@@ -96,3 +96,57 @@ Notes:
 - Keep PR descriptions factual and include any golden fixture updates (what changed and why).
 
 - Before opening a PR: run `pre-commit run -a` locally; PRs must pass **Lint & Types** (Ruff format repo-wide, Ruff safety repo-wide, Ruff strict on CLI, MyPy on CLI).
+
+## Running tests
+
+Most tests are offline by default:
+```bash
+pytest -q -m "not manual"
+```
+
+## M9: Parallelism — local parity commands
+
+Goal: verify that parallel **ON** preserves sequential artifacts (byte‑for‑byte) and know how to smoke‑test locally.
+
+### One‑shot checks
+
+```bash
+# Sequential baseline (identity path)
+python -m clematis.scripts.run_demo --config examples/perf/parallel_off.yaml
+
+# Parallel ON (opt‑in)
+python -m clematis.scripts.run_demo --config examples/perf/parallel_on.yaml
+```
+
+### Identity tests (CI parity)
+
+```bash
+pytest -q tests/integration/test_identity_parallel.py
+```
+
+### Microbenches (local only; no CI gating)
+
+```bash
+# T1 (single‑threaded; --parallel is advisory)
+python -m clematis.scripts.bench_t1 --graphs 3 --iters 2 --json
+
+# T2 (in‑memory backend)
+python -m clematis.scripts.bench_t2 --rows 256 --iters 3 --json
+
+# T2 (parallel shards)
+python -m clematis.scripts.bench_t2 --rows 512 --iters 5 --parallel --workers 3 --json
+```
+
+### LanceDB optional extras
+
+```bash
+python -m pip install -e '.[lancedb]'
+python -m clematis.scripts.bench_t2 --rows 512 --iters 5 --backend lancedb --parallel --json
+```
+
+### Troubleshooting (quick)
+
+- Remove stale logs: `rm -f logs/*.jsonl`
+- Keep `perf.parallel.*` **OFF** for the sequential baseline.
+- Pin Python to a CI‑proven version (3.11–3.13).
+- See **docs/m9/overview.md** for the config matrix, determinism rules, and FAQs.
