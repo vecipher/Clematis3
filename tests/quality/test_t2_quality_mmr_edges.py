@@ -1,7 +1,7 @@
 import pytest
 from typing import Any, Dict, List
 
-from clematis.engine.stages.t2_quality import maybe_apply_mmr
+from clematis.engine.stages.t2.quality_ops import maybe_apply_mmr
 
 
 def _mk(i: str, fused: float, text: str = "", toks=None) -> Dict[str, Any]:

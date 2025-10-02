@@ -1,5 +1,5 @@
 from typing import List, Dict, Any, Tuple
-from clematis.engine.stages.t2_quality import fuse
+from clematis.engine.stages.t2.quality_ops import fuse
 
 
 def _items() -> List[Dict[str, Any]]:

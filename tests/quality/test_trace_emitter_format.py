@@ -1,6 +1,6 @@
 from pathlib import Path
 import json
-from clematis.engine.stages.t2_quality_trace import emit_trace
+from clematis.engine.stages.t2.quality_trace import emit_trace
 
 
 def _cfg(trace_dir: Path, redact: bool):

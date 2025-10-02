@@ -10,90 +10,47 @@ from ...types import EpisodeRef, T2Result
 from ...util.embed_store import open_reader
 from ...util.parallel import run_parallel
 from ....adapters.embeddings import BGEAdapter
-from ....memory.index import InMemoryIndex
+from .quality import apply_quality as _apply_quality
 from .cache import get_cache as _get_cache
 from .config import (
     cfg_get as _cfg_get,
     ensure_dict as _ensure_dict,
     metrics_gate_on as _metrics_gate_on,
-    quality_cfg_snapshot as _quality_cfg_snapshot,
 )
 from .helpers import (
     EpRefShim as _EpRefShim,
-    build_label_map as _build_label_map,
-    gather_changed_labels as _gather_changed_labels,
-    items_for_fusion as _items_for_fusion,
     owner_for_query as _owner_for_query,
     parse_iso as _parse_iso,
     quality_digest as _quality_digest,
 )
-from ..hybrid import rerank_with_gel
+
+from .state import (
+    _init_index_from_cfg,
+    gather_changed_labels as _gather_changed_labels,
+    build_label_map as _build_label_map,
+)
 from .metrics import (
     emit_t2_metrics as _emit_t2_metrics,
     estimate_result_cost as _estimate_result_cost,
+    finalize as _finalize_metrics,
 )
+
 from .parallel import (
     collect_shard_hits as _collect_shard_hits,
     t2_parallel_enabled as _t2_parallel_enabled,
 )
-from ..t2_quality_mmr import MMRItem, avg_pairwise_distance
-from ..t2_quality_trace import emit_trace as emit_quality_trace
-from ..t2_shard import merge_tier_hits_across_shards_dict as _merge_tier_hits_across_shards, _qscore
+from .quality_mmr import MMRItem, avg_pairwise_distance
+from .shard import merge_tier_hits_across_shards_dict as _merge_tier_hits_across_shards, _qscore
 
 # PR40: Safe import for optional Lance partitioned reader
 try:
-    from ..t2_lance_reader import LancePartitionSpec, PartitionedReader  # PR40 optional
+    from .lance_reader import LancePartitionSpec, PartitionedReader  # PR40 optional
 except Exception:
     LancePartitionSpec = None  # type: ignore
     PartitionedReader = None  # type: ignore
 
 
-# Helper: build a deterministic items list for quality fusion based on current ordering
-def _init_index_from_cfg(state: dict, cfg_t2: dict):
-    """Instantiate and cache the memory index based on t2.backend with safe fallback.
-    Returns: (index, backend_selected:str, fallback_reason:str|None)
-    """
-    idx = state.get("mem_index")
-    if idx is not None:
-        return (
-            idx,
-            state.get("mem_backend", str(cfg_t2.get("backend", "inmemory")).lower()),
-            state.get("mem_backend_fallback_reason"),
-        )
 
-    backend = str(cfg_t2.get("backend", "inmemory")).lower()
-    fallback_reason = None
-
-    if backend == "lancedb":
-        try:
-            from clematis.memory.lance_index import (
-                LanceIndex,
-            )  # deferred import; adapter defers lancedb
-
-            lcfg = cfg_t2.get("lancedb", {}) or {}
-            idx = LanceIndex(
-                uri=str(lcfg.get("uri", "./.data/lancedb")),
-                table=str(lcfg.get("table", "episodes")),
-                meta_table=str(lcfg.get("meta_table", "meta")),
-            )
-        except Exception as e:
-            # Fallback to in-memory index, record reason
-            idx = InMemoryIndex()
-            fallback_reason = f"{type(e).__name__}: {e}"
-            backend = "inmemory"
-    else:
-        idx = InMemoryIndex()
-        backend = "inmemory"
-
-    state["mem_index"] = idx
-    state["mem_backend"] = backend
-    if fallback_reason:
-        state["mem_backend_fallback_reason"] = fallback_reason
-    return idx, backend, fallback_reason
-
-
-import hashlib
-import json
 
 
 def t2_semantic(ctx, state, text: str, t1) -> T2Result:
@@ -448,137 +405,16 @@ def t2_semantic(ctx, state, text: str, t1) -> T2Result:
     rescored.sort(key=lambda t: (-t[1], t[0].id))
     retrieved = [r for (r, _, _) in rescored]
 
-    # --- Optional GEL-based hybrid re-ranking (feature-flagged) ---
-    # Prepare hybrid placeholders; we will attach them to `metrics` later
-    hcfg = _ensure_dict(cfg_t2.get("hybrid", {}))
-    if bool(hcfg.get("enabled", False)):
-        try:
-            new_items, hmetrics = rerank_with_gel(ctx, state, retrieved)
-            retrieved = new_items
-            hybrid_used = bool(hmetrics.get("hybrid_used", False))
-            hybrid_info = {
-                k: hmetrics.get(k)
-                for k in (
-                    "anchor_top_m",
-                    "walk_hops",
-                    "edge_threshold",
-                    "lambda_graph",
-                    "damping",
-                    "degree_norm",
-                    "k_max",
-                    "k_considered",
-                    "k_reordered",
-                )
-                if k in hmetrics
-            }
-        except Exception:
-            hybrid_used = False
-            hybrid_info = {}
-    else:
-        hybrid_used = False
-        hybrid_info = {}
-
-    # PR37 fusion bookkeeping
-    q_fusion_used = False
-    q_fusion_meta = {}
-    # PR38 fusion bookkeeping
-    q_mmr_used = False
-    q_mmr_selected_n = 0
-
-    # --- PR37: Optional lexical BM25 + fusion (alpha), behind t2.quality.enabled ---
-    try:
-        q_enabled_cfg = bool(_cfg_get(cfg_root, ["t2", "quality", "enabled"], False))
-        if q_enabled_cfg:
-            # Import lazily to avoid hard dependency before PR37 lands
-            try:
-                from .t2_quality import fuse as quality_fuse  # type: ignore
-            except Exception:
-                quality_fuse = None  # fallback: skip fusion if module not present
-            if quality_fuse is not None:
-                # Build fusion input from the *current* ordering
-                items_for_fusion = _items_for_fusion(retrieved)
-                fused_out = quality_fuse(q_text, items_for_fusion, cfg=cfg_root)
-                # Allow either a list or (list, meta) return
-                if isinstance(fused_out, tuple):
-                    fused_items, q_fusion_meta = fused_out
-                else:
-                    fused_items, q_fusion_meta = fused_out, {}
-                # Build optional maps for enabled-path traces
-                try:
-                    sem_rank_map = {d["id"]: i + 1 for i, d in enumerate(items_for_fusion)}
-                    score_fused_map = {
-                        d.get("id"): float(d.get("score_fused", 0.0)) for d in (fused_items or [])
-                    }
-                    if isinstance(q_fusion_meta, dict):
-                        q_fusion_meta.setdefault("sem_rank_map", sem_rank_map)
-                        q_fusion_meta.setdefault("score_fused_map", score_fused_map)
-                except Exception:
-                    pass
-                # Reorder `retrieved` according to fused id ordering; keep only known ids
-                id_to_ref = {r.id: r for r in retrieved}
-                new_order = []
-                for it in fused_items:
-                    iid = it.get("id")
-                    if iid in id_to_ref:
-                        new_order.append(id_to_ref[iid])
-                if new_order:
-                    retrieved = new_order
-                    q_fusion_used = True
-                # --- PR38: Optional MMR diversification over fused list ---
-                try:
-                    from .t2_quality import maybe_apply_mmr as quality_mmr  # type: ignore
-                except Exception:
-                    quality_mmr = None
-                try:
-                    mmr_enabled = bool(
-                        _cfg_get(cfg_root, ["t2", "quality", "mmr", "enabled"], False)
-                    )
-                except Exception:
-                    mmr_enabled = False
-                if quality_mmr is not None and mmr_enabled:
-                    qcfg = _cfg_get(cfg_root, ["t2", "quality"], {}) or {}
-                    mmr_items = quality_mmr(fused_items, qcfg)
-                    # Mark that MMR executed, even if it yields an empty/no-op selection
-                    q_mmr_used = True
-                    # Reorder EpisodeRefs according to MMR output (when any ids are returned)
-                    id_to_ref = {r.id: r for r in retrieved}
-                    mmr_order = []
-                    for it in mmr_items or []:
-                        iid = it.get("id")
-                        if iid in id_to_ref:
-                            mmr_order.append(id_to_ref[iid])
-                    q_mmr_selected_n = len(mmr_order)
-                    if mmr_order:
-                        retrieved = mmr_order
-    except Exception:
-        # Fusion must never break retrieval; if anything goes wrong, keep baseline ordering
-        q_fusion_used = False
-        q_fusion_meta = {}
-
-    # PR38 fallback: if fusion step failed/was skipped, still attempt MMR over current ordering
-    if not q_mmr_used:
-        try:
-            try:
-                from .t2_quality import maybe_apply_mmr as _quality_mmr_fallback  # type: ignore
-            except Exception:
-                _quality_mmr_fallback = None
-            _mmr_enabled_fb = bool(_cfg_get(cfg_root, ["t2", "quality", "mmr", "enabled"], False))
-            if _quality_mmr_fallback is not None and _mmr_enabled_fb:
-                _items_fb = _items_for_fusion(retrieved)
-                _qcfg_fb = _cfg_get(cfg_root, ["t2", "quality"], {}) or {}
-                _mmr_items_fb = _quality_mmr_fallback(_items_fb, _qcfg_fb)
-                q_mmr_used = True
-                id_to_ref_fb = {r.id: r for r in retrieved}
-                _mmr_order_fb = []
-                for it in _mmr_items_fb or []:
-                    _iid = it.get("id")
-                    if _iid in id_to_ref_fb:
-                        _mmr_order_fb.append(id_to_ref_fb[_iid])
-                q_mmr_selected_n = len(_mmr_order_fb)
-                if _mmr_order_fb:
-                    retrieved = _mmr_order_fb
-        except Exception:
-            pass
+    # --- Quality layer (hybrid + fusion + MMR) delegated to t2/quality.py ---
+    (
+        retrieved,
+        hybrid_used,
+        hybrid_info,
+        q_fusion_used,
+        q_fusion_meta,
+        q_mmr_used,
+        q_mmr_selected_n,
+    ) = _apply_quality(ctx, state, retrieved, q_text, cfg_root, cfg_t2)
 
     # --- M5 scheduler slice caps (use-only clamp) ---
     # We cap how many retrieval hits are **used** downstream in this slice (not how many are fetched).
@@ -662,137 +498,58 @@ def t2_semantic(ctx, state, text: str, t1) -> T2Result:
     }
     if hybrid_info:
         metrics["hybrid"] = hybrid_info
-
     # --- Additional gated metrics (only when perf.enabled && perf.metrics.report_memory) ---
-    if gate_on:
-        # Emit reader diagnostics only when the reader actually engaged under perf gate
-        if use_reader and perf_enabled:
-            partitions_list = []
-            if isinstance(partitions_cfg, dict):
-                by = partitions_cfg.get("by") or partitions_cfg.get("partitions")
-                if isinstance(by, (list, tuple)):
-                    partitions_list = [str(x) for x in by]
-            reader_meta = {
-                "embed_store_dtype": pr33_store_dtype,
-                "precompute_norms": bool(precompute_norms_cfg),
-                "layout": pr33_layout,
-                "shards": int(pr33_shards or 0),
-            }
-            if partitions_list:
-                reader_meta["partitions"] = list(partitions_list)
-            metrics["reader"] = reader_meta
-        # PR40: emit selected reader mode for observability
+    # Delegate most of the assembly to metrics.assemble_metrics to keep this file lean.
+    metrics = _finalize_metrics(
+        cfg=cfg_root,
+        base_metrics=metrics,
+        tier_sequence=tier_sequence if 'tier_sequence' in locals() and tier_sequence else tiers,
+        tiers=tiers,
+        gate_on=gate_on,
+        use_reader=use_reader,
+        perf_enabled=perf_enabled,
+        metrics_enabled=metrics_enabled,
+        partitions_cfg=partitions_cfg if isinstance(partitions_cfg, dict) else None,
+        pr33_store_dtype=pr33_store_dtype,
+        pr33_layout=pr33_layout,
+        pr33_shards=pr33_shards,
+        reader_mode=reader_mode_sel,
+        t2_task_count=t2_task_count,
+        t2_parallel_workers=t2_parallel_workers,
+        t2_partition_count=t2_partition_count,
+        backend_fallback_reason=backend_fallback_reason,
+        hybrid_used=hybrid_used,
+        hybrid_info=hybrid_info,
+        q_fusion_used=q_fusion_used,
+        q_fusion_meta=q_fusion_meta,
+        q_mmr_used=q_mmr_used,
+        q_mmr_selected_n=q_mmr_selected_n,
+    )
+
+    # PR38: emit MMR diversity metric only when quality+MMR are enabled and MMR ran
+    if gate_on and bool(_cfg_get(cfg, ["t2", "quality", "enabled"], False)):
         try:
-            metrics["t2.reader_mode"] = str(reader_mode_sel)
-        except Exception:
-            pass
-        if backend_fallback_reason:
-            metrics["backend_fallback_reason"] = str(backend_fallback_reason)
-        # PR37: emit quality fusion metrics only when enabled and fusion executed
-        if bool(_cfg_get(cfg, ["t2", "quality", "enabled"], False)) and q_fusion_used:
-            metrics["t2q.fusion_mode"] = "score_interp"
-            metrics["t2q.alpha_semantic"] = float(
-                _cfg_get(cfg, ["t2", "quality", "fusion", "alpha_semantic"], 0.6)
-            )
-            # If the fuser provided additional meta (e.g., lex_hits), forward selected fields
-            if isinstance(q_fusion_meta, dict) and "t2q.lex_hits" in q_fusion_meta:
-                try:
-                    metrics["t2q.lex_hits"] = int(q_fusion_meta["t2q.lex_hits"])
-                except Exception:
-                    pass
-        # PR37: enabled-path tracing (triple-gated). Writes fused ordering details.
-        if bool(_cfg_get(cfg, ["t2", "quality", "enabled"], False)) and q_fusion_used:
-            try:
-                # Prefer a caller-supplied reason (e.g., "examples_smoke", "eval"); fallback to "enabled"
-                _reason_en = None
-                try:
-                    _reason_en = getattr(ctx, "trace_reason", None)
-                    if _reason_en is None and isinstance(ctx, dict):  # tolerate dict-style ctx
-                        _reason_en = ctx.get("trace_reason")
-                except Exception:
-                    _reason_en = None
-                if _reason_en is None:
-                    try:
-                        _reason_en = _cfg_get(cfg, ["perf", "metrics", "trace_reason"], None)
-                    except Exception:
-                        _reason_en = None
-                cfg_snap = _quality_cfg_snapshot(cfg)
-                sem_rank_map = {}
-                score_fused_map = {}
-                if isinstance(q_fusion_meta, dict):
-                    sem_rank_map = q_fusion_meta.get("sem_rank_map", {}) or {}
-                    score_fused_map = q_fusion_meta.get("score_fused_map", {}) or {}
-                trace_items = []
-                for idx, r in enumerate(retrieved, start=1):
-                    sid = getattr(r, "id", None)
-                    trace_items.append(
-                        {
-                            "id": sid,
-                            "rank_sem": int(sem_rank_map.get(sid, 0)),
-                            "rank_fused": int(idx),
-                            "score_fused": float(score_fused_map.get(sid, 0.0)),
-                        }
-                    )
-                meta = {
-                    "k": len(retrieved),
-                    "reason": str(_reason_en) if _reason_en else "enabled",
-                    "note": "PR37 enabled trace; fused ordering active",
-                    "alpha": float(
-                        _cfg_get(cfg, ["t2", "quality", "fusion", "alpha_semantic"], 0.6)
-                    ),
-                    "lex_hits": int(q_fusion_meta.get("t2q.lex_hits", 0))
-                    if isinstance(q_fusion_meta, dict)
-                    else 0,
-                }
-                emit_quality_trace(cfg_snap, q_text, trace_items, meta)
-            except Exception:
-                # Never fail the request due to tracing issues
-                pass
-        # PR38: emit MMR metrics only when quality+MMR are enabled and MMR ran
-        if bool(_cfg_get(cfg, ["t2", "quality", "enabled"], False)):
-            try:
-                lam = float(_cfg_get(cfg, ["t2", "quality", "mmr", "lambda"], 0.5))
-                metrics["t2q.mmr.lambda"] = lam
-                selected_n = int(q_mmr_selected_n or 0) if q_mmr_used else 0
-                metrics["t2q.mmr.selected"] = selected_n
-                # compute diversity over head if any; else 0.0
-                head_refs = retrieved[:selected_n] if selected_n > 0 else []
-                mmr_items_head = []
-                import unicodedata
-                import re
+            lam = float(_cfg_get(cfg, ["t2", "quality", "mmr", "lambda"], 0.5))
+            selected_n = int(q_mmr_selected_n or 0) if q_mmr_used else 0
+            head_refs = retrieved[:selected_n] if selected_n > 0 else []
+            mmr_items_head = []
+            import unicodedata
+            import re
 
-                for r in head_refs:
-                    s = unicodedata.normalize("NFKC", getattr(r, "text", "") or "").lower()
-                    toks = [t for t in re.split(r"[^0-9a-zA-Z]+", s) if t]
-                    from clematis.engine.stages.t2_quality_mmr import MMRItem, avg_pairwise_distance
-
-                    mmr_items_head.append(
-                        MMRItem(id=str(getattr(r, "id", "")), rel=0.0, toks=frozenset(toks))
-                    )
-                metrics["t2q.diversity_avg_pairwise"] = (
-                    float(avg_pairwise_distance(mmr_items_head)) if mmr_items_head else 0.0
+            for r in head_refs:
+                s = unicodedata.normalize("NFKC", getattr(r, "text", "") or "").lower()
+                toks = [t for t in re.split(r"[^0-9a-zA-Z]+", s) if t]
+                mmr_items_head.append(
+                    MMRItem(id=str(getattr(r, "id", "")), rel=0.0, toks=frozenset(toks))
                 )
-            except Exception:
-                pass
-        # PR33: gated perf counters (namespaced)
-        metrics["t2.embed_dtype"] = "fp32"
-        metrics["t2.embed_store_dtype"] = pr33_store_dtype
-        metrics["t2.precompute_norms"] = bool(precompute_norms_cfg)
-        if pr33_reader is not None:
-            metrics["t2.reader_shards"] = pr33_shards
-            metrics["t2.partition_layout"] = pr33_layout
-        # PR68: minimal parallel T2 observability (only when metrics gate is on)
-        try:
-            if int(t2_task_count or 0) > 0:
-                metrics["t2.task_count"] = int(t2_task_count)
-                metrics["t2.parallel_workers"] = int(t2_parallel_workers or 0)
+            metrics["t2q.diversity_avg_pairwise"] = (
+                float(avg_pairwise_distance(mmr_items_head)) if mmr_items_head else 0.0
+            )
         except Exception:
             pass
-        try:
-            if int(t2_partition_count or 0) > 0:
-                metrics["t2.partition_count"] = int(t2_partition_count)
-        except Exception:
-            pass
+
+
+
     result = T2Result(
         retrieved=retrieved, graph_deltas_residual=graph_deltas_residual, metrics=metrics
     )
@@ -817,38 +574,7 @@ def t2_semantic(ctx, state, text: str, t1) -> T2Result:
                     result.metrics.get("t2.cache_bytes", 0) + cache_evicted_b
                 )
 
-    # --- PR36: Shadow tracing (no-op) — triple-gated; does not mutate rankings or metrics ---
-    try:
-        q_enabled = bool(_cfg_get(cfg, ["t2", "quality", "enabled"], False))
-        q_shadow = bool(_cfg_get(cfg, ["t2", "quality", "shadow"], False))
-        if perf_enabled and metrics_enabled and q_shadow and not q_enabled:
-            # Prefer a caller-supplied reason; fallback to "shadow"
-            _reason_sh = None
-            try:
-                _reason_sh = getattr(ctx, "trace_reason", None)
-                if _reason_sh is None and isinstance(ctx, dict):
-                    _reason_sh = ctx.get("trace_reason")
-            except Exception:
-                _reason_sh = None
-            if _reason_sh is None:
-                try:
-                    _reason_sh = _cfg_get(cfg, ["perf", "metrics", "trace_reason"], None)
-                except Exception:
-                    _reason_sh = None
-            cfg_snap = _quality_cfg_snapshot(cfg)
-            # serialize only id+score for trace; keep ordering identical to returned list
-            trace_items = [
-                {"id": h.id, "score": float(getattr(h, "score", 0.0))} for h in retrieved
-            ]
-            meta = {
-                "k": len(retrieved),
-                "reason": str(_reason_sh) if _reason_sh else "shadow",
-                "note": "PR36 shadow trace; rankings unchanged",
-            }
-            emit_quality_trace(cfg_snap, q_text, trace_items, meta)
-    except Exception:
-        # Never fail the request due to tracing issues
-        pass
+
 
     return result
 

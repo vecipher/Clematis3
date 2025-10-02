@@ -4,6 +4,7 @@ import datetime as dt
 import hashlib
 import json
 from typing import Any, Dict, Iterable, List, Optional
+from .state import gather_changed_labels, build_label_map  # re-export
 
 
 def items_for_fusion(retrieved_list: Iterable[Any]) -> List[Dict[str, Any]]:
@@ -19,46 +20,6 @@ def items_for_fusion(retrieved_list: Iterable[Any]) -> List[Dict[str, Any]]:
                 "text": getattr(ref, "text", ""),
             }
         )
-    return out
-
-
-def gather_changed_labels(state: Dict[str, Any], t1) -> List[str]:
-    store = state.get("store")
-    active_graphs = state.get("active_graphs", [])
-    if store is None:
-        return []
-    node_ids = {
-        delta.get("id")
-        for delta in getattr(t1, "graph_deltas", [])
-        if delta.get("op") == "upsert_node"
-    }
-    labels: List[str] = []
-    for graph_id in active_graphs:
-        graph = store.get_graph(graph_id)
-        for node_id in sorted(node_ids):
-            node = graph.nodes.get(node_id)
-            if node and node.label:
-                labels.append(node.label)
-    seen = set()
-    out: List[str] = []
-    for label in labels:
-        if label not in seen:
-            seen.add(label)
-            out.append(label)
-    return out
-
-
-def build_label_map(state: Dict[str, Any]) -> Dict[str, str]:
-    store = state.get("store")
-    active_graphs = state.get("active_graphs", [])
-    out: Dict[str, str] = {}
-    if not store:
-        return out
-    for graph_id in active_graphs:
-        graph = store.get_graph(graph_id)
-        for node in graph.nodes.values():
-            if node.label:
-                out[node.label.lower()] = node.id
     return out
 
 

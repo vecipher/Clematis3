@@ -5,7 +5,28 @@ All notable changes to this project will be documented in this file.
 
 
 
+
 ## [Unreleased]
+
+### Refactor (PR76 — M7/PR37–38: T2 extraction & file moves; **no shim re-exports**)
+- **Lean core:** `t2/core.py` no longer embeds quality/fusion/MMR or trace assembly. Core now calls:
+  - `clematis.engine.stages.t2.quality.apply_quality(...)`
+  - `clematis.engine.stages.t2.metrics.finalize(...)`
+- **New modules:**
+  - `clematis/engine/stages/t2/quality.py` — orchestrates GEL hybrid → fusion → MMR; owns **shadow trace** (PR36) under the triple gate; never mutates rankings in shadow mode.
+  - `clematis/engine/stages/t2/state.py` — `_init_index_from_cfg`, `gather_changed_labels`, `build_label_map`.
+  - `clematis/engine/stages/t2/metrics.py` — `assemble_metrics(...)`, `finalize(...)` (pure assembly; side‑effect free).
+- **Behavioral invariants:** identity path unchanged; shadow traces still require `perf.enabled && perf.metrics.report_memory && t2.quality.shadow && !t2.quality.enabled`.
+- **File relocations into `t2/` package (update imports):**
+  - `engine/stages/t2_lance_reader.py`  → `engine/stages/t2/lance_reader.py`
+  - `engine/stages/t2_quality_mmr.py`   → `engine/stages/t2/quality_mmr.py`
+  - `engine/stages/t2_quality_norm.py`  → `engine/stages/t2/quality_norm.py`
+  - `engine/stages/t2_quality_trace.py` → `engine/stages/t2/quality_trace.py`
+  - `engine/stages/t2_quality.py`       → `engine/stages/t2/quality_ops.py`
+  - `engine/stages/t2_shard.py`         → `engine/stages/t2/shard.py`
+- **Breaking import change:** no compatibility shims were added. If you import these modules directly, update paths to the new locations (e.g., `from clematis.engine.stages.t2.quality_mmr import ...`).
+- **Tests/docs:** updated to reflect new module layout and gating; all suites green.
+
 
 ### Added (PR74 — M9-12: Bench kits (T1/T2) + docs)
 - **Scripts:** `clematis/scripts/bench_t1.py` and `clematis/scripts/bench_t2.py`.

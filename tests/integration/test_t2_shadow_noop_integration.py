@@ -117,7 +117,7 @@ def _extract_items(result):
 
 def _emit_trace_fallback(query: str, cfg: dict):
     # Fallback: use the emitter directly with deterministic items; but only under triple gate
-    from clematis.engine.stages.t2_quality_trace import emit_trace
+    from clematis.engine.stages.t2.quality_trace import emit_trace
 
     items = [{"id": "A", "score": 0.9}, {"id": "B", "score": 0.8}]
     perf = cfg.get("perf", {})

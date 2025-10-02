@@ -251,7 +251,9 @@ t2:
 
 See **docs/m9/benchmarks.md** for bench usage, shapes, and caveats.
 
-## Cross‑references
+-## Cross‑references
+- PR76 — T2 refactor: extraction of quality/state/metrics and file moves under
+		t2/; see [docs/refactors/PR76](../refactors/PR76) for details.
 - PR63 surface (this page): config keys, normalization, and identity guarantees.
 - PR64 helper: [`parallel_helper.md`](./parallel_helper.md) — deterministic runner API and usage.
 - PR65 cache safety: [`cache_safety.md`](./cache_safety.md) — wrappers + deterministic merge policies.

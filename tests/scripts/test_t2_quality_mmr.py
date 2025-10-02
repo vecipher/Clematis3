@@ -1,6 +1,6 @@
 import pytest
 
-from clematis.engine.stages.t2_quality_mmr import (
+from clematis.engine.stages.t2.quality_mmr import (
     MMRItem,
     mmr_select,
     mmr_reorder_full,

@@ -2,7 +2,7 @@
 
 Clematis is a deterministic, turn‑based scaffold for agential AI. It models agents with concept graphs and tiered reasoning (T1→T4), uses small LLMs where needed, and keeps runtime behavior reproducible (no hidden network calls in tests/CI).
 
-> **Status (Milestone 9):** In progress ⚙️ — PR63 (config schema; defaults **OFF**), PR64 (deterministic runner), PR65 (cache safety wrappers), PR66 (flag‑gated T1 fan‑out across graphs), PR67 (parallel metrics + microbench), **PR68 (flag‑gated T2 fan‑out across in‑memory shards)**, **PR69 (LanceDB parallel T2 + deterministic T2 microbench)**, **PR70 (agent‑level parallel driver)**, **PR71 (log staging & ordered writes)**, **PR72 (identity & race test suite)**, **PR73 (opt‑in CI parallel smoke; non‑required)**, and **PR74 (bench kits + docs)** have landed. Parallelism remains **OFF by default**; identity is unchanged unless explicitly enabled. See **[docs/m9/overview.md](docs/m9/overview.md)** and **[docs/m9/parallel_helper.md](docs/m9/parallel_helper.md)**.
+> **Status (Milestone 9):** In progress ⚙️ — PR63 (config schema; defaults **OFF**), PR64 (deterministic runner), PR65 (cache safety wrappers), PR66 (flag‑gated T1 fan‑out across graphs), PR67 (parallel metrics + microbench), **PR68 (flag‑gated T2 fan‑out across in‑memory shards)**, **PR69 (LanceDB parallel T2 + deterministic T2 microbench)**, **PR70 (agent‑level parallel driver)**, **PR71 (log staging & ordered writes)**, **PR72 (identity & race test suite)**, **PR73 (opt‑in CI parallel smoke; non‑required)**, **PR74 (bench kits + docs)**, and **PR76 (T2 refactor: quality/state/metrics extraction; file moves)** have landed. Parallelism remains **OFF by default**; identity is unchanged unless explicitly enabled. See **[docs/m9/overview.md](docs/m9/overview.md)**, **[docs/m9/parallel_helper.md](docs/m9/parallel_helper.md)**, **[docs/refactors/PR76](docs/refactors/PR76)**, and **[docs/m9/migration.md](docs/m9/migration.md)**.
 
 ---
 
@@ -148,7 +148,12 @@ See **docs/m9/overview.md** for determinism rules, identity guarantees, and trou
 - `clematis/engine/util/logmux.py` — ctx‑aware buffered logging (PR70 driver capture & deterministic flush).
 - `clematis/engine/util/io_logging.py` — deterministic log staging and ordered flush (PR71).
 - `clematis/engine/stages/state_clone.py` — read‑only state snapshot utilities for the compute phase.
-- `clematis/engine/stages/t2_shard.py` — deterministic helpers for sharded T2 merge (quantized scoring, id tie‑break).
+- `clematis/engine/stages/t2/` — T2 retrieval stack (post‑PR76 refactor):
+  - `core.py` — lean orchestrator (retrieval + calls quality/metrics)
+  - `quality.py` — quality orchestration (hybrid→fusion→MMR) + shadow trace (triple‑gated)
+  - `state.py` — index/labels helpers
+  - `metrics.py` — assemble/finalize metrics (side‑effect free)
+  - `lance_reader.py`, `quality_ops.py`, `quality_mmr.py`, `quality_norm.py`, `quality_trace.py`, `shard.py`
 - `tests/t2/test_t2_parallel_merge.py` — gate semantics, tie‑break, tier‑ordered K‑clamp, normalization.
 - `clematis/cli/` — umbrella + wrapper subcommands (delegates to `clematis.scripts.*`).
 - `scripts/` — direct script shims (`*_hint.py`, tolerant import, single stderr hint).

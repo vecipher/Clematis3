@@ -9,12 +9,14 @@ from .config import (
 )
 from .helpers import (
     EpRefShim as _EpRefShim,
-    build_label_map as _build_label_map,
-    gather_changed_labels as _gather_changed_labels,
     items_for_fusion as _items_for_fusion,
     owner_for_query as _owner_for_query,
     parse_iso as _parse_iso,
     quality_digest as _quality_digest,
+)
+from .state import (
+    build_label_map as _build_label_map,
+    gather_changed_labels as _gather_changed_labels,
 )
 from .metrics import (
     emit_t2_metrics as _emit_t2_metrics,
@@ -25,7 +27,7 @@ from .parallel import (
     t2_parallel_enabled as _t2_parallel_enabled,
 )
 from .cache import get_cache as _get_cache
-from ..t2_shard import merge_tier_hits_across_shards_dict as _merge_tier_hits_across_shards, _qscore
+from .shard import merge_tier_hits_across_shards_dict as _merge_tier_hits_across_shards, _qscore
 
 __all__ = [
     "t2_semantic",

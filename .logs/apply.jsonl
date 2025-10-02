@@ -1,1 +1,1 @@
-{"turn": "demo-1", "agent": "AgentA", "applied": 0, "clamps": 0, "version_etag": "44", "snapshot": "./.data/snapshots/state_AgentA.json", "cache_invalidations": 0, "ms": 0.15}
+{"turn": "demo-1", "agent": "AgentA", "applied": 0, "clamps": 0, "version_etag": "44", "snapshot": "./.data/snapshots/state_AgentA.json", "cache_invalidations": 0, "ms": 0.144}
