@@ -146,7 +146,7 @@ def load_alias_map(path: str) -> Dict[str, str]:
     """
     if not path:
         return {}
-    abspath = os.path.abspath(path)
+    abspath = os.path.realpath(os.path.abspath(os.path.expanduser(path)))
     if abspath in _ALIAS_MAP_CACHE:
         return _ALIAS_MAP_CACHE[abspath]
     try:

@@ -34,7 +34,7 @@ def _get_cache(ctx, cfg_t1: dict):
     PR32-aware cache selection for T1 results.
     Returns: (cache, kind_str) where kind_str in {"bytes", "lru"} or (None, None).
     """
-    perf_on = bool(_cfg_get(ctx, ["cfg", "perf", "enabled"], False))
+    perf_on = bool(_cfg_get(ctx, ["cfg", "perf", "enabled"], False) or _cfg_get(ctx, ["cfg", "perf", "parallel", "enabled"], False))
     max_e = int(_cfg_get(ctx, ["cfg", "perf", "t1", "cache", "max_entries"], 0) or 0)
     max_b = int(_cfg_get(ctx, ["cfg", "perf", "t1", "cache", "max_bytes"], 0) or 0)
     global _T1_CACHE, _T1_CACHE_CFG, _T1_CACHE_KIND
@@ -202,7 +202,7 @@ def t1_propagate(ctx, state, text: str) -> T1Result:
     def _t1_one_graph(gid: str):
         # Returns (deltas_for_gid, per_graph_metrics)
         g = store.get_graph(gid)
-        labels = [(n.id, n.label) for n in g.nodes.values()]
+        labels = [(n.id, n.label) for n in sorted(g.nodes.values(), key=lambda n: n.id)]
         seeds = _match_keywords(text, labels)
         if not seeds:
             return [], {
@@ -272,6 +272,7 @@ def t1_propagate(ctx, state, text: str) -> T1Result:
 
         # --- Compute fresh ---
         csr = store.csr(gid)  # dict[src] -> list[(dst, Edge)]
+        # Ensure deterministic neighbor traversal by sorting adjacency lists when iterating
         acc = defaultdict(float)  # accumulated contribution per node
         dist = {}  # hop distance per node
         pops = 0
@@ -345,7 +346,7 @@ def t1_propagate(ctx, state, text: str) -> T1Result:
                 continue
 
             stop_relax = False
-            for v, e in csr[u]:
+            for v, e in sorted(csr[u], key=lambda t: t[0]):
                 d = dist[u] + 1
                 if d > radius_cap:
                     radius_cap_hits_local += 1

@@ -41,7 +41,18 @@ _STOP_EN_BASIC = {"a", "an", "the", "of", "to", "in", "and", "or"}
 # Reciprocal-rank smoothing constant (rank starts at 1)
 _RRANK_C = 60
 
+
 _EPS = 1e-12
+
+# Helper: deduplicate while preserving order
+def _unique_in_order(seq: List[str]) -> List[str]:
+    seen = set()
+    out: List[str] = []
+    for x in seq:
+        if x not in seen:
+            seen.add(x)
+            out.append(x)
+    return out
 
 
 # ---------- Normalization & tokenization ----------
@@ -120,9 +131,10 @@ def _bm25_scores(
                 df[t] = df.get(t, 0) + 1
                 seen.add(t)
 
-    # IDF with small stabilizer
+    # IDF with small stabilizer; compute over UNIQUE query terms in their first-seen order
+    q_terms_unique = _unique_in_order(q_terms)
     idf = {
-        t: math.log((N - df.get(t, 0) + 0.5) / (df.get(t, 0) + 0.5) + 1e-9) for t in set(q_terms)
+        t: math.log((N - df.get(t, 0) + 0.5) / (df.get(t, 0) + 0.5) + 1e-9) for t in q_terms_unique
     }
 
     scores: Dict[str, float] = {}

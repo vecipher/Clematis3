@@ -59,6 +59,34 @@ def _maybe_override_cfg_inplace(cfg: Any, args: Any) -> Any:
     budgets = _ensure_child(sched, "budgets")
     fairness = _ensure_child(sched, "fairness")
 
+    # --- Normalize perf defaults to identity-off when absent (PR76 hardening) ---
+    perf = _ensure_child(cfg, "perf")
+    parallel = _ensure_child(perf, "parallel")
+    metrics = _ensure_child(perf, "metrics")
+
+    def _set_default(target: Any, key: str, value: Any):
+        if isinstance(target, dict):
+            target.setdefault(key, value)
+        else:
+            cur = getattr(target, key, None)
+            if cur is None:
+                try:
+                    setattr(target, key, value)
+                except Exception:
+                    d = getattr(target, "__dict__", None)
+                    if isinstance(d, dict) and key not in d:
+                        d[key] = value
+
+    # Identity path: all OFF; ≤1 workers means sequential
+    _set_default(parallel, "enabled", False)
+    _set_default(parallel, "max_workers", 1)
+    _set_default(parallel, "t1", False)
+    _set_default(parallel, "t2", False)
+    _set_default(parallel, "agents", False)
+    _set_default(metrics, "enabled", False)
+    _set_default(metrics, "report_memory", False)
+    # --- End perf defaults normalization ---
+
     def set_in(target: Any, key: str, value: Any):
         if value is None:
             return
@@ -245,9 +273,8 @@ def main():
         else:
             print(f"[{step}] NO-YIELD agent={agent_id} pick={pick_reason}  | utter={line!r}")
 
-    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
     print("---")
-    print("Logs written to:", os.path.join(repo_root, ".logs"))
+    print("Logs written to:", logs_dir())
 
 
 if __name__ == "__main__":

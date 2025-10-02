@@ -2,6 +2,7 @@ from __future__ import annotations
 from dataclasses import asdict
 from typing import Any, Dict, Tuple
 import os
+import json, hashlib
 
 try:
     import yaml
@@ -62,6 +63,99 @@ def _apply_perf_env_overrides(cfg: Any) -> Any:
         return cfg
     return cfg
 
+def _canon_perf(perf: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Build a canonical perf dict with explicit defaults and stable key order.
+    This removes structural/insertion-order differences between implicit and explicit OFF.
+    """
+    par = perf.get("parallel", {}) if isinstance(perf, dict) else {}
+    met = perf.get("metrics", {}) if isinstance(perf, dict) else {}
+    # Return a NEW dict with canonical insertion order and filled defaults
+    return {
+        "parallel": {
+            "enabled": bool((par.get("enabled", False))),
+            "max_workers": int((par.get("max_workers", 1))),
+            "t1": bool((par.get("t1", False))),
+            "t2": bool((par.get("t2", False))),
+            "agents": bool((par.get("agents", False))),
+        },
+        "metrics": {
+            "enabled": bool((met.get("enabled", False))),
+            "report_memory": bool((met.get("report_memory", False))),
+        },
+    }
+
+def _materialize_perf_on_cfg(cfg: Any) -> Any:
+    """
+    Ensure cfg.perf exists and is canonicalized to identity-off defaults when missing.
+    """
+    try:
+        cur_perf = getattr(cfg, "perf", None)
+    except Exception:
+        cur_perf = None
+    if not isinstance(cur_perf, dict):
+        cur_perf = {}
+    # Canonicalize and attach
+    try:
+        setattr(cfg, "perf", _canon_perf(cur_perf))
+    except Exception:
+        # If cfg is restrictive, try to use its __dict__ directly
+        d = getattr(cfg, "__dict__", None)
+        if isinstance(d, dict):
+            d["perf"] = _canon_perf(cur_perf)
+    return cfg
+
+
+# ---- identity helpers ----------------------------------------------------
+
+def _to_plain_dict(cfg: Any) -> Dict[str, Any]:
+    """
+    Best-effort conversion of a Config-like object to a plain dict that includes
+    both dataclass fields and any dynamically attached attributes (e.g., 'perf').
+    """
+    # Prefer __dict__ because we attach unknown keys onto the instance
+    d: Dict[str, Any] = {}
+    try:
+        if hasattr(cfg, "__dict__") and isinstance(cfg.__dict__, dict):
+            d.update(cfg.__dict__)
+        else:
+            try:
+                # fall back to dataclasses.asdict if possible
+                d.update(asdict(cfg))  # type: ignore[arg-type]
+            except Exception:
+                if isinstance(cfg, dict):
+                    d.update(cfg)
+    except Exception:
+        if isinstance(cfg, dict):
+            d.update(cfg)
+    return d
+
+
+def config_identity_basis(cfg: Any) -> Dict[str, Any]:
+    """
+    Canonical, stable view of config for hashing/seeding and safe logging.
+    - Excludes non-identity inputs (argv, raw YAML, paths, env snapshots).
+    - Includes 'perf' in canonicalized form so implicit OFF == explicit OFF.
+    """
+    d = _to_plain_dict(cfg)
+    # Drop non-identity fields if present
+    for k in ("raw_yaml", "argv", "source_path", "env"):
+        d.pop(k, None)
+    # Ensure 'perf' is present in a canonical shape
+    perf = d.get("perf", {})
+    d["perf"] = _canon_perf(perf if isinstance(perf, dict) else {})
+    return d
+
+
+def config_identity_sha(cfg: Any) -> str:
+    """
+    Stable SHA-256 of the identity basis (keys sorted, compact separators).
+    Use this for seeds and for any 'config_sha' fields in logs.
+    """
+    basis = config_identity_basis(cfg)
+    payload = json.dumps(basis, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
 
 # ---- loader ---------------------------------------------------------------
 
@@ -77,7 +171,9 @@ def load_config(path: str | None = None) -> Config:
     # If PyYAML unavailable or file missing, return defaults.
     if not path or (yaml is None):
         cfg = Config()
-        return _apply_perf_env_overrides(cfg)
+        cfg = _apply_perf_env_overrides(cfg)
+        cfg = _materialize_perf_on_cfg(cfg)
+        return cfg
 
     try:
         with open(path, "r", encoding="utf-8") as f:
@@ -111,7 +207,10 @@ def load_config(path: str | None = None) -> Config:
 
         # Apply minimal env overrides for Gate C matrix
         cfg = _apply_perf_env_overrides(cfg)
+        cfg = _materialize_perf_on_cfg(cfg)
         return cfg
     except FileNotFoundError:
         cfg = Config()
-        return _apply_perf_env_overrides(cfg)
+        cfg = _apply_perf_env_overrides(cfg)
+        cfg = _materialize_perf_on_cfg(cfg)
+        return cfg

@@ -7,6 +7,7 @@ import hashlib
 from typing import Any, Dict, List, Optional
 import unicodedata
 import logging
+from clematis.io.config import config_identity_sha
 
 _logger = logging.getLogger(__name__)
 __TRACE_WRITE_ERROR_WARNED = False
@@ -43,26 +44,32 @@ def _config_digest(cfg: Dict[str, Any]) -> str:
     Digest only the knobs that change behavior/semantics for quality/traces.
     Excludes path-like and purely cosmetic fields (e.g., trace_dir).
     """
-    perf = cfg.get("perf", {}) or {}
-    q = cfg.get("t2", {}).get("quality", {}) or {}
-    sub = {
-        "perf": {
-            "enabled": bool(perf.get("enabled", False)),
-            "metrics": {
-                "report_memory": bool((perf.get("metrics") or {}).get("report_memory", False))
+    try:
+        # Prefer canonical identity digest so implicit OFF == explicit OFF
+        return config_identity_sha(cfg)
+    except Exception:
+        # Fallback: digest only behavior-relevant knobs, using canonical parallel gate.
+        perf = cfg.get("perf", {}) or {}
+        par = (perf.get("parallel") or {})
+        # Consider nested parallel.enabled first; fall back to legacy top-level perf.enabled
+        par_enabled = bool(par.get("enabled", perf.get("enabled", False)))
+        metrics = perf.get("metrics") or {}
+        q = (cfg.get("t2") or {}).get("quality", {}) or {}
+        sub = {
+            "perf": {
+                "parallel": {"enabled": par_enabled},
+                "metrics": {"report_memory": bool(metrics.get("report_memory", False))},
             },
-        },
-        "t2": {
-            "quality": {
-                "enabled": bool(q.get("enabled", False)),
-                "shadow": bool(q.get("shadow", False)),
-                # redact does affect the *shape* of traces, so include it
-                "redact": bool(q.get("redact", True)),
-                # NOTE: trace_dir intentionally excluded (non-semantic, env-specific)
-            }
-        },
-    }
-    return _sha256(_stable_json(sub))
+            "t2": {
+                "quality": {
+                    "enabled": bool(q.get("enabled", False)),
+                    "shadow": bool(q.get("shadow", False)),
+                    # redact does affect the *shape* of traces, so include it
+                    "redact": bool(q.get("redact", True)),
+                }
+            },
+        }
+        return _sha256(_stable_json(sub))
 
 
 def _git_sha() -> str:
@@ -92,14 +99,14 @@ def _derive_trace_dir(cfg: Dict[str, Any]) -> Path:
         metrics = perf.get("metrics") or {}
         td = metrics.get("trace_dir")
         if isinstance(td, str) and td.strip():
-            return Path(td)
+            return Path(os.path.realpath(os.path.abspath(os.path.expanduser(td))))
     except Exception:
         pass
     try:
         qcfg = (cfg.get("t2") or {}).get("quality", {}) or {}
         td2 = qcfg.get("trace_dir")
         if isinstance(td2, str) and td2.strip():
-            return Path(td2)
+            return Path(os.path.realpath(os.path.abspath(os.path.expanduser(td2))))
     except Exception:
         pass
     return Path("logs/quality")

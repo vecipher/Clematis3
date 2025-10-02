@@ -111,7 +111,9 @@ class PartitionedReader:
         we report False so the caller can fall back to the flat reader.
         """
         try:
-            root = self._spec.root
+            # Normalize root to avoid env-dependent path shapes (e.g., '~', relative paths)
+            raw_root = self._spec.root
+            root = os.path.abspath(os.path.expanduser(raw_root)) if raw_root else ""
             ok = bool(root) and os.path.isdir(root)
             # Warn only once per process if unavailable; callers will fall back to flat.
             global __WARNED_PARTITION_UNAVAILABLE
@@ -147,13 +149,14 @@ class PartitionedReader:
         """
         if self._flat_iter is None:
             # Nothing to iterate; yield nothing deterministically.
-            return
-            yield  # pragma: no cover (generator form, never executed)
+            return  # explicit empty iterator
 
         # Build a stable ordering of partition keys up-front as we see them.
         # We avoid randomization and preserve within-partition arrival order.
         for ids, embeds, norms in self._flat_iter():
-            if not self._spec.by or not self._meta:
+            # Defensive: ensure 'by' is a tuple of strings for stable behavior
+            by_fields: Tuple[str, ...] = tuple(str(f) for f in (self._spec.by or ()))
+            if not by_fields or not self._meta:
                 # No partitioning information — passthrough for parity.
                 global __WARNED_NO_METADATA
                 if not __WARNED_NO_METADATA:
@@ -170,7 +173,7 @@ class PartitionedReader:
             buckets: Dict[Tuple[object, ...], List[int]] = {}
             for idx, id_ in enumerate(ids):
                 meta = self._meta.get(id_, {})
-                key = tuple(meta.get(field, "") for field in self._spec.by)
+                key = tuple(meta.get(field, "") for field in by_fields)
                 buckets.setdefault(key, []).append(idx)
 
             # Emit per-partition slices in lexicographic key order.

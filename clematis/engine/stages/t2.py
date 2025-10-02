@@ -13,6 +13,7 @@ from types import SimpleNamespace as NS
 from .hybrid import rerank_with_gel
 from .t2_quality_trace import emit_trace as emit_quality_trace
 from .t2_quality_mmr import MMRItem, avg_pairwise_distance
+import os
 
 # Import merged helpers from t2_shard
 from .t2_shard import merge_tier_hits_across_shards_dict as _merge_tier_hits_across_shards, _qscore
@@ -39,7 +40,7 @@ def _metrics_gate_on(cfg) -> bool:
 
 def _quality_cfg_snapshot(cfg_obj) -> Dict[str, Any]:
     """Build a minimal config dict with only the parts used by the quality trace emitter."""
-    perf_enabled = bool(_cfg_get(cfg_obj, ["perf", "enabled"], False))
+    perf_enabled = bool(_cfg_get(cfg_obj, ["perf", "parallel", "enabled"], _cfg_get(cfg_obj, ["perf", "enabled"], False)))
     report_memory = bool(_cfg_get(cfg_obj, ["perf", "metrics", "report_memory"], False))
     perf_trace_dir = _cfg_get(cfg_obj, ["perf", "metrics", "trace_dir"], None)
     if isinstance(perf_trace_dir, str):
@@ -48,6 +49,7 @@ def _quality_cfg_snapshot(cfg_obj) -> Dict[str, Any]:
     q_enabled = bool(_cfg_get(cfg_obj, ["t2", "quality", "enabled"], False))
     q_shadow = bool(_cfg_get(cfg_obj, ["t2", "quality", "shadow"], False))
     q_trace_dir = str(_cfg_get(cfg_obj, ["t2", "quality", "trace_dir"], "logs/quality"))
+    q_trace_dir = os.path.realpath(os.path.abspath(os.path.expanduser(q_trace_dir)))
     q_redact = bool(_cfg_get(cfg_obj, ["t2", "quality", "redact"], True))
 
     metrics = {"report_memory": report_memory}

@@ -70,6 +70,14 @@ def merge_tier_hits_across_shards_dict(
 
     Returns (merged_hits, used_tiers).
     """
+    # Normalize k to a non-negative int; if k==0, return early with no hits/tiers
+    try:
+        k = int(k_retrieval)
+    except Exception:
+        k = 0
+    if k <= 0:
+        return [], []
+
     seen: set[str] = set()
     out: List[Dict[str, Any]] = []
     used_tiers: List[str] = []
@@ -98,7 +106,7 @@ def merge_tier_hits_across_shards_dict(
                 continue
             out.append(h)
             seen.add(hid)
-            if len(out) >= k_retrieval:
+            if len(out) >= k:
                 return out, used_tiers
 
     return out, used_tiers

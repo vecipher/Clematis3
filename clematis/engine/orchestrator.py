@@ -20,6 +20,7 @@ from .gel import (
     apply_promotion as gel_apply_promotion,
 )
 from ..io.log import append_jsonl, _append_jsonl_unbuffered
+from ..io.config import config_identity_sha
 
 # --- PR70: parallel driver helpers & readonly snapshot import ---
 from .stages.state_clone import readonly_snapshot
@@ -431,6 +432,26 @@ class Orchestrator:
         turn_id = getattr(ctx, "turn_id", "-")
         agent_id = getattr(ctx, "agent_id", "-")
         now = getattr(ctx, "now", None)
+
+        # Establish a deterministic seed if none is provided on ctx.
+        # Seed is derived from a canonical, sorted identity view of the config,
+        # so implicit OFF (no perf block) == explicit OFF (all false) produce the same value.
+        try:
+            cur_seed = getattr(ctx, "seed", None)
+        except Exception:
+            cur_seed = None
+        if not cur_seed:
+            try:
+                cfg_for_seed = _get_cfg(ctx)
+                # Use low 64 bits of the canonical SHA for an int seed
+                stable_seed = int(config_identity_sha(cfg_for_seed)[:16], 16)
+            except Exception:
+                stable_seed = 0
+            try:
+                setattr(ctx, "seed", stable_seed)
+            except Exception:
+                # Best-effort; downstream stages may still read ctx.seed if present
+                pass
 
         # PR70: allow a dry-run that stops after T4 to enable agent-level compute phase
         _dry_run = bool(getattr(ctx, "_dry_run_until_t4", False))
