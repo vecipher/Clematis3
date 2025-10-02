@@ -1,19 +1,22 @@
 #!/usr/bin/env python3
-# bench_t2.py — Deterministic micro-bench for T2 retrieval (PR69)
+# bench_t2.py — Deterministic micro-bench for T2 retrieval (PR74: M9-12 Bench Kits)
 # Read-only; no runtime semantics changes. Import-robust; does not require extras.
+# Delegates to scripts/... (wrapper help text requirement)
 
 from __future__ import annotations
 
 import argparse
 import json
-import math
 import os
 import sys
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
+
+# Hard-block accidental networking in compliant environments.
+os.environ.setdefault("CLEMATIS_NETWORK_BAN", "1")
 
 try:
     import numpy as np
@@ -22,6 +25,11 @@ except Exception as e:  # pragma: no cover
     raise
 
 # ------------------------------ utilities ----------------------------------
+
+def _stable_json(data: Dict[str, Any], pretty: bool = False) -> str:
+    if pretty:
+        return json.dumps(data, sort_keys=True, indent=2, ensure_ascii=True)
+    return json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
 
 def _seeded_rng(seed: int):
     rs = np.random.RandomState(int(seed))
@@ -54,8 +62,7 @@ def _make_ts(base: datetime, days_offset: int) -> str:
 
 def build_corpus(n_rows: int, dim: int, seed: int) -> List[Episode]:
     rs = _seeded_rng(seed)
-    now = datetime(2025, 10, 1, tzinfo=timezone.utc)
-    # Half in current quarter (Q4 2025), half in a past quarter (Q1 2025) to ensure >1 shard
+    # Half in recent quarter (Q3/Q4 2025), half in a past quarter (Q1 2025) to ensure >1 shard
     rows: List[Episode] = []
     for i in range(n_rows):
         eid = f"e{i:06d}"
@@ -177,7 +184,7 @@ class BenchIndex:
 # ------------------------------ bench core ----------------------------------
 
 def run_bench(iters: int, workers: int, backend: str, dim: int, n_rows: int,
-              parallel: bool, seed: int, k: int = 32) -> Dict[str, Any]:
+              parallel: bool, seed: int, k: int = 32, warmup: int = 1) -> Dict[str, Any]:
     rows = build_corpus(n_rows=n_rows, dim=dim, seed=seed)
 
     # Index: try to import real backends; otherwise fall back to BenchIndex
@@ -231,16 +238,17 @@ def run_bench(iters: int, workers: int, backend: str, dim: int, n_rows: int,
         "recent_days": 365,
     }
 
+    # Warmup (not timed) — prime any lazy paths deterministically
+    for _ in range(max(0, int(warmup))):
+        _ = shards[0].search_tiered(None, q, k, "exact_semantic", hints)
+
     t0 = time.perf_counter()
+    total_returned = 0
     for _ in range(max(1, int(iters))):
         if parallel and shard_count > 1 and effective_workers > 1:
             # Execute per-shard searches concurrently (read-only)
             with ThreadPoolExecutor(max_workers=effective_workers) as ex:
-                futs = [ex.submit(s.search_tiered, None, q, k, "exact_semantic", hints) for s in shards]
-                # Deterministic collection: enumerate in submit order
-                results = []
-                for f in futs:
-                    results.append(f.result())
+                results = [ex.submit(s.search_tiered, None, q, k, "exact_semantic", hints).result() for s in shards]
             # Merge (deterministic by score desc then id asc)
             merged: List[Tuple[float, str, Dict[str, Any]]] = []
             for lst in results:
@@ -256,40 +264,58 @@ def run_bench(iters: int, workers: int, backend: str, dim: int, n_rows: int,
                     merged.append((float(e.get("_score", 0.0)), str(e.get("id")), e))
             merged.sort(key=lambda t: (-t[0], t[1]))
             top = [e for (_, _, e) in merged[:k]]
+        total_returned += len(top)
     t1 = time.perf_counter()
 
-    # Backfilled metrics (these mirror stage metrics when the gate is ON)
+    # Backfilled metrics (mirrors stage metrics naming used when the gate is ON)
     t2_task_count = shard_count if (parallel and shard_count > 1) else 0
     t2_parallel_workers = effective_workers if t2_task_count > 0 else 0
     t2_partition_count = shard_count if (t2_task_count > 0 and index_backend == "lancedb") else 0
 
     out = {
+        "backend": index_backend,
+        "parallel": bool(parallel),
         "queries": int(iters),
+        "iters": int(iters),
+        "k": int(k),
+        "dim": int(dim),
+        "rows": int(n_rows),
         "shards": int(shard_count),
         "workers": int(workers),
         "effective_workers": int(effective_workers),
-        "backend": index_backend,
-        "parallel": bool(parallel),
         "elapsed_ms": round((t1 - t0) * 1000.0, 3),
+        # Backfilled metrics as top-level fields for backward compatibility
         "t2_task_count": int(t2_task_count),
         "t2_parallel_workers": int(t2_parallel_workers),
         "t2_partition_count": int(t2_partition_count),
+        # Bench metrics
+        "metrics": {
+            "total_k_returned": int(total_returned),
+            "avg_returned_per_query": float(total_returned / max(1, int(iters))),
+            "t2_task_count": int(t2_task_count),
+            "t2_parallel_workers": int(t2_parallel_workers),
+            "t2_partition_count": int(t2_partition_count),
+        },
     }
     return out
 
 # ------------------------------ CLI ----------------------------------------
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
-    p = argparse.ArgumentParser(description="Deterministic micro-bench for T2 retrieval (PR69). Delegates to scripts/bench_t2.py")
+    p = argparse.ArgumentParser(
+        prog="bench_t2",
+        description="Deterministic micro-bench for T2 retrieval (PR74). Delegates to scripts/...",
+    )
     p.add_argument("--iters", type=int, default=3, help="Number of query iterations (default: 3)")
     p.add_argument("--workers", type=int, default=max(1, (os.cpu_count() or 4) // 2), help="Worker cap for parallel path (default: half cores)")
     p.add_argument("--backend", choices=["inmemory", "lancedb"], default="inmemory", help="Index backend to simulate/use (default: inmemory)")
     p.add_argument("--dim", type=int, default=32, help="Embedding dimension (default: 32)")
-    p.add_argument("--rows", type=int, default=128, help="Corpus size (default: 128)")
+    p.add_argument("--rows", type=int, default=256, help="Corpus size (default: 256)")
     p.add_argument("--seed", type=int, default=1337, help="Deterministic seed (default: 1337)")
     p.add_argument("--k", type=int, default=32, help="Top-K to retrieve (default: 32)")
     p.add_argument("--parallel", action="store_true", help="Enable parallel execution across shards (mirrors stage gate)")
-    p.add_argument("--json", action="store_true", help="Emit JSON only")
+    p.add_argument("--warmup", type=int, default=1, help="Warmup runs before timing (default: 1)")
+    p.add_argument("--json", action="store_true", help="Emit JSON only (stable, single line)")
 
     args = p.parse_args(argv)
 
@@ -302,13 +328,20 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         parallel=bool(args.parallel),
         seed=args.seed,
         k=args.k,
+        warmup=args.warmup,
     )
 
     if args.json:
-        print(json.dumps(out, separators=(",", ":")))
+        print(_stable_json(out, pretty=False))
     else:
-        print(f"backend={out['backend']} parallel={out['parallel']} iters={out['queries']} shards={out['shards']} workers={out['workers']} ew={out['effective_workers']} elapsed_ms={out['elapsed_ms']}")
-        print(f"t2_task_count={out['t2_task_count']} t2_parallel_workers={out['t2_parallel_workers']} t2_partition_count={out['t2_partition_count']}")
+        # Two-line summary + pretty metrics for quick TTY reads
+        print(
+            f"backend={out['backend']} parallel={out['parallel']} "
+            f"iters={out['queries']} k={out['k']} dim={out['dim']} rows={out['rows']} "
+            f"shards={out['shards']} workers={out['workers']} ew={out['effective_workers']} "
+            f"elapsed_ms={out['elapsed_ms']}"
+        )
+        print("metrics:", _stable_json(out["metrics"], pretty=True))
 
     return 0
 
