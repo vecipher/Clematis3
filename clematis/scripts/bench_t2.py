@@ -276,6 +276,7 @@ def run_bench(iters: int, workers: int, backend: str, dim: int, n_rows: int,
         "backend": index_backend,
         "parallel": bool(parallel),
         "queries": int(iters),
+        "iters": int(iters),
         "k": int(k),
         "dim": int(dim),
         "rows": int(n_rows),
@@ -283,6 +284,10 @@ def run_bench(iters: int, workers: int, backend: str, dim: int, n_rows: int,
         "workers": int(workers),
         "effective_workers": int(effective_workers),
         "elapsed_ms": round((t1 - t0) * 1000.0, 3),
+        # Backfilled metrics as top-level fields for backward compatibility
+        "t2_task_count": int(t2_task_count),
+        "t2_parallel_workers": int(t2_parallel_workers),
+        "t2_partition_count": int(t2_partition_count),
         # Bench metrics
         "metrics": {
             "total_k_returned": int(total_returned),
