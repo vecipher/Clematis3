@@ -26,9 +26,9 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import numpy as np
 
-logger = logging.getLogger(__name__)
-
 from ..engine.types import EpisodeRef
+
+logger = logging.getLogger(__name__)
 
 
 # ----------------------------- helper utilities -----------------------------
