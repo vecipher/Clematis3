@@ -4,7 +4,27 @@ All notable changes to this project will be documented in this file.
 
 
 
+
 ## [Unreleased]
+
+### Added (PR74 — M9-12: Bench kits (T1/T2) + docs)
+- **Scripts:** `clematis/scripts/bench_t1.py` and `clematis/scripts/bench_t2.py`.
+  - Stable one-line JSON via `sort_keys=True`, fixed separators, `ensure_ascii=True`.
+  - Deterministic seeds and warmup **outside** the timed region.
+  - `bench_t1`: single-threaded by design; accumulates metrics across `--iters` (uses `max` for `max_delta`). `--parallel/--workers` are advisory (observability only).
+  - `bench_t2`: builds a deterministic synthetic corpus; supports `--backend {inmemory,lancedb}` and `--parallel` shard fan-out with deterministic merge (by `(-score, id)`); **import-robust** fallback to an internal in-memory shard adapter when extras are missing.
+  - Both set `CLEMATIS_NETWORK_BAN=1` defensively.
+- **Docs:** `docs/m9/benchmarks.md` — quick start, flags, output shapes, caveats; reproducibility guidance.
+- **README:** microbenches section with module-form invocations and a pointer to the docs.
+
+### CI (PR74)
+- No new workflows. These benches **do not gate merges**.
+- Optional: may be triggered manually in CI via the existing PR73 smoke path (`RUN_PERF=1`), but keep non-required.
+
+### Invariants (PR74)
+- No runtime behavior change; **disabled-path identity remains unchanged**.
+- Metrics gating rules unchanged; benches backfill convenience fields in their own JSON only.
+- No network or external I/O introduced; LanceDB path remains optional and guarded.
 
 ### Added (PR73 — M9-11: Parallel smoke in CI; opt-in, non-required)
 - **Workflow:** `.github/workflows/parallel-smoke.yml` — opt-in via `RUN_PERF=1` (or `workflow_dispatch` input); defaults **OFF** (`RUN_PERF=0`). Runs a tiny end-to-end execution with `perf.parallel.enabled=true` (agents/T1/T2 ON, `max_workers=2`) and prints a success line. **No perf thresholds.**
