@@ -1,363 +1,54 @@
 from __future__ import annotations
-from typing import Dict, Any, List
-from ..types import T2Result, EpisodeRef
-from ..cache import stable_key, ThreadSafeCache
-from ..util.lru_bytes import LRUBytes
-from ..util.embed_store import open_reader
-from ..util.parallel import run_parallel
-from ...adapters.embeddings import BGEAdapter
-from ...memory.index import InMemoryIndex
-import numpy as np
-import datetime as dt
-from .hybrid import rerank_with_gel
-from .t2_quality_trace import emit_trace as emit_quality_trace
-from .t2_quality_mmr import MMRItem, avg_pairwise_distance
 
-# Import merged helpers from t2_shard
-from .t2_shard import merge_tier_hits_across_shards_dict as _merge_tier_hits_across_shards, _qscore
+import datetime as dt
+from typing import Any, Dict, List
+
+import numpy as np
+
+from ...cache import stable_key
+from ...types import EpisodeRef, T2Result
+from ...util.embed_store import open_reader
+from ...util.parallel import run_parallel
+from ....adapters.embeddings import BGEAdapter
+from ....memory.index import InMemoryIndex
+from .cache import get_cache as _get_cache
+from .config import (
+    cfg_get as _cfg_get,
+    ensure_dict as _ensure_dict,
+    metrics_gate_on as _metrics_gate_on,
+    quality_cfg_snapshot as _quality_cfg_snapshot,
+)
+from .helpers import (
+    EpRefShim as _EpRefShim,
+    build_label_map as _build_label_map,
+    gather_changed_labels as _gather_changed_labels,
+    items_for_fusion as _items_for_fusion,
+    owner_for_query as _owner_for_query,
+    parse_iso as _parse_iso,
+    quality_digest as _quality_digest,
+)
+from ..hybrid import rerank_with_gel
+from .metrics import (
+    emit_t2_metrics as _emit_t2_metrics,
+    estimate_result_cost as _estimate_result_cost,
+)
+from .parallel import (
+    collect_shard_hits as _collect_shard_hits,
+    t2_parallel_enabled as _t2_parallel_enabled,
+)
+from ..t2_quality_mmr import MMRItem, avg_pairwise_distance
+from ..t2_quality_trace import emit_trace as emit_quality_trace
+from ..t2_shard import merge_tier_hits_across_shards_dict as _merge_tier_hits_across_shards, _qscore
 
 # PR40: Safe import for optional Lance partitioned reader
 try:
-    from .t2_lance_reader import LancePartitionSpec, PartitionedReader  # PR40 optional
+    from ..t2_lance_reader import LancePartitionSpec, PartitionedReader  # PR40 optional
 except Exception:
     LancePartitionSpec = None  # type: ignore
     PartitionedReader = None  # type: ignore
 
 
-def _metrics_gate_on(cfg) -> bool:
-    """True only when perf.enabled && perf.metrics.report_memory."""
-    perf = (cfg.get("perf") or {}) if isinstance(cfg, dict) else (getattr(cfg, "perf", {}) or {})
-    if not bool(perf.get("enabled", False)):
-        return False
-    m = perf.get("metrics") or {}
-    return bool(m.get("report_memory", False))
-
-
-# Helper for minimal config snapshot for quality trace emitter
-
-
-def _quality_cfg_snapshot(cfg_obj) -> Dict[str, Any]:
-    """Build a minimal config dict with only the parts used by the quality trace emitter."""
-    perf_enabled = bool(_cfg_get(cfg_obj, ["perf", "enabled"], False))
-    report_memory = bool(_cfg_get(cfg_obj, ["perf", "metrics", "report_memory"], False))
-    perf_trace_dir = _cfg_get(cfg_obj, ["perf", "metrics", "trace_dir"], None)
-    if isinstance(perf_trace_dir, str):
-        perf_trace_dir = perf_trace_dir.strip() or None
-
-    q_enabled = bool(_cfg_get(cfg_obj, ["t2", "quality", "enabled"], False))
-    q_shadow = bool(_cfg_get(cfg_obj, ["t2", "quality", "shadow"], False))
-    q_trace_dir = str(_cfg_get(cfg_obj, ["t2", "quality", "trace_dir"], "logs/quality"))
-    q_redact = bool(_cfg_get(cfg_obj, ["t2", "quality", "redact"], True))
-
-    metrics = {"report_memory": report_memory}
-    if perf_trace_dir:
-        metrics["trace_dir"] = perf_trace_dir
-
-    return {
-        "perf": {"enabled": perf_enabled, "metrics": metrics},
-        "t2": {
-            "quality": {
-                "enabled": q_enabled,
-                "shadow": q_shadow,
-                "trace_dir": q_trace_dir,
-                "redact": q_redact,
-            }
-        },
-    }
-
-
-def _ensure_dict(obj: Any) -> Dict[str, Any]:
-    if isinstance(obj, dict):
-        return dict(obj)
-    if hasattr(obj, "__dict__"):
-        try:
-            return dict(obj.__dict__)
-        except Exception:
-            return {}
-    return {}
-
-
 # Helper: build a deterministic items list for quality fusion based on current ordering
-def _items_for_fusion(retrieved_list: list) -> list[dict]:
-    """
-    Convert the current ordered list of EpisodeRef into dicts consumable by the quality fuser.
-    We provide a deterministic 'score' surrogate that strictly reflects the current ordering,
-    so fusion can use rank-based normalization independent of cosine/combined values.
-    """
-    n = len(retrieved_list or [])
-    out = []
-    for idx, ref in enumerate(retrieved_list):
-        # Higher surrogate score for earlier items to preserve the current rank in fusion
-        sem_rank_surrogate = float(n - idx)
-        out.append(
-            {
-                "id": getattr(ref, "id", None),
-                "score": sem_rank_surrogate,
-                "text": getattr(ref, "text", ""),
-            }
-        )
-    return out
-
-
-def _emit_t2_metrics(
-    evt: dict,
-    cfg,
-    *,
-    reader_engaged: bool,
-    shard_count: int | None = None,
-    partition_layout: str | None = None,
-    tier_sequence: list[str] | None = None,
-) -> None:
-    """
-    Gate all T2 metrics emission. Never emit top-level tier_sequence.
-    Only emit metrics.* when the gate is ON; strip empty metrics otherwise.
-    """
-    if _metrics_gate_on(cfg):
-        m = evt.setdefault("metrics", {})
-        if reader_engaged:
-            m["tier_sequence"] = tier_sequence or ["embed_store"]
-            if shard_count is not None:
-                m["reader_shards"] = int(shard_count)
-            if partition_layout:
-                m["partition_layout"] = str(partition_layout)
-    else:
-        # Ensure nothing leaked: remove top-level tier_sequence; drop empty metrics
-        if "metrics" in evt and (not evt["metrics"]):
-            del evt["metrics"]
-
-
-def _cfg_get(obj, path, default=None):
-    cur = obj
-    for i, key in enumerate(path):
-        try:
-            if isinstance(cur, dict):
-                cur = cur.get(key, {} if i < len(path) - 1 else default)
-            else:
-                cur = getattr(cur, key)
-        except Exception:
-            return default
-    return cur
-
-
-def _estimate_result_cost(retrieved, metrics):
-    """Deterministic, conservative byte estimate for caching a T2Result."""
-    try:
-        texts_sum = sum(len(getattr(ep, "text", "") or "") for ep in (retrieved or []))
-        ids_sum = sum(len(getattr(ep, "id", "") or "") for ep in (retrieved or []))
-        base = 16 * len(retrieved or [])
-        metric_overhead = 64
-        # Include small dependency on k_used/k_returned to keep estimates monotonic
-        k_used = int((metrics or {}).get("k_used", 0)) if isinstance(metrics, dict) else 0
-        k_ret = int((metrics or {}).get("k_returned", 0)) if isinstance(metrics, dict) else 0
-        return texts_sum + ids_sum + base + metric_overhead + 8 * (k_used + k_ret)
-    except Exception:
-        return 1024
-
-
-# PR68: Parallel T2 helpers
-def _t2_parallel_enabled(cfg_obj, backend: str, index) -> bool:
-    """Gate for PR68/PR69 parallel T2.
-    Enable for in-memory **or** LanceDB backends when:
-      • perf.parallel.enabled && perf.parallel.t2 && max_workers>1
-      • index exposes `_iter_shards_for_t2`
-      • iterator yields >1 shard (deterministically checked)
-    """
-    try:
-        if not _cfg_get(cfg_obj, ["perf", "parallel", "enabled"], False):
-            return False
-        if not _cfg_get(cfg_obj, ["perf", "parallel", "t2"], False):
-            return False
-        mw = int(_cfg_get(cfg_obj, ["perf", "parallel", "max_workers"], 1) or 1)
-        if mw <= 1:
-            return False
-        backend_l = str(backend or "inmemory").lower()
-        if backend_l not in ("inmemory", "lancedb"):
-            return False
-        if not hasattr(index, "_iter_shards_for_t2"):
-            return False
-        # Probe deterministically whether we have more than one shard/partition
-        try:
-            try:
-                it = index._iter_shards_for_t2("exact_semantic", suggested=mw)  # type: ignore[attr-defined]
-            except TypeError:
-                it = index._iter_shards_for_t2("exact_semantic")  # type: ignore[attr-defined]
-            shards = list(it)
-            return len(shards) > 1
-        except Exception:
-            return False
-    except Exception:
-        return False
-
-
-def _collect_shard_hits(
-    shard,
-    tiers: List[str],
-    owner_query,
-    q_vec,
-    k_retrieval: int,
-    now_str: str | None,
-    sim_threshold: float,
-    clusters_top_m: int,
-) -> Dict[str, List[Dict[str, Any]]]:
-    """
-    Collect per-tier raw hits from a single shard. Does not de-duplicate or clamp globally.
-    Ensures each hit dict has 'id' (str) and 'score' (float) keys for merge sorting.
-    """
-    out: Dict[str, List[Dict[str, Any]]] = {}
-    for tier in tiers:
-        hints: Dict[str, Any] = {"sim_threshold": sim_threshold}
-        if tier == "exact_semantic":
-            hints.update({"recent_days": None})  # real value unused by shards that don't look at it
-        elif tier == "cluster_semantic":
-            hints.update({"clusters_top_m": int(clusters_top_m)})
-        elif tier == "archive":
-            pass
-        else:
-            continue
-        if now_str:
-            hints["now"] = now_str
-        try:
-            hits = shard.search_tiered(
-                owner=owner_query, q_vec=q_vec, k=k_retrieval, tier=tier, hints=hints
-            )
-        except Exception:
-            hits = []
-        normed: List[Dict[str, Any]] = []
-        for h in hits or []:
-            if isinstance(h, dict):
-                d = dict(h)
-                d["id"] = str(d.get("id"))
-                if "score" not in d:
-                    d["score"] = float(d.get("_score", 0.0))
-                normed.append(d)
-            else:
-                # EpisodeRef-like
-                d = {
-                    "id": str(getattr(h, "id", "")),
-                    "text": getattr(h, "text", ""),
-                    "score": float(getattr(h, "score", 0.0)),
-                }
-                normed.append(d)
-        out[tier] = normed
-    return out
-
-
-# Config-driven cache (constructed lazily per cfg)
-_T2_CACHE = None
-_T2_CACHE_CFG = None
-_T2_CACHE_KIND = None
-
-
-def _get_cache(ctx, cfg_t2: dict):
-    """PR32-aware cache selection.
-    Priority:
-      1) perf.t2.cache (LRU-by-bytes) when perf.enabled and caps > 0.
-      2) legacy t2.cache (LRU with TTL) for backward compatibility.
-    Returns: (cache, kind_str) where kind_str in {"bytes", "lru"} or (None, None).
-    """
-    perf_on = bool(_cfg_get(ctx, ["cfg", "perf", "enabled"], False))
-    max_e = int(_cfg_get(ctx, ["cfg", "perf", "t2", "cache", "max_entries"], 0) or 0)
-    max_b = int(_cfg_get(ctx, ["cfg", "perf", "t2", "cache", "max_bytes"], 0) or 0)
-    global _T2_CACHE, _T2_CACHE_CFG, _T2_CACHE_KIND
-    # PR32 path: size-aware cache behind perf gate
-    if perf_on and (max_e > 0 or max_b > 0):
-        cfg_tuple = ("bytes", max_e, max_b)
-        if _T2_CACHE is None or _T2_CACHE_CFG != cfg_tuple:
-            _T2_CACHE = LRUBytes(max_entries=max_e, max_bytes=max_b)
-            _T2_CACHE_CFG = cfg_tuple
-            _T2_CACHE_KIND = "bytes"
-        return _T2_CACHE, _T2_CACHE_KIND
-    # Legacy fallback (pre-PR32 semantics) using t2.cache
-    c = cfg_t2.get("cache", {}) or {}
-    enabled = bool(c.get("enabled", True))
-    if not enabled:
-        return None, None
-    try:
-        from ..cache import LRUCache  # local import to avoid global import when unused
-    except Exception:
-        return None, None
-    max_entries = int(c.get("max_entries", 512))
-    ttl_s = int(c.get("ttl_s", 300))
-    cfg_tuple = ("lru", max_entries, ttl_s)
-    if _T2_CACHE is None or _T2_CACHE_CFG != cfg_tuple:
-        # PR65: wrap legacy LRU with a thin lock to make shared access safe under optional parallel paths.
-        _T2_CACHE = ThreadSafeCache(LRUCache(max_entries=max_entries, ttl_s=ttl_s))  # type: ignore[arg-type]
-        _T2_CACHE_CFG = cfg_tuple
-        _T2_CACHE_KIND = "lru"
-    return _T2_CACHE, _T2_CACHE_KIND
-
-
-def _gather_changed_labels(state: dict, t1) -> List[str]:
-    """Collect labels for nodes touched by T1 across active graphs, deterministically sorted."""
-    store = state.get("store")
-    active_graphs = state.get("active_graphs", [])
-    if store is None:
-        return []
-    # Node ids touched by T1
-    nid_set = {d.get("id") for d in getattr(t1, "graph_deltas", []) if d.get("op") == "upsert_node"}
-    labels: List[str] = []
-    for gid in active_graphs:
-        g = store.get_graph(gid)
-        for nid in sorted(nid_set):
-            n = g.nodes.get(nid)
-            if n and n.label:
-                labels.append(n.label)
-    # de-dup while stable
-    seen = set()
-    out: List[str] = []
-    for lb in labels:
-        if lb not in seen:
-            seen.add(lb)
-            out.append(lb)
-    return out
-
-
-def _build_label_map(state: dict) -> Dict[str, str]:
-    """label(lower) -> node_id across active graphs (last one wins but we sort anyway later)."""
-    store = state.get("store")
-    active_graphs = state.get("active_graphs", [])
-    m: Dict[str, str] = {}
-    if not store:
-        return m
-    for gid in active_graphs:
-        g = store.get_graph(gid)
-        for n in g.nodes.values():
-            if n.label:
-                m[n.label.lower()] = n.id
-    return m
-
-
-def _parse_iso(ts: str) -> dt.datetime:
-    try:
-        return dt.datetime.fromisoformat((ts or "").replace("Z", "+00:00")).astimezone(
-            dt.timezone.utc
-        )
-    except Exception:
-        return dt.datetime.now(dt.timezone.utc)
-
-
-def _owner_for_query(ctx, cfg_t2: dict):
-    scope = str(cfg_t2.get("owner_scope", "any")).lower()
-    if scope == "agent":
-        return getattr(ctx, "agent_id", None)
-    if scope == "world":
-        return "world"
-    return None  # any
-
-
-class _EpRefShim:
-    __slots__ = ("id", "text", "score")
-
-    def __init__(self, d: Dict[str, Any]):
-        self.id = str(d.get("id"))
-        self.text = d.get("text", "")
-        s = d.get("score", d.get("_score", 0.0))
-        try:
-            self.score = float(s)
-        except Exception:
-            self.score = 0.0
-
-
 def _init_index_from_cfg(state: dict, cfg_t2: dict):
     """Instantiate and cache the memory index based on t2.backend with safe fallback.
     Returns: (index, backend_selected:str, fallback_reason:str|None)
@@ -375,7 +66,9 @@ def _init_index_from_cfg(state: dict, cfg_t2: dict):
 
     if backend == "lancedb":
         try:
-            from ...memory.lance_index import LanceIndex  # deferred import; adapter defers lancedb
+            from clematis.memory.lance_index import (
+                LanceIndex,
+            )  # deferred import; adapter defers lancedb
 
             lcfg = cfg_t2.get("lancedb", {}) or {}
             idx = LanceIndex(
@@ -401,14 +94,6 @@ def _init_index_from_cfg(state: dict, cfg_t2: dict):
 
 import hashlib
 import json
-
-
-def _quality_digest(qcfg: dict) -> str:
-    keys = ["enabled", "lexical", "fusion", "mmr"]
-    # keep it slim but stable; omit heavy nested stuff if absent
-    slim = {k: qcfg.get(k) for k in keys if k in qcfg}
-    js = json.dumps(slim, sort_keys=True, separators=(",", ":"))
-    return hashlib.sha1(js.encode("utf-8")).hexdigest()[:12]
 
 
 def t2_semantic(ctx, state, text: str, t1) -> T2Result:
@@ -1079,7 +764,7 @@ def t2_semantic(ctx, state, text: str, t1) -> T2Result:
                 for r in head_refs:
                     s = unicodedata.normalize("NFKC", getattr(r, "text", "") or "").lower()
                     toks = [t for t in re.split(r"[^0-9a-zA-Z]+", s) if t]
-                    from .t2_quality_mmr import MMRItem, avg_pairwise_distance
+                    from clematis.engine.stages.t2_quality_mmr import MMRItem, avg_pairwise_distance
 
                     mmr_items_head.append(
                         MMRItem(id=str(getattr(r, "id", "")), rel=0.0, toks=frozenset(toks))
