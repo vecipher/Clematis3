@@ -26,6 +26,9 @@ from ..stages.t3 import (
     llm_speak,
     build_llm_prompt,
     emit_trace,
+    reflect,
+    ReflectionBundle,
+    ReflectionResult,
 )
 from ..stages.t4 import t4_filter as _t4_filter
 from ..apply import apply_changes as _default_apply_changes
@@ -216,6 +219,114 @@ def _write_or_capture_scheduler_event(ctx, event: Dict[str, Any]) -> None:
         # Fall back to writing
         pass
     _append_jsonl("scheduler.jsonl", event)
+
+#
+# --- PR79: Reflection helpers (pure orchestration; no I/O/logging here) ---
+def _safe_extract_snippets(t2_obj, topk: int) -> list[str]:
+    """Best-effort extraction of human-readable snippet text from T2 results.
+    Deterministic: preserves original order; filters to strings; caps at topk.
+    """
+    out: list[str] = []
+    items = getattr(t2_obj, "retrieved", []) or []
+    for r in items:
+        text = None
+        if isinstance(r, dict):
+            # common fields in various backends
+            for key in ("text", "snippet", "content"):
+                v = r.get(key)
+                if isinstance(v, str) and v:
+                    text = v
+                    break
+        else:
+            for key in ("text", "snippet", "content"):
+                v = getattr(r, key, None)
+                if isinstance(v, str) and v:
+                    text = v
+                    break
+        if isinstance(text, str) and text:
+            out.append(text)
+            if len(out) >= int(topk):
+                break
+    return out[: int(topk)]
+
+
+def _run_reflection_if_enabled(ctx, state, plan, utter, t2_obj):
+    """Gated, deterministic reflection call after Apply. No logging or writes here.
+    Returns the ReflectionResult or None if gate is closed or in dry-run.
+    """
+    # Respect dry-run compute phase (used by agent-level parallel driver)
+    if bool(getattr(ctx, "_dry_run_until_t4", False)):
+        return None
+
+    cfg = _get_cfg(ctx)
+    t3cfg = (cfg.get("t3") or {}) if isinstance(cfg, dict) else {}
+    allow_reflection = bool(t3cfg.get("allow_reflection", False))
+    if not (allow_reflection and bool(getattr(plan, "reflection", False))):
+        return None
+
+    ref_cfg = (t3cfg.get("reflection") or {})
+    topk = int(ref_cfg.get("topk_snippets", 3))
+    snippets = _safe_extract_snippets(t2_obj, topk) if topk > 0 else []
+    if (not snippets) and topk > 0:
+        try:
+            _art = getattr(ctx, "turn_artifacts", None) or {}
+            _cand = _art.get("t2_snippets", [])
+            if isinstance(_cand, list):
+                snippets = [s for s in _cand if isinstance(s, str)][:topk]
+        except Exception:
+            pass
+
+    bundle = ReflectionBundle(
+        ctx=ctx,
+        state_view=state,  # opaque, read-only usage inside reflect()
+        plan=plan,
+        utter=str(utter or ""),
+        snippets=snippets,
+    )
+
+    # Time the pure call to enforce wall budget after the fact (no preemption).
+    t0 = time.perf_counter()
+    result = reflect(bundle, cfg, embedder=None)
+    ms = round((time.perf_counter() - t0) * 1000.0, 3)
+    # Attach timing into metrics (will be logged by later PRs)
+    try:
+        if isinstance(result.metrics, dict):
+            result.metrics.setdefault("ms", ms)
+        else:
+            result.metrics = {"ms": ms}
+    except Exception:
+        pass
+
+    # Honor wall budget: if exceeded, mark timeout and drop entries (fail-soft).
+    budgets = ((cfg.get("scheduler") or {}).get("budgets") or {}) if isinstance(cfg, dict) else {}
+    wall_ms = budgets.get("time_ms_reflection")
+    try:
+        wall_ms_val = int(wall_ms) if wall_ms is not None else None
+    except Exception:
+        wall_ms_val = None
+    if wall_ms_val is not None and ms > wall_ms_val:
+        try:
+            # Rebuild a shallow result with empty writes and a reason
+            result = ReflectionResult(
+                summary=result.summary,
+                memory_entries=[],
+                metrics={**(result.metrics or {}), "reason": "reflection_timeout"},
+            )
+        except Exception:
+            # If dataclass import shape changes, fall back to mutating
+            try:
+                result.memory_entries = []
+                if isinstance(result.metrics, dict):
+                    result.metrics["reason"] = "reflection_timeout"
+            except Exception:
+                pass
+
+    # Stash for downstream (PR86 logging / PR80 writes)
+    try:
+        setattr(ctx, "_reflection_result", result)
+    except Exception:
+        pass
+    return result
 
 
 class Orchestrator:
@@ -844,6 +955,7 @@ class Orchestrator:
                             "cache_hit": bool(cache_hit),
                         },
                     )
+                    setattr(ctx, "_dryrun_plan_reflection", bool(getattr(plan, "reflection", False)))
                 except Exception:
                     pass
                 return TurnResult(line=utter if 'utter' in locals() else "", events=[])
@@ -1107,6 +1219,12 @@ class Orchestrator:
                 snapshot_path=None,
             )
 
+        # --- PR79: Reflection (gated; no I/O/logging here) ---
+        try:
+            _ = _run_reflection_if_enabled(ctx, state, plan, utter, t2)
+        except Exception:
+            # Reflection must never break the turn
+            pass
         # --- Health summary + per-turn rollup ---
         from .. import health
 

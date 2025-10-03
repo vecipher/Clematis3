@@ -432,6 +432,35 @@ def t2_semantic(ctx, state, text: str, t1) -> T2Result:
             _cap_val = 0
         used_hits = retrieved[:_cap_val]
 
+    # PR79: stash top-K retrieval snippets for reflection (identity-safe; not logged)
+    try:
+        _t3cfg = _ensure_dict(cfg_root.get("t3", {}))
+        _rfcfg = _ensure_dict(_t3cfg.get("reflection", {}))
+        _topk_for_reflection = int(_rfcfg.get("topk_snippets", 3))
+    except Exception:
+        _topk_for_reflection = 3
+    try:
+        _snips: list[str] = []
+        for _h in retrieved[:_topk_for_reflection]:
+            _txt = None
+            if hasattr(_h, "text"):
+                _txt = getattr(_h, "text", None)
+            elif isinstance(_h, dict):
+                _txt = _h.get("text")
+            if isinstance(_txt, str) and _txt:
+                _snips.append(_txt)
+        _art = getattr(ctx, "turn_artifacts", None)
+        if not isinstance(_art, dict):
+            try:
+                setattr(ctx, "turn_artifacts", {})
+                _art = ctx.turn_artifacts
+            except Exception:
+                _art = None
+        if isinstance(_art, dict):
+            _art["t2_snippets"] = _snips
+    except Exception:
+        pass
+
     # Residual propagation: map episode texts back to node labels
     residual_cap = int(cfg_t2.get("residual_cap_per_turn", 32))
     label_map = _build_label_map(state)
