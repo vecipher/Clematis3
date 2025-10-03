@@ -32,6 +32,7 @@ STAGE_ORD: Dict[str, int] = {
     "health.jsonl": 7,
     "turn.jsonl": 8,
     "scheduler.jsonl": 9,
+    "t3_reflection.jsonl": 10,
 }
 
 # Logs that participate in byte-for-byte identity checks
