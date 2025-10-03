@@ -1,53 +1,81 @@
-# PR76 — T2 Refactor (M7/PR37–38 extraction)
+# PR76 — T2 Extraction + Orchestrator Split (M9 consolidation)
 
-**Goal:** Make `t2/core.py` lean by extracting self‑contained concerns (quality gating, state/labels, metrics assembly), without changing identity‑path behavior.
+**Goals**
 
-## Impactful refactors (focus)
-These change where logic lives and what modules own what. They reduce churn in `core.py`, isolate feature‑gated code, and improve testability.
+- Keep the T2 pipeline lean by extracting quality/state/metrics helpers into purpose-built modules without altering identity-path behaviour.
+- Decouple the orchestrator turn loop from logging/parallel helpers so test monkeypatches remain simple, LogMux plumbing lives in one place, and we eliminate recursion hazards around overridden writers.
 
-1. **Quality layer → `t2/quality.py`**
-   - Orchestrates **GEL hybrid**, **fusion**, and **MMR** behind `t2.quality.enabled`.
-   - Owns **PR36 shadow tracing** (triple‑gated; SHADOW‐only; no ranking mutation).
-   - Accepts `(ctx, state, retrieved, q_text, cfg_root, cfg_t2)` and returns the reordered list plus compact quality metrics.
-   - Fix: shadow trace **reason** now prefers `ctx["trace_reason"]` and falls back to `cfg["perf"]["metrics"]["trace_reason"]`.
+---
 
-2. **Graph/labels utilities → `t2/state.py`**
-   - `_init_index_from_cfg` (LanceDB w/ safe fallback to InMemory), `gather_changed_labels`, `build_label_map`.
-   - `helpers.py` re‑exports the two label helpers to avoid import churn.
+## Impactful refactors (what moved where)
 
-3. **Gated metrics assembly → `t2/metrics.py`**
-   - Adds `assemble_metrics(...)` and `finalize(...)` (phase‑1: assemble only; no emit/caching).
-   - `core.py` now calls `finalize(...)` instead of assembling a big dict inline.
+### T2 stack
+1. **Quality orchestration → `stages/t2/quality.py`**
+   - Houses GEL hybrid, fusion, and MMR wiring behind `t2.quality.enabled` (defaults OFF).
+   - Owns PR36 shadow tracing (triple-gated; never mutates rankings).
+   - Consumes `(ctx, state, retrieved, q_text, cfg_root, cfg_t2)` and returns reordered hits plus quality metrics.
 
-4. **File relocations under `t2/` package (structure clean‑up)**
-   ```
+2. **Graph/label utilities → `stages/t2/state.py`**
+   - `_init_index_from_cfg`, `gather_changed_labels`, `build_label_map`.
+   - `stages/t2/helpers.py` merely re-exports for compatibility.
+
+3. **Metrics assembly → `stages/t2/metrics.py`**
+   - Adds `assemble_metrics(...)` + `finalize(...)`, removing the mega-dict from `core.py`.
+   - `core.py` now delegates to `finalize`.
+
+4. **File relocations under `stages/t2/`**
+   ```text
    stages/t2_lance_reader.py  → stages/t2/lance_reader.py
    stages/t2_quality_mmr.py   → stages/t2/quality_mmr.py
    stages/t2_quality_norm.py  → stages/t2/quality_norm.py
    stages/t2_quality_trace.py → stages/t2/quality_trace.py
-   stages/t2_quality.py       → stages/t2/quality_ops.py   # avoid name clash with t2/quality.py
+   stages/t2_quality.py       → stages/t2/quality_ops.py
    stages/t2_shard.py         → stages/t2/shard.py
    ```
-   - Imports updated. Optional shim files may be kept temporarily for back‑compat if external callers reference old paths.
+   Imports updated in-tree; add shims if external callers depend on legacy paths.
+
+### Orchestrator stack
+1. **Sequential loop focus (`engine/orchestrator/core.py`)**
+   - Runs the canonical T1→Apply stages, but delegates logging/parallel concerns to helper modules.
+   - Looks up orchestrator-level overrides (via `_get_stage_callable`, `_get_cfg`, `_truthy`) before falling back to defaults so tests can monkeypatch `clematis.engine.orchestrator` cleanly.
+
+2. **Logging helpers (`engine/orchestrator/logging.py`)**
+   - Centralizes LogMux/stager activation (`enable_staging`, `_begin_log_capture`, etc.).
+   - Provides override-aware `append_jsonl` and `_append_jsonl_unbuffered` to stop recursion when tests patch `orch.append_jsonl`.
+
+3. **Agent fan-out helpers (`engine/orchestrator/parallel.py`)**
+   - Hosts `_clone_ctx_for_agent`, `_run_turn_compute`, `_run_agents_parallel_batch`, `_select_independent_batch`, etc.
+   - Uses `_get_orch_callable` to honour overrides (e.g., patched `_run_turn_compute`, `apply_changes`).
+
+4. **Lightweight types (`engine/orchestrator/types.py`)**
+   - Defines `TurnCtx`/`TurnResult` for re-export without pulling in heavyweight stage modules.
+
+5. **Package façade (`engine/orchestrator/__init__.py`)**
+   - Re-exports the commonly monkeypatched helpers from `core`, `logging`, `parallel`, and `types`.
+   - Custom `__setattr__` pushes attributes into whichever module already defines them, defaulting to `core` so legacy patches keep working.
 
 ---
 
 ## API / import surface changes
-**Core integration**
-```python
-# quality orchestration
-from clematis.engine.stages.t2.quality import apply_quality
 
-# metrics assembly
+### Core integration (T2)
+```python
+from clematis.engine.stages.t2.quality import apply_quality
 from clematis.engine.stages.t2.metrics import finalize as finalize_metrics
 ```
 
-**MMR helpers used by core for the diversity metric**
+### Diversity helpers (unchanged imports)
 ```python
 from clematis.engine.stages.t2.quality_mmr import MMRItem, avg_pairwise_distance
 ```
 
-**Internal moves (if you import these directly)**
+### Orchestrator helpers (new homes)
+```python
+from clematis.engine.orchestrator.logging import append_jsonl, enable_staging
+from clematis.engine.orchestrator.parallel import _run_agents_parallel_batch
+```
+
+### Mapping for direct imports
 ```python
 # OLD → NEW
 from clematis.engine.stages.t2_quality_mmr import ...   → from clematis.engine.stages.t2.quality_mmr import ...
@@ -56,66 +84,84 @@ from clematis.engine.stages.t2_quality_trace import ... → from clematis.engine
 from clematis.engine.stages.t2_quality import ...       → from clematis.engine.stages.t2.quality_ops import ...
 from clematis.engine.stages.t2_shard import ...         → from clematis.engine.stages.t2.shard import ...
 from clematis.engine.stages.t2_lance_reader import ...  → from clematis.engine.stages.t2.lance_reader import ...
+
+from clematis.engine.orchestrator.core import append_jsonl             → from clematis.engine.orchestrator.logging import append_jsonl
+from clematis.engine.orchestrator.core import enable_staging           → from clematis.engine.orchestrator.logging import enable_staging
+from clematis.engine.orchestrator.core import LogMux                   → from clematis.engine.orchestrator.logging import LogMux
+from clematis.engine.orchestrator.core import _run_agents_parallel_batch → from clematis.engine.orchestrator.parallel import _run_agents_parallel_batch
 ```
 
 ---
 
-## Behavior & gates (unchanged semantics)
-- **Identity path:** With `t2.quality.enabled=false` (default), rankings and metrics are byte‑identical to pre‑refactor.
-- **Shadow trace:** Fires only if **all** are true:
-  - `perf.enabled`
-  - `perf.metrics.report_memory`
-  - `t2.quality.shadow`
-  - `t2.quality.enabled == false`
-- **MMR diversity metric:** Still computed in `core.py` using `quality_mmr.MMRItem/avg_pairwise_distance` on the selected head.
+## Behaviour & gates (no semantic change)
+- **T2 identity path:** with `t2.quality.enabled = false` (default) rankings/metrics are byte-identical to pre-refactor.
+- **Shadow tracing:** still requires `perf.enabled && perf.metrics.report_memory && t2.quality.shadow && not t2.quality.enabled`.
+- **Agent parallel driver:** gate unchanged (`perf.parallel.enabled && perf.parallel.agents && max_workers > 1`). The sequential path writes logs directly; the parallel path stages and flushes via `orchestrator.logging`.
+- **CI identity:** `engine/util/io_logging.normalize_for_identity` now also strips `slice_idx`/`yielded` when `CI=true`, keeping disabled-path fixtures stable.
 
 ---
 
-## Tests
-Covered:
-- `tests/integration/test_traces_write_path.py::test_traces_written_to_custom_dir_and_first_line_parses` (shadow trace path; reason plumbing fix)
+## Tests exercised
+- `tests/integration/test_traces_write_path.py::test_traces_written_to_custom_dir_and_first_line_parses`
 - `tests/t2/test_t2_parallel_merge.py`
 - `tests/test_t2_stage.py`
-- Identity & CLI: `tests/identity`, `tests/cli`
+- `tests/identity` suite
+- `tests/cli` suite
+- `tests/test_golden_path.py`
+- `tests/test_scheduler_pick_reason_passthrough.py`
+- `tests/test_cache_coherency.py`
+- `tests/test_integration_t4_apply.py`
+- `tests/test_integration_cache_after_apply.py`
 
-Result: green.
+All passing.
 
 ---
 
 ## Risks & mitigations
-- **Import path drift:** We updated in‑repo imports; add **shim re‑exports** at the old locations if external users import legacy paths.
-- **Trace write failures:** Shadow trace is wrapped in `try/except` and never mutates results or crashes the pipeline.
-- **Backend fallback:** `_init_index_from_cfg` retains LanceDB→InMemory fallback with a recorded `backend_fallback_reason`.
+- **Import drift:** in-repo imports updated; add shim modules if external callers rely on legacy paths.
+- **Trace write failures:** shadow trace remains wrapped in `try/except` and never mutates rankings.
+- **Backend fallback:** `_init_index_from_cfg` maintains LanceDB→InMemory fallback with a `backend_fallback_reason` metric.
+- **Orchestrator overrides:** `_get_orch_callable` and the updated `__setattr__` maintain monkeypatch behaviour; we also prefer module overrides before defaults to avoid regression in tests that patch `orch._run_turn_compute`, `orch.append_jsonl`, etc.
 
 ---
 
 ## Migration notes (short)
-- Update any direct imports per the mapping above. Internal modules already updated.
-- If you rely on `ctx.trace_reason`, you can also set `perf.metrics.trace_reason` in cfg; quality’s shadow trace will use it.
+- Update direct imports per the mapping above.
+- If you rely on `ctx.trace_reason`, you can set `perf.metrics.trace_reason`; the quality layer will use it when shadow tracing.
+- Ensure any orchestrator monkeypatches import from `clematis.engine.orchestrator` (not `core`) so the façade can forward them to the right module.
 
 ---
 
 ## Acceptance checklist
-- [x] `core.py` contains **no** hybrid/fusion/MMR/shadow logic
-- [x] `t2/quality.py` owns quality orchestration + shadow tracing (triple‑gated)
-- [x] `t2/state.py` owns index/labels helpers; `helpers.py` only re‑exports
-- [x] `t2/metrics.py` owns metrics assembly (`finalize` used by core)
-- [x] File relocations complete; imports updated
-- [x] Identity & CLI suites green
+- [x] `stages/t2/core.py` contains no quality/fusion/MMR/shadow logic
+- [x] `stages/t2/quality.py` owns quality orchestration + shadow trace
+- [x] `stages/t2/state.py` holds index/label helpers; `helpers.py` only re-exports
+- [x] `stages/t2/metrics.py` assembles metrics consumed by `core`
+- [x] File relocations under `stages/t2/` complete
+- [x] Orchestrator logging helpers live in `orchestrator/logging.py`; agent fan-out lives in `orchestrator/parallel.py`
+- [x] README/CHANGELOG updated with orchestrator-split context
+- [x] Identity + CLI + targeted regression suites green
 
 ---
 
-## Module map (post‑refactor)
+## Module map (post-refactor)
 ```text
 clematis/engine/stages/t2/
-  core.py          # lean pipeline; calls quality + metrics.finalize
-  quality.py       # orchestration + shadow trace (no ranking mutation in shadow)
+  core.py          # lean pipeline; calls quality.finalize + metrics.finalize
+  quality.py       # orchestration + shadow trace
   state.py         # index/labels helpers
   metrics.py       # assemble_metrics + finalize
   lance_reader.py  # optional Lance backend
-  quality_ops.py   # fusion/MMR primitives (ex‑t2_quality.py)
+  quality_ops.py   # fusion/MMR primitives (ex t2_quality.py)
   quality_mmr.py   # MMRItem, avg_pairwise_distance
   quality_norm.py  # lexical/BM25 normalization
   quality_trace.py # rq_traces.jsonl writer
   shard.py         # shard/partition helpers
+
+clematis/engine/orchestrator/
+  __init__.py      # façade + re-exports for monkeypatching
+  core.py          # sequential turn loop; imports logging helpers
+  logging.py       # LogMux/stager helpers; append_jsonl wrappers
+  parallel.py      # agent-level compute→commit helpers
+  types.py         # TurnCtx / TurnResult light aliases
 ```

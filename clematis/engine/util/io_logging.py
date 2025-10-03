@@ -63,6 +63,20 @@ def normalize_for_identity(name: str, rec: Dict[str, Any]) -> Dict[str, Any]:
         durations = out.get("durations_ms")
         if isinstance(durations, dict):
             out["durations_ms"] = {k: 0.0 for k in durations.keys()}
+        # Preserve scheduling context fields introduced in PR27 when a yield
+        # actually occurred, but strip them in the steady path so legacy
+        # identity baselines remain byte-identical.
+        yielded = out.get("yielded")
+        if yielded:
+            if "slice_idx" in out:
+                try:
+                    out["slice_idx"] = int(out["slice_idx"])
+                except Exception:
+                    pass
+            out["yielded"] = True
+        else:
+            out.pop("yielded", None)
+            out.pop("slice_idx", None)
     return out
 
 

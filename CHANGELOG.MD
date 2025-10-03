@@ -78,7 +78,7 @@ All notable changes to this project will be documented in this file.
 
 ### Added (PR71 — M9-09: Log staging & ordered writes; flag-gated, defaults OFF)
 - **Central staging layer:** `engine/util/io_logging.py` buffers log records with a stable composite key `(turn_id, stage_ord, slice_idx, seq)`; canonical stream order via `stage_ord`: `t1.jsonl → t2.jsonl → t3_plan.jsonl → t3_dialogue.jsonl → t4.jsonl → apply.jsonl → health.jsonl → turn.jsonl → scheduler.jsonl`.
-- **Orchestrator (parallel path):** `_run_agents_parallel_batch` stages **all** compute-phase logs and commit-phase `apply.jsonl` entries, then performs a single **ordered flush**.
+- **Orchestrator refactor:** split orchestration into `core.py` (sequential loop), `logging.py` (mux/stager + override-aware writers), and `parallel.py` (agent fan-out helpers `_run_turn_compute`, `_run_agents_parallel_batch`).
 - **Unbuffered writer:** `io/log._append_jsonl_unbuffered(...)` mirrors `append_jsonl(...)` serialization to preserve byte parity while bypassing LogMux during staged flush.
 - **Tests:** `tests/engine/test_io_logging_staging.py` (order & back-pressure), `tests/integration/test_agents_parallel_driver.py` (A→B ordering for `t1.jsonl`, `t4.jsonl`, `apply.jsonl` with fixed `turn`), `tests/test_golden_path.py` (byte-for-byte equality of `turn.jsonl` & `scheduler.jsonl` vs sequential baseline).
 - **Docs:** `docs/m9/overview.md` adds a PR71 section (design, gate, invariants, troubleshooting).

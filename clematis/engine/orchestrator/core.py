@@ -3,6 +3,8 @@ from typing import Any, Dict
 import time
 from datetime import datetime, timezone
 import os as _os
+import sys as _sys
+from dataclasses import asdict, is_dataclass
 
 
 def _iso_from_ms(ms: int) -> str:
@@ -10,10 +12,12 @@ def _iso_from_ms(ms: int) -> str:
 
 
 from types import SimpleNamespace
+
+from .logging import _append_jsonl, _get_logging_callable
 from .types import TurnCtx, TurnResult
-from .stages.t1 import t1_propagate
-from .stages.t2 import t2_semantic
-from .stages.t3 import (
+from ..stages.t1 import t1_propagate as _t1_propagate
+from ..stages.t2 import t2_semantic as _t2_semantic
+from ..stages.t3 import (
     make_plan_bundle,
     make_dialog_bundle,
     deliberate,
@@ -23,10 +27,10 @@ from .stages.t3 import (
     build_llm_prompt,
     emit_trace,
 )
-from .stages.t4 import t4_filter
-from .apply import apply_changes
-from .snapshot import load_latest_snapshot
-from .gel import (
+from ..stages.t4 import t4_filter as _t4_filter
+from ..apply import apply_changes as _default_apply_changes
+from ..snapshot import load_latest_snapshot
+from ..gel import (
     observe_retrieval as gel_observe,
     tick as gel_tick,
     merge_candidates as gel_merge_candidates,
@@ -36,200 +40,32 @@ from .gel import (
     promote_clusters as gel_promote_clusters,
     apply_promotion as gel_apply_promotion,
 )
-from ..io.log import append_jsonl, _append_jsonl_unbuffered
-
-# --- PR70: parallel driver helpers & readonly snapshot import ---
-from .stages.state_clone import readonly_snapshot
-from .util.logmux import LogMux, set_mux, reset_mux
-
-from .util.io_logging import enable_staging, disable_staging, default_key_for
+apply_changes = _default_apply_changes
+t1_propagate = _t1_propagate
+t2_semantic = _t2_semantic
+t4_filter = _t4_filter
+from ..cache import CacheManager
 
 
-from .cache import CacheManager
-
-# --- PR70: minimal compute/commit driver (not wired into run_turn default path) ---
-from types import SimpleNamespace as _SNS
-
-
-def _clone_ctx_for_agent(ctx: TurnCtx, agent_id: str, turn_id: int | str) -> TurnCtx:
-    """Shallow clone of TurnCtx with agent/turn specialized; preserves cfg/now/seed.
-    We use SimpleNamespace to avoid coupling to concrete ctx classes.
-    """
-    base = {}
-    for attr in ("cfg", "config", "now", "now_ms", "seed", "slice_idx", "slice_budgets"):
-        if hasattr(ctx, attr):
-            base[attr] = getattr(ctx, attr)
-    base["agent_id"] = str(agent_id)
-    base["turn_id"] = turn_id
-    # PR70: instruct run_turn to stop after T4 and record deltas/metrics
-    base["_dry_run_until_t4"] = True
-    return _SNS(**base)
+def _get_stage_callable(name: str, default):
+    orch_module = _sys.modules.get("clematis.engine.orchestrator")
+    if orch_module is not None:
+        func = getattr(orch_module, name, None)
+        if callable(func):
+            return func
+    return default
 
 
-def _extract_dryrun_artifacts(ctx: TurnCtx) -> tuple[list, str, dict, dict]:
-    """Pull artifacts stashed by run_turn in dry-run mode.
-    Returns (approved_deltas, utter, t1_info, t2_info).
-    """
-    t4_obj = getattr(ctx, "_dryrun_t4", None)
-    deltas = list(getattr(t4_obj, "approved_deltas", []) or [])
-    utter = str(getattr(ctx, "_dryrun_utter", "") or "")
-    t1_info = getattr(ctx, "_dryrun_t1", {}) or {}
-    t2_info = getattr(ctx, "_dryrun_t2", {}) or {}
-    return deltas, utter, t1_info, t2_info
+def _truthy(value: Any) -> bool:
+    if isinstance(value, str):
+        v = value.strip().lower()
+        if v in {"false", "0", "", "no", "off"}:
+            return False
+        if v in {"true", "1", "yes", "on"}:
+            return True
+    return bool(value)
 
 
-def _run_turn_compute(
-    ctx: TurnCtx, base_state: Any, agent_id: str, input_text: str
-) -> "_TurnBuffer":
-    """Compute phase: run stages up to T4 on a read-only snapshot, capturing logs.
-    The underlying `append_jsonl` is ctx-aware and will buffer to the active LogMux.
-    """
-    # Assign a deterministic, per-agent turn id if not present
-    turn_id = getattr(ctx, "turn_id", None)
-    if turn_id is None:
-        # Fallback: derive from time monotonic; tests usually set turn_id
-        turn_id = int(time.time() * 1000) % 10_000_000
-
-    # Clone a per-agent ctx with dry-run enabled
-    subctx = _clone_ctx_for_agent(ctx, agent_id, turn_id)
-
-    # Activate log capture for this compute
-    mux, token = _begin_log_capture()
-    try:
-        # IMPORTANT: read-only snapshot to avoid mutating the live state
-        ro = _make_readonly_snapshot(base_state)
-        # Run the existing sequential pipeline up to T4 (dry-run will early-return after T4)
-        _ = Orchestrator().run_turn(subctx, ro, input_text)
-        # Extract artifacts (approved deltas and utter)
-        deltas, utter, t1_info, t2_info = _extract_dryrun_artifacts(subctx)
-        logs = mux.dump()
-        buf: dict = {
-            "turn_id": subctx.turn_id,
-            "slice_idx": int(getattr(subctx, "slice_idx", 0) or 0),
-            "agent_id": str(agent_id),
-            "logs": logs,
-            "deltas": deltas,
-            "dialogue": utter,
-            "graphs_touched": set(t1_info.get("graphs_touched", []) or []),
-            "graph_versions": {},
-        }
-        return buf
-    finally:
-        _end_log_capture(token)
-
-
-def _run_agents_parallel_batch(
-    ctx: TurnCtx, state: dict, tasks: list[tuple[str, str]]
-) -> list[TurnResult]:
-    """Run a batch of (agent_id, input_text) with compute-then-commit semantics.
-    This function is gated by the caller; it does not alter default run_turn behavior.
-    """
-    # Gate: require agents parallel to be enabled
-    if not _agents_parallel_enabled(ctx):
-        # Fallback: sequential
-        out: list[TurnResult] = []
-        for aid, text in tasks:
-            subctx = _clone_ctx_for_agent(ctx, aid, getattr(ctx, "turn_id", 0))
-            # Disable dry-run for sequential path
-            setattr(subctx, "_dry_run_until_t4", False)
-            out.append(Orchestrator().run_turn(subctx, state, text))
-        return out
-
-    # PR71: centralize log writes via staging for deterministic ordering
-    stager = enable_staging()
-
-    # Select independent batch in input order
-    max_workers = int(
-        ((_get_cfg(ctx).get("perf") or {}).get("parallel") or {}).get("max_workers", 2)
-    )
-    agent_ids = [aid for aid, _ in tasks]
-    picked = _select_independent_batch(agent_ids, state, max_workers)
-
-    # Compute on a single read-only snapshot
-    base = _make_readonly_snapshot(state)
-    buffers: list = []
-    for aid, text in tasks:
-        if aid not in picked:
-            continue
-        buf = _run_turn_compute(ctx, base, aid, text)
-        buffers.append(buf)
-
-    # Stage all compute-phase logs first (no disk writes yet)
-    for buf in buffers:
-        turn_id = buf["turn_id"]
-        slice_idx = int(buf.get("slice_idx", 0) or 0)
-        for file_path, payload in buf["logs"]:
-            key = default_key_for(file_path=file_path, turn_id=turn_id, slice_idx=slice_idx)
-            try:
-                stager.stage(file_path, key, payload)
-            except RuntimeError as e:
-                if str(e) == "LOG_STAGING_BACKPRESSURE":
-                    # Backpressure is expected; drain deterministically and retry without surfacing stderr noise.
-                    for rec in stager.drain_sorted():
-                        _append_jsonl_unbuffered(rec.file_path, rec.payload)
-                    stager.stage(file_path, key, payload)
-                else:
-                    raise
-
-    # Apply deltas sequentially in deterministic order and stage apply logs
-    results: list[TurnResult] = []
-    for buf in _sort_turn_buffers(buffers):
-        t4_like = _SNS(
-            approved_deltas=list(buf["deltas"]),
-            rejected_ops=[],
-            reasons=["PR70_COMMIT"],
-            metrics={"counts": {"approved": len(buf["deltas"])}},
-        )
-        apply = apply_changes(ctx, state, t4_like)
-        apply_payload = {
-            "turn": buf["turn_id"],
-            "agent": buf["agent_id"],
-            "applied": apply.applied,
-            "clamps": apply.clamps,
-            "version_etag": apply.version_etag,
-            "snapshot": apply.snapshot_path,
-            "cache_invalidations": int(
-                (getattr(apply, "metrics", {}) or {}).get("cache_invalidations", 0)
-            ),
-            "ms": 0.0,
-        }
-        key = default_key_for(
-            file_path="apply.jsonl",
-            turn_id=buf["turn_id"],
-            slice_idx=int(buf.get("slice_idx", 0) or 0),
-        )
-        # PR76: stabilize identity fields before logging
-        _ap = dict(apply_payload)
-        # Deterministic timestamp: prefer ctx.now_ms; else drop 'now'
-        if "now" in _ap:
-            if getattr(ctx, "now_ms", None) is not None:
-                _ap["now"] = _iso_from_ms(int(ctx.now_ms))
-            else:
-                _ap.pop("now", None)
-        # Elapsed wall time is noisy; zero it on CI to keep byte identity
-        if _os.environ.get("CI", "").lower() == "true":
-            _ap["ms"] = 0.0
-        try:
-            stager.stage("apply.jsonl", key, _ap)
-        except RuntimeError as e:
-            if str(e) == "LOG_STAGING_BACKPRESSURE":
-                # Same fallback as above: flush staged logs and retry, keeping stderr quiet and behavior deterministic.
-                for rec in stager.drain_sorted():
-                    _append_jsonl_unbuffered(rec.file_path, rec.payload)
-                stager.stage("apply.jsonl", key, _ap)
-            else:
-                raise
-        results.append(TurnResult(line=buf["dialogue"], events=[]))
-
-    # Final drain and ordered writes
-    for rec in stager.drain_sorted():
-        _append_jsonl_unbuffered(rec.file_path, rec.payload)
-    disable_staging()
-
-    return results
-
-
-# --- M5: Scheduler wiring (PR26 — helpers & scaffolding; yields gated) ---
 from typing import TypedDict
 
 _sched_next_turn = None
@@ -257,22 +93,10 @@ class _SliceCtx(TypedDict):
     agent_id: str
 
 
-# --- PR70: Turn buffer type for parallel driver scaffolding ---
-class _TurnBuffer(TypedDict):
-    turn_id: int | str
-    slice_idx: int
-    agent_id: str
-    logs: list[tuple[str, dict]]  # (stream, obj) pairs captured during compute
-    deltas: Any  # placeholder for T4-approved deltas (PR70 wiring)
-    dialogue: str  # the utterance string (if any)
-    graphs_touched: set[str]
-    graph_versions: Dict[str, str]
-
-
 def _m5_enabled(ctx) -> bool:
     cfg = _get_cfg(ctx)
     s = (cfg.get("scheduler") if isinstance(cfg, dict) else {}) or {}
-    return bool(s.get("enabled", False))
+    return _truthy(s.get("enabled", False))
 
 
 def _clock(ctx) -> int:
@@ -345,112 +169,19 @@ def _get_cfg(ctx) -> Dict[str, Any]:
         return cfg
     if isinstance(cfg, SimpleNamespace):
         return dict(cfg.__dict__)
+    if cfg is not None and is_dataclass(cfg):
+        return asdict(cfg)
     cfg2 = getattr(ctx, "config", None)
     if isinstance(cfg2, dict):
         return cfg2
     if isinstance(cfg2, SimpleNamespace):
         return dict(cfg2.__dict__)
+    if cfg2 is not None and is_dataclass(cfg2):
+        return asdict(cfg2)
     return {}
 
 
 # --- PR70 minimal driver helpers (scaffolding; not yet wired to run_turn) ---
-
-
-def _resolve_graphs_for_agent(state: Any, agent_id: str) -> set[str]:
-    """Best-effort resolver for graphs an agent may touch.
-    Looks for common shapes on state; returns empty set if unknown.
-    This keeps the selector safe and deterministic across environments.
-    """
-    try:
-        # Common shapes we tolerate:
-        # 1) state["agents"][agent_id]["graphs"] -> iterable of names
-        agents = state.get("agents") if isinstance(state, dict) else getattr(state, "agents", None)
-        if isinstance(agents, dict):
-            a = agents.get(agent_id) or {}
-            g = a.get("graphs") if isinstance(a, dict) else None
-            if g is None and hasattr(a, "graphs"):
-                g = getattr(a, "graphs")
-            if g is not None:
-                return {str(x) for x in g}
-        # 2) state["graphs_by_agent"][agent_id] -> iterable
-        gba = (
-            state.get("graphs_by_agent")
-            if isinstance(state, dict)
-            else getattr(state, "graphs_by_agent", None)
-        )
-        if isinstance(gba, dict) and agent_id in gba:
-            return {str(x) for x in (gba.get(agent_id) or [])}
-    except Exception:
-        pass
-    return set()
-
-
-def _select_independent_batch(agent_ids: list[str], state: Any, max_workers: int) -> list[str]:
-    """Greedy selection of agents whose graph sets are pairwise disjoint.
-    Deterministic order: preserves the input order; stops at max_workers.
-    """
-    picked: list[str] = []
-    used: set[str] = set()
-    for aid in agent_ids:
-        if len(picked) >= max(1, int(max_workers)):
-            break
-        gset = _resolve_graphs_for_agent(state, aid)
-        if used.isdisjoint(gset):
-            picked.append(aid)
-            used.update(gset)
-    return picked
-
-
-def _begin_log_capture() -> tuple[LogMux, object]:
-    """Activate a LogMux for the current task and return (mux, token)."""
-    mux = LogMux()
-    token = set_mux(mux)
-    return mux, token
-
-
-def _end_log_capture(token: object) -> None:
-    """Reset the active LogMux using the provided token."""
-    try:
-        reset_mux(token)
-    except Exception:
-        pass
-
-
-def _sort_turn_buffers(buffers: list[_TurnBuffer]) -> list[_TurnBuffer]:
-    """Sort buffers deterministically by (turn_id, slice_idx).
-    turn_id is compared as int when possible, else as string.
-    """
-
-    def _key(b: _TurnBuffer):
-        tid = b.get("turn_id")
-        try:
-            tid_i = int(tid)  # type: ignore[arg-type]
-            return (0, tid_i, int(b.get("slice_idx", 0)))
-        except Exception:
-            return (1, str(tid), int(b.get("slice_idx", 0)))
-
-    return sorted(buffers, key=_key)
-
-
-def _make_readonly_snapshot(state: Any) -> Any:
-    """Create a read-only snapshot facade used by the compute phase."""
-    return readonly_snapshot(state)
-
-
-# --- PR70: agent-level parallel driver gate ---
-
-
-def _agents_parallel_enabled(ctx) -> bool:
-    cfg = _get_cfg(ctx)
-    p = (cfg.get("perf") or {}).get("parallel") or {}
-    try:
-        enabled = bool(p.get("enabled", False))
-        agents = bool(p.get("agents", False))
-        mw = int(p.get("max_workers", 1) or 1)
-        return bool(enabled and agents and mw > 1)
-    except Exception:
-        return False
-
 
 # --- Helper for pick reason passthrough to scheduler logs ---
 def _get_pick_reason(ctx) -> str | None:
@@ -484,7 +215,7 @@ def _write_or_capture_scheduler_event(ctx, event: Dict[str, Any]) -> None:
     except Exception:
         # Fall back to writing
         pass
-    append_jsonl("scheduler.jsonl", event)
+    _append_jsonl("scheduler.jsonl", event)
 
 
 class Orchestrator:
@@ -582,9 +313,9 @@ class Orchestrator:
 
         # --- T1 ---
         t0 = time.perf_counter()
-        t1 = t1_propagate(ctx, state, input_text)
+        t1 = _get_stage_callable("t1_propagate", t1_propagate)(ctx, state, input_text)
         t1_ms = round((time.perf_counter() - t0) * 1000.0, 3)
-        append_jsonl(
+        _append_jsonl(
             "t1.jsonl",
             {
                 "turn": turn_id,
@@ -628,7 +359,7 @@ class Orchestrator:
                 }
                 _write_or_capture_scheduler_event(ctx, event)
                 total_ms_now = round((time.perf_counter() - total_t0) * 1000.0, 3)
-                append_jsonl(
+                _append_jsonl(
                     "turn.jsonl",
                     {
                         "turn": turn_id,
@@ -678,13 +409,13 @@ class Orchestrator:
                 t2 = cached
                 cache_hit = True
             else:
-                t2 = t2_semantic(ctx, state, input_text, t1)
+                t2 = _get_stage_callable("t2_semantic", t2_semantic)(ctx, state, input_text, t1)
                 cm.set(ns, key, t2)
         else:
-            t2 = t2_semantic(ctx, state, input_text, t1)
+            t2 = _get_stage_callable("t2_semantic", t2_semantic)(ctx, state, input_text, t1)
 
         t2_ms = round((time.perf_counter() - t0) * 1000.0, 3)
-        append_jsonl(
+        _append_jsonl(
             "t2.jsonl",
             {
                 "turn": turn_id,
@@ -727,7 +458,7 @@ class Orchestrator:
                 }
                 _write_or_capture_scheduler_event(ctx, event)
                 total_ms_now = round((time.perf_counter() - total_t0) * 1000.0, 3)
-                append_jsonl(
+                _append_jsonl(
                     "turn.jsonl",
                     {
                         "turn": turn_id,
@@ -774,7 +505,7 @@ class Orchestrator:
                 turn_idx = None
             gel_metrics = gel_observe(ctx, state, items, turn=turn_idx, agent=agent_id)
             gel_ms = round((time.perf_counter() - t0_gel) * 1000.0, 3)
-            append_jsonl(
+            _append_jsonl(
                 "gel.jsonl",
                 {
                     "turn": turn_id,
@@ -789,8 +520,13 @@ class Orchestrator:
         # All pure stage functions; only logging here does I/O.
         t0 = time.perf_counter()
         bundle = make_plan_bundle(ctx, state, t1, t2)
-        # Allow tests to monkeypatch a module-level t3_deliberate(ctx, state, bundle)
-        delib_fn = globals().get("t3_deliberate")
+        # Allow tests to monkeypatch via clematis.engine.orchestrator.t3_deliberate
+        orch_module = _sys.modules.get("clematis.engine.orchestrator")
+        delib_fn = None
+        if orch_module is not None:
+            delib_fn = getattr(orch_module, "t3_deliberate", None)
+        if delib_fn is None:
+            delib_fn = globals().get("t3_deliberate")
         if callable(delib_fn):
             plan = delib_fn(ctx, state, bundle)
         else:
@@ -826,7 +562,7 @@ class Orchestrator:
                 }
                 _write_or_capture_scheduler_event(ctx, event)
                 total_ms_now = round((time.perf_counter() - total_t0) * 1000.0, 3)
-                append_jsonl(
+                _append_jsonl(
                     "turn.jsonl",
                     {
                         "turn": turn_id,
@@ -865,7 +601,7 @@ class Orchestrator:
         def _retrieve_fn(payload: Dict[str, Any]) -> Dict[str, Any]:
             # Deterministic wrapper around T2: re-run with the provided query; map to the shape rag_once expects.
             q = str(payload.get("query") or input_text)
-            t2_alt = t2_semantic(ctx, state, q, t1)
+            t2_alt = _get_stage_callable("t2_semantic", t2_semantic)(ctx, state, q, t1)
             # Normalize retrieved to list[dict]
             hits = []
             for r in getattr(t2_alt, "retrieved", []) or []:
@@ -959,7 +695,11 @@ class Orchestrator:
         fallback_reason = None
 
         # let tests monkeypatch a module-level t3_dialogue with flexible signatures for speed and laziness.
-        dlg_fn = globals().get("t3_dialogue")
+        dlg_fn = None
+        if orch_module is not None:
+            dlg_fn = getattr(orch_module, "t3_dialogue", None)
+        if dlg_fn is None:
+            dlg_fn = globals().get("t3_dialogue")
         if callable(dlg_fn):
             try:
                 # pref sig: (dialog_bundle, plan)
@@ -997,7 +737,7 @@ class Orchestrator:
         policy_backend = (
             str(t3cfg.get("backend", "rulebased")) if isinstance(t3cfg, dict) else "rulebased"
         )
-        append_jsonl(
+        _append_jsonl(
             "t3_plan.jsonl",
             {
                 "turn": turn_id,
@@ -1040,7 +780,7 @@ class Orchestrator:
         else:
             dlg_extra.update({"backend": "rulebased"})
 
-        append_jsonl(
+        _append_jsonl(
             "t3_dialogue.jsonl",
             {
                 "turn": turn_id,
@@ -1067,7 +807,7 @@ class Orchestrator:
             t0 = time.perf_counter()
             t4 = t4_filter(ctx, state, t1, t2, plan, utter)
             t4_ms = round((time.perf_counter() - t0) * 1000.0, 3)
-            append_jsonl(
+            _append_jsonl(
                 "t4.jsonl",
                 {
                     "turn": turn_id,
@@ -1136,7 +876,7 @@ class Orchestrator:
                     }
                     _write_or_capture_scheduler_event(ctx, event)
                     total_ms_now = round((time.perf_counter() - total_t0) * 1000.0, 3)
-                    append_jsonl(
+                    _append_jsonl(
                         "turn.jsonl",
                         {
                             "turn": turn_id,
@@ -1186,7 +926,7 @@ class Orchestrator:
                     turn_idx2 = None
                 decay_metrics = gel_tick(ctx, state, decay_dt=1, turn=turn_idx2, agent=agent_id)
                 decay_ms = round((time.perf_counter() - t0_decay) * 1000.0, 3)
-                append_jsonl(
+                _append_jsonl(
                     "gel.jsonl",
                     {
                         "turn": turn_id,
@@ -1245,7 +985,7 @@ class Orchestrator:
                                 promo_applied += 1
 
                         msp_ms = round((time.perf_counter() - t0_msp) * 1000.0, 3)
-                        append_jsonl(
+                        _append_jsonl(
                             "gel.jsonl",
                             {
                                 "turn": turn_id,
@@ -1287,7 +1027,7 @@ class Orchestrator:
                     _ap.pop("now", None)
             if _os.environ.get("CI", "").lower() == "true":
                 _ap["ms"] = 0.0
-            append_jsonl("apply.jsonl", _ap)
+            _append_jsonl("apply.jsonl", _ap)
             # --- M5 boundary check after Apply ---
             if slice_ctx is not None:
                 consumed = {
@@ -1317,7 +1057,7 @@ class Orchestrator:
                     }
                     _write_or_capture_scheduler_event(ctx, event)
                     total_ms_now = round((time.perf_counter() - total_t0) * 1000.0, 3)
-                    append_jsonl(
+                    _append_jsonl(
                         "turn.jsonl",
                         {
                             "turn": turn_id,
@@ -1368,12 +1108,12 @@ class Orchestrator:
             )
 
         # --- Health summary + per-turn rollup ---
-        from . import health
+        from .. import health
 
-        health.check_and_log(ctx, state, t1, t2, t4, apply, append_jsonl)
+        health.check_and_log(ctx, state, t1, t2, t4, apply, _append_jsonl)
 
         total_ms = round((time.perf_counter() - total_t0) * 1000.0, 3)
-        append_jsonl(
+        _append_jsonl(
             "turn.jsonl",
             {
                 "turn": turn_id,
