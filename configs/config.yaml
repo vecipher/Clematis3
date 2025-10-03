@@ -49,6 +49,12 @@ t3:
   max_ops_per_turn: 3
   allow_reflection: false
   backend: rulebased
+  reflection:
+    backend: rulebased        # deterministic summariser; "llm" requires fixtures (see PR84)
+    summary_tokens: 128       # whitespace-tokenised cap
+    embed: true               # embed the reflection summary deterministically
+    log: true                 # write t3_reflection.jsonl (not part of identity logs)
+    topk_snippets: 3          # number of retrieval snippets to include
   dialogue:
     template: "{style_prefix}| summary: {labels}. next: {intent}"
     include_top_k_snippets: 2
@@ -112,6 +118,8 @@ perf:
 #     t1_iters: 50
 #     t2_k: 64            # cap on results USED (not fetched)
 #     t3_ops: 3
+#     time_ms_reflection: 6000  # reflection time budget
+#     ops_reflection: 5         # max reflection memory writes per turn
 #     wall_ms: 200        # must be >= quantum_ms
 #   fairness:
 #     max_consecutive_turns: 1  # enforced in PR27

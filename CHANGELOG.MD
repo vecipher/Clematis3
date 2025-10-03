@@ -6,7 +6,19 @@ All notable changes to this project will be documented in this file.
 
 
 
+
 ## [Unreleased]
+
+## [0.9.0a1] - 2025-10-03
+
+### Added (PR77 — M10-01: Reflection gate & budgets; defaults OFF)
+- **Config surface (t3):** Introduce `t3.allow_reflection: false` and `t3.reflection.{backend,summary_tokens,embed,log,topk_snippets}`. Defaults keep identity path unchanged; `backend: "rulebased"` is deterministic. `"llm"` is reserved for a fixtures-only path to land in PR84.
+- **Budgets (scheduler):** Add `scheduler.budgets.ops_reflection: 5` and `scheduler.budgets.time_ms_reflection: 6000` with strict non‑negative bounds (time budget ≥1). Coercion follows existing budget semantics.
+- **Validator:** Unknown‑key rejection for `t3.reflection.*`; strict type/bounds; backend enum restricted to `{"rulebased","llm"}`. Normalizes booleans/ints and writes back a canonical `t3.reflection` block.
+- **Examples/Defaults:** `configs/config.yaml` now surfaces the `t3.reflection` block (gate remains OFF) and comments the two new scheduler budget knobs in the example.
+- **Tests:** `tests/config/test_validate_reflection.py` covers defaults injection, typing/bounds, backend enum, unknown‑keys, and budget coercion vs negatives.
+- **Invariants:** **Disabled‑path identity preserved.** No runtime behavior change until reflection is enabled in later PRs.
+
 
 ### Refactor (PR76 — M7/PR37–38: T2 extraction & file moves; **no shim re-exports**)
 - **Lean core:** `t2/core.py` no longer embeds quality/fusion/MMR or trace assembly. Core now calls:
