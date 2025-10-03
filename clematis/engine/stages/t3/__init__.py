@@ -7,6 +7,7 @@ from .metrics import finalize as finalize_metrics
 finalize = finalize_metrics
 from .policy import run_policy, select_policy
 from .trace import emit_trace
+from .reflect import ReflectionBundle, ReflectionResult, reflect
 from .legacy import (
     deliberate,
     make_dialog_bundle,
@@ -34,4 +35,7 @@ __all__ = [
     "emit_trace",
     "t3_pipeline",
     "validate_bundle",
+    "ReflectionBundle",
+    "ReflectionResult",
+    "reflect",
 ]
