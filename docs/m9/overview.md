@@ -6,6 +6,12 @@ This page summarizes the M9 deterministic parallelism work across **PR63–PR73*
 ## Purpose
 Provide a stable, validated config contract for later PRs (PR64+). Teams can start wiring flags in their local branches without risking behavior drift on `main`.
 
+## T3 Extraction (Phase A/B)
+- `clematis.engine.stages.t3.make_plan_bundle` now delegates to the façade in `clematis.engine.stages.t3.bundle`. Behavior and identity remain unchanged while we stage the package split.
+- New scaffolds (`t3.policy`, `t3.metrics`, `t3.core`, `t3.trace`, `t3.types`) mirror what we shipped for T2 so later moves can migrate policy/metrics logic without touching callers. The original monolith lives on as `t3.legacy` until we finish migrating helpers.
+- Bundle helpers (`iso_now`, config snapshot, agent/world readers, T1/T2 extractors) reside in `t3/bundle.py`, and the legacy module now forwards into them so follow-up moves can delete the duplicated implementations.
+- Trace emission is routed through `t3.trace.emit_trace(...)`, matching the T2 triple gate and recording into `state.logs` for orchestrator consumers.
+
 ## Configuration matrix (M9)
 
 | Key                          | Type  | Default* | Notes |

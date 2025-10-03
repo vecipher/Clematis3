@@ -26,6 +26,10 @@ All notable changes to this project will be documented in this file.
   - `engine/stages/t2_shard.py`         → `engine/stages/t2/shard.py`
 - **Breaking import change:** no compatibility shims were added. If you import these modules directly, update paths to the new locations (e.g., `from clematis.engine.stages.t2.quality_mmr import ...`).
 - **Tests/docs:** updated to reflect new module layout and gating; all suites green.
+- **T3 Phase A/B:** Introduced façade modules under `clematis.engine.stages.t3` (with `legacy.py` retaining the monolithic entry points) and delegated `make_plan_bundle(...)` through the bundle façade. Behavior remains unchanged; identity path preserved while the package split lands.
+- **Bundle helpers:** `_iso_now`, config/agent readers, and the T1/T2 extractors now live in `t3/bundle.py`, with `legacy.py` forwarding to the shared helpers.
+- **Trace wiring:** `clematis.engine.stages.t3.trace.emit_trace(...)` is now invoked from the orchestrator, honoring the same triple-gate as T2 and writing into `state.logs` for downstream consumers.
+- **Scaffolds:** Added `t3.policy.select_policy`, `t3.policy.run_policy`, `t3.metrics.finalize`, and helpers for future policy/metrics extraction (not yet used by orchestrator).
 
 
 ### Added (PR74 — M9-12: Bench kits (T1/T2) + docs)
