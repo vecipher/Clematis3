@@ -345,6 +345,15 @@ class Orchestrator:
         _dry_run = bool(getattr(ctx, "_dry_run_until_t4", False))
 
         total_t0 = time.perf_counter()
+        # --- PR80: ensure deterministic per-turn ISO timestamp for writes ---
+        try:
+            if not hasattr(ctx, "now_iso"):
+                nm = getattr(ctx, "now_ms", None)
+                if isinstance(nm, int):
+                    setattr(ctx, "now_iso", _iso_from_ms(int(nm)))
+        except Exception:
+            # never allow timestamp normalization to break the turn
+            pass
 
         # --- M5 slice init (PR26 scaffolding) ---
         sched_enabled = _m5_enabled(ctx)
@@ -1225,6 +1234,27 @@ class Orchestrator:
         except Exception:
             # Reflection must never break the turn
             pass
+        # --- PR80: Reflection writes (deterministic; fail-soft; no logging here) ---
+        try:
+            res = getattr(ctx, "_reflection_result", None)
+            if res is not None and getattr(res, "memory_entries", None):
+                try:
+                    from . import reflection as _refl_writer  # sibling module (PR80)
+                except Exception:
+                    _refl_writer = None
+                if _refl_writer is not None and hasattr(_refl_writer, "write_reflection_entries"):
+                    cfg_root = _get_cfg(ctx)
+                    report = _refl_writer.write_reflection_entries(ctx, state, cfg_root, res)
+                    try:
+                        setattr(ctx, "_reflection_write_report", report)
+                    except Exception:
+                        pass
+        except Exception:
+            # Reflection writes must never break the turn
+            try:
+                setattr(ctx, "_reflection_write_report", None)
+            except Exception:
+                pass
         # --- Health summary + per-turn rollup ---
         from .. import health
 
