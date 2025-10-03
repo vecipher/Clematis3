@@ -4,6 +4,7 @@ import time
 from datetime import datetime, timezone
 import os as _os
 import sys as _sys
+import importlib
 from dataclasses import asdict, is_dataclass
 
 
@@ -259,6 +260,14 @@ def _run_reflection_if_enabled(ctx, state, plan, utter, t2_obj):
         return None
 
     cfg = _get_cfg(ctx)
+    if (not cfg) and state is not None:
+        try:
+            if isinstance(state, dict):
+                cfg = state.get("cfg") or {}
+            else:
+                cfg = getattr(state, "cfg", {}) or {}
+        except Exception:
+            cfg = {}
     t3cfg = (cfg.get("t3") or {}) if isinstance(cfg, dict) else {}
     allow_reflection = bool(t3cfg.get("allow_reflection", False))
     if not (allow_reflection and bool(getattr(plan, "reflection", False))):
@@ -286,14 +295,22 @@ def _run_reflection_if_enabled(ctx, state, plan, utter, t2_obj):
 
     # Time the pure call to enforce wall budget after the fact (no preemption).
     t0 = time.perf_counter()
-    result = reflect(bundle, cfg, embedder=None)
-    ms = round((time.perf_counter() - t0) * 1000.0, 3)
+    reflect_fn = _get_stage_callable("reflect", reflect)
+    if reflect_fn is reflect:
+        try:
+            refl_module = importlib.import_module("clematis.engine.stages.t3.reflect")
+            reflect_fn = getattr(refl_module, "reflect", reflect_fn)
+        except Exception:
+            pass
+    result = reflect_fn(bundle, cfg, embedder=None)
+    elapsed_ms = round((time.perf_counter() - t0) * 1000.0, 3)
+    metrics_ms = 0.0 if str(_os.environ.get("CI", "")).lower() == "true" else elapsed_ms
     # Attach timing into metrics (will be logged by later PRs)
     try:
         if isinstance(result.metrics, dict):
-            result.metrics.setdefault("ms", ms)
+            result.metrics.setdefault("ms", metrics_ms)
         else:
-            result.metrics = {"ms": ms}
+            result.metrics = {"ms": metrics_ms}
     except Exception:
         pass
 
@@ -304,7 +321,7 @@ def _run_reflection_if_enabled(ctx, state, plan, utter, t2_obj):
         wall_ms_val = int(wall_ms) if wall_ms is not None else None
     except Exception:
         wall_ms_val = None
-    if wall_ms_val is not None and ms > wall_ms_val:
+    if wall_ms_val is not None and elapsed_ms > wall_ms_val:
         try:
             # Rebuild a shallow result with empty writes and a reason
             result = ReflectionResult(

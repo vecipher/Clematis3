@@ -47,6 +47,8 @@ def _choose_index(state, cfg_root) -> Optional[Any]:
     """
     # Prefer whatever you already attach to state (e.g., state.memory_index).
     idx = getattr(state, "memory_index", None)
+    if idx is None and isinstance(state, dict):
+        idx = state.get("memory_index")
     if idx is not None:
         return idx
 
