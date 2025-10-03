@@ -13,7 +13,16 @@ from types import SimpleNamespace
 from .types import TurnCtx, TurnResult
 from .stages.t1 import t1_propagate
 from .stages.t2 import t2_semantic
-from .stages.t3 import make_plan_bundle, make_dialog_bundle, deliberate, rag_once, speak, llm_speak
+from .stages.t3 import (
+    make_plan_bundle,
+    make_dialog_bundle,
+    deliberate,
+    rag_once,
+    speak,
+    llm_speak,
+    build_llm_prompt,
+    emit_trace,
+)
 from .stages.t4 import t4_filter
 from .apply import apply_changes
 from .snapshot import load_latest_snapshot
@@ -905,6 +914,34 @@ class Orchestrator:
         # Dialogue synthesis (rule-based vs optional LLM backend)
         t0 = time.perf_counter()
         dialog_bundle = make_dialog_bundle(ctx, state, t1, t2, plan)
+
+        prompt_text = build_llm_prompt(dialog_bundle, plan)
+
+        trace_meta: Dict[str, Any] = {}
+        state_logs = None
+        if isinstance(state, dict):
+            state_logs = state.get("logs")
+            if not isinstance(state_logs, list):
+                state_logs = []
+                state["logs"] = state_logs
+        else:
+            state_logs = getattr(state, "logs", None)
+            if not isinstance(state_logs, list):
+                try:
+                    state_logs = []
+                    setattr(state, "logs", state_logs)
+                except Exception:
+                    state_logs = None
+        if isinstance(state_logs, list):
+            trace_meta["state_logs"] = state_logs
+
+        trace_reason = getattr(ctx, "trace_reason", None)
+        if trace_reason is None and isinstance(ctx, dict):
+            trace_reason = ctx.get("trace_reason")
+        if trace_reason is not None:
+            trace_meta["trace_reason"] = trace_reason
+
+        emit_trace(dialog_bundle.get("cfg", {}), prompt_text, dialog_bundle, trace_meta)
 
         # Backend selection
         backend_cfg = (

@@ -1,6 +1,3 @@
-#!/usr/bin/env python3
-from __future__ import annotations
-
 """
 PR41 — Retrieval Quality (RQ) evaluation harness
 
@@ -13,6 +10,9 @@ pipeline entrypoint (`run_t2`). It does not mutate configs; any trace emission i
 controlled by the provided configs and an optional context hint.
 """
 
+#!/usr/bin/env python3
+from __future__ import annotations
+
 import argparse
 import csv
 import dataclasses
@@ -22,6 +22,9 @@ import json
 import math
 import os
 import sys
+
+if __package__ is None:  # Allow direct execution without installing package
+    sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from typing import Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 # ------------------------------- Utilities --------------------------------

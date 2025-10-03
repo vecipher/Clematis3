@@ -1,8 +1,10 @@
+import types
+
 import pytest
 from dataclasses import asdict
 from datetime import datetime, timezone
 
-from clematis.engine.stages.t3 import deliberate
+from clematis.engine.stages.t3 import deliberate, policy
 
 
 def _bundle(s_max=0.9, labels=None, n_nodes=6, ops_cap=3, tokens=256, owner_scope="any"):
@@ -131,3 +133,66 @@ def test_request_retrieve_owner_and_k_when_low_evidence():
     assert rr is not None, "RequestRetrieve should be present for low evidence"
     assert getattr(rr, "owner", None) == "world"
     assert getattr(rr, "k", 0) >= 1 and getattr(rr, "k", 0) <= 3  # half of k_retrieval=6 → 3
+
+
+# --- New facade tests for select_policy/run_policy ---
+
+
+def _policy_cfg():
+    return {
+        "t3": {"tokens": 128, "max_ops_per_turn": 3},
+        "t2": {"k_retrieval": 4, "sim_threshold": 0.3, "owner_scope": "any"},
+    }
+
+
+def _policy_bundle():
+    return {
+        "cfg": _policy_cfg(),
+        "agent": {"caps": {"ops": 3}},
+        "slice_caps": {},
+        "t2": {"metrics": {"sim_stats": {"max": 0.2}}, "retrieved": []},
+        "t1": {"touched_nodes": []},
+        "text": {"input": "hi", "labels_from_t1": []},
+    }
+
+
+def test_select_policy_defaults_to_rulebased():
+    handle = policy.select_policy({}, ctx=None)
+    assert handle == {"name": "rulebased", "meta": {}}
+
+
+def test_select_policy_honors_backend_llm():
+    cfg_root = {"t3": {"backend": "llm"}}
+    handle = policy.select_policy(cfg_root, ctx=None)
+    assert handle["name"] == "llm"
+
+
+def test_run_policy_rulebased_emits_expected_ops():
+    bundle = _policy_bundle()
+    handle = {"name": "rulebased", "meta": {}}
+    result = policy.run_policy(handle, bundle, bundle["cfg"], ctx=object())
+    ops = result["plan"]
+    assert getattr(ops[0], "kind", None) == "Speak"
+    assert getattr(ops[1], "kind", None) == "RequestRetrieve"
+    assert result["rationale"] == ""
+
+
+def test_run_policy_llm_delegates(monkeypatch):
+    called = {}
+
+    def fake_plan_with_llm(ctx, state, cfg):
+        called["args"] = (ctx, state, cfg)
+        return {"plan": ["step"], "rationale": "ok"}
+
+    monkeypatch.setattr(policy, "plan_with_llm", fake_plan_with_llm)
+
+    handle = {"name": "llm", "meta": {}}
+    state = types.SimpleNamespace(logs=[])
+    cfg_root = _policy_cfg()
+    out = policy.run_policy(handle, _policy_bundle(), cfg_root, ctx="ctx", state=state)
+
+    assert out == {"plan": ["step"], "rationale": "ok"}
+    assert called["args"] == ("ctx", state, cfg_root)
+
+    with pytest.raises(ValueError):
+        policy.run_policy(handle, {}, cfg_root, ctx="ctx")
