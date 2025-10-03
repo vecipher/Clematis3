@@ -1,6 +1,10 @@
+
 # Milestone 9 — Deterministic Parallelism (Overview)
 
-This page summarizes the M9 deterministic parallelism work across **PR63–PR73**: the config surface, determinism/identity guarantees, and how to enable/verify it. Defaults keep parallel execution **OFF** and preserve byte‑for‑byte identity.
+> **Status:** M9 is **complete**. As of **v0.9.0a1** (2025-10-03) we begin **M10 — Reflection Sessions**. For the reflection config surface (gate OFF by default), see [docs/m10/reflection.md](../m10/reflection.md).
+
+
+This page summarizes the M9 deterministic parallelism work across **PR63–PR76**: the config surface, determinism/identity guarantees, and how to enable/verify it. Defaults keep parallel execution **OFF** and preserve byte‑for‑byte identity.
 
 
 ## Purpose
@@ -70,9 +74,9 @@ python -m clematis.scripts.run_demo --config examples/perf/parallel_on.yaml
 ### Keys (under `perf.parallel`)
 - `enabled` (bool, default `false`)
 - `max_workers` (int, default `1`) — values **≤1** behave sequentially.
-- `t1` (bool, default `false`) — gate for T1 stage parallelism (to be implemented in later PRs).
-- `t2` (bool, default `false`) — gate for T2 stage parallelism (later PRs).
-- `agents` (bool, default `false`) — gate for agent driver parallelism (later PRs).
+- `t1` (bool, default `false`) — gate for T1 stage parallelism (wired in PR66).
+- `t2` (bool, default `false`) — gate for T2 stage parallelism (wired in PR68/PR69).
+- `agents` (bool, default `false`) — gate for agent driver parallelism (wired in PR70/PR71).
 
 ### Normalization & validation
 - Unknown keys under `perf.parallel` fail validation with a clear path, e.g. `perf.parallel.foo unknown key`.
@@ -258,6 +262,7 @@ t2:
 See **docs/m9/benchmarks.md** for bench usage, shapes, and caveats.
 
 -## Cross‑references
+## Cross‑references
 - PR76 — T2 refactor: extraction of quality/state/metrics and file moves under
 		t2/; see [docs/refactors/PR76](../refactors/PR76) for details.
 - PR63 surface (this page): config keys, normalization, and identity guarantees.

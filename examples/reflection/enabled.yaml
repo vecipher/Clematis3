@@ -1,0 +1,37 @@
+
+
+# Example overlay to enable Reflection (M10) locally.
+# Merge this on top of configs/config.yaml (e.g., via your loader or CLI flag).
+#
+# Gate stays OFF in defaults; this overlay turns it ON with deterministic rulebased backend.
+# If you insist on not doing step (2) from the doc (keeping rulebased), see the "LLM backend" note below.
+
+t3:
+  allow_reflection: true
+  reflection:
+    backend: rulebased          # deterministic summariser; no fixtures required
+    summary_tokens: 128
+    embed: true
+    log: true
+    topk_snippets: 3
+
+scheduler:
+  budgets:
+    time_ms_reflection: 6000    # wall budget for the reflection step
+    ops_reflection: 5           # cap on memory entries written by reflection
+
+# --- LLM backend (fixtures-only; PR84) ---
+# To switch to the LLM backend once PR84 lands and fixtures are enabled,
+# change the backend below to `llm` and ensure t3.llm.fixtures.enabled=true in your base config:
+#
+# t3:
+#   allow_reflection: true
+#   reflection:
+#     backend: llm
+#     summary_tokens: 128
+#     embed: true
+#     log: true
+#     topk_snippets: 3
+#
+# Note: until PR78/PR79 integrate runtime reflection, enabling this overlay only configures
+# the gate; it introduces no behavior change in the turn loop.

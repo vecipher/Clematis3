@@ -101,6 +101,14 @@ DEFAULTS: Dict[str, Any] = {
         "max_rag_loops": 1,
         "max_ops_per_turn": 8,
         "backend": "rulebased",
+        "allow_reflection": False,
+        "reflection": {
+            "backend": "rulebased",
+            "summary_tokens": 128,
+            "embed": True,
+            "log": True,
+            "topk_snippets": 3,
+        },
         "llm": {
             "provider": "fixture",
             "model": "qwen3:4b-instruct-q4_K_M",
@@ -182,6 +190,8 @@ DEFAULTS: Dict[str, Any] = {
             "t1_iters": 50,
             "t2_k": 64,  # cap on results USED (not fetched)
             "t3_ops": 3,
+            "time_ms_reflection": 6000,
+            "ops_reflection": 5,
             "wall_ms": 200,  # hard per-slice wall (PR26)
         },
         "fairness": {
@@ -260,9 +270,11 @@ ALLOWED_T3 = {
     "dialogue",
     "policy",
     "llm",
+    "reflection",
 }
 ALLOWED_T3_LLM = {"provider", "model", "endpoint", "max_tokens", "temp", "timeout_ms", "fixtures"}
 ALLOWED_T3_LLM_FIXTURES = {"enabled", "path"}
+ALLOWED_T3_REFLECTION = {"backend", "summary_tokens", "embed", "log", "topk_snippets"}
 ALLOWED_T4 = {
     "enabled",
     "delta_norm_cap_l2",
@@ -434,6 +446,7 @@ def _validate_config_normalize_impl(cfg: Dict[str, Any]) -> Dict[str, Any]:
     raw_t3 = _ensure_dict(cfg_in.get("t3"))
     raw_t3_llm = _ensure_dict(raw_t3.get("llm"))
     raw_t3_llm_fixtures = _ensure_dict(raw_t3_llm.get("fixtures"))
+    raw_t3_reflection = _ensure_dict(raw_t3.get("reflection"))
     raw_t4 = _ensure_dict(cfg_in.get("t4"))
     raw_t1_cache = _ensure_dict(raw_t1.get("cache"))
     raw_t2_cache = _ensure_dict(raw_t2.get("cache"))
@@ -509,6 +522,12 @@ def _validate_config_normalize_impl(cfg: Dict[str, Any]) -> Dict[str, Any]:
             sug = _suggest_key(k, ALLOWED_T3_LLM_FIXTURES)
             hint = f" (did you mean '{sug}')" if sug else ""
             _err(errors, f"t3.llm.fixtures.{k}", f"unknown key{hint}")
+
+    for k in raw_t3_reflection.keys():
+        if k not in ALLOWED_T3_REFLECTION:
+            sug = _suggest_key(k, ALLOWED_T3_REFLECTION)
+            hint = f" (did you mean '{sug}')" if sug else ""
+            _err(errors, f"t3.reflection.{k}", f"unknown key{hint}")
 
     for k in raw_t4.keys():
         if k not in ALLOWED_T4:
@@ -883,6 +902,28 @@ def _validate_config_normalize_impl(cfg: Dict[str, Any]) -> Dict[str, Any]:
     t3_backend = str(t3.get("backend", "rulebased"))
     if t3_backend not in {"rulebased", "llm"}:
         _err(errors, "t3.backend", f"must be one of {{rulebased,llm}}, got: {t3_backend!r}")
+    t3["allow_reflection"] = _coerce_bool(t3.get("allow_reflection", False))
+
+    # t3.reflection normalization (PR77)
+    rfl = _ensure_subdict(t3, "reflection")
+    # backend choice
+    r_backend = str(rfl.get("backend", "rulebased"))
+    if r_backend not in {"rulebased", "llm"}:
+        _err(errors, "t3.reflection.backend", "must be one of {rulebased,llm}")
+        r_backend = "rulebased"
+    rfl["backend"] = r_backend
+    # summary_tokens >= 0
+    rfl["summary_tokens"] = _coerce_int(rfl.get("summary_tokens", 128))
+    if rfl["summary_tokens"] < 0:
+        _err(errors, "t3.reflection.summary_tokens", "must be >= 0")
+    # embed/log booleans
+    rfl["embed"] = _coerce_bool(rfl.get("embed", True))
+    rfl["log"] = _coerce_bool(rfl.get("log", True))
+    # topk_snippets >= 0
+    rfl["topk_snippets"] = _coerce_int(rfl.get("topk_snippets", 3))
+    if rfl["topk_snippets"] < 0:
+        _err(errors, "t3.reflection.topk_snippets", "must be >= 0")
+    t3["reflection"] = rfl
 
     # t3.llm normalization (config-only in M3-07; no runtime wiring yet)
     llm = _ensure_subdict(t3, "llm")
@@ -1168,6 +1209,8 @@ def _validate_config_normalize_impl(cfg: Dict[str, Any]) -> Dict[str, Any]:
     _budget_int_or_none("t1_iters", 0)
     _budget_int_or_none("t2_k", 0)
     _budget_int_or_none("t3_ops", 0)
+    _budget_int_or_none("time_ms_reflection", 1)
+    _budget_int_or_none("ops_reflection", 0)
     _budget_int_or_none("wall_ms", 1)
 
     wall = sb.get("wall_ms")

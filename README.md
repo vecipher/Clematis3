@@ -2,7 +2,9 @@
 
 Clematis is a deterministic, turn‑based scaffold for agential AI. It models agents with concept graphs and tiered reasoning (T1→T4), uses small LLMs where needed, and keeps runtime behavior reproducible (no hidden network calls in tests/CI).
 
-> **Status (Milestone 9):** In progress ⚙️ — PR63 (config schema; defaults **OFF**), PR64 (deterministic runner), PR65 (cache safety wrappers), PR66 (flag‑gated T1 fan‑out across graphs), PR67 (parallel metrics + microbench), **PR68 (flag‑gated T2 fan‑out across in‑memory shards)**, **PR69 (LanceDB parallel T2 + deterministic T2 microbench)**, **PR70 (agent‑level parallel driver)**, **PR71 (log staging & ordered writes)**, **PR72 (identity & race test suite)**, **PR73 (opt‑in CI parallel smoke; non‑required)**, **PR74 (bench kits + docs)**, and **PR76 (T2 + orchestrator module refactor)** have landed. Parallelism remains **OFF by default**; identity is unchanged unless explicitly enabled. See **[docs/m9/overview.md](docs/m9/overview.md)**, **[docs/m9/parallel_helper.md](docs/m9/parallel_helper.md)**, **[docs/refactors/PR76](docs/refactors/PR76)**, and **[docs/m9/migration.md](docs/m9/migration.md)**.
+> **Status:** **v0.9.0a1** (2025‑10‑03) — **M9 complete** ✅. Deterministic parallelism shipped behind flags; default path remains byte‑identical.
+>
+> **M10 — Reflection Sessions (started):** **PR77** adds the reflection config surface (gate OFF by default; no runtime effect). See **[docs/m10/reflection.md](docs/m10/reflection.md)**. For M9 details, see **[docs/m9/overview.md](docs/m9/overview.md)**, **[docs/m9/parallel_helper.md](docs/m9/parallel_helper.md)**, **[docs/refactors/PR76](docs/refactors/PR76)**, and **[docs/m9/migration.md](docs/m9/migration.md)**.
 
 ---
 
@@ -19,7 +21,7 @@ Clematis is a deterministic, turn‑based scaffold for agential AI. It models ag
 - **Concept graph:** nodes/edges with decay and relations; surface views for I/O.
 - **Stages:**
   T1 keyword/seeded propagation → T2 semantic retrieval (+ residual) → T3 bounded policy (rule‑based now; LLM adapter gated) → T4 meta‑filter & apply/persist.
-  Reflection and scheduler features are gated for determinism.
+  Reflection (M10) and scheduler features are gated for determinism; the reflection config surface was added in v0.9.0a1 and is **OFF by default**.
 - **Determinism:** golden logs, identity path when gates are OFF; shadow/quality traces never affect results.
 
 ## Quick start
@@ -183,7 +185,8 @@ to zero `ms`, drop `now`, and keep byte identity across runs.
   – Add fast CLI smokes to CI (help phrase, arg‑order, sentinel strip, shim hint).
   – pre-commit + Ruff/Mypy configs; dual Ruff CI gates (repo safety + CLI strict).
   – declare NumPy as a runtime dependency (examples smoke).
-- **M9 (WIP):** deterministic parallelism — schema landed in PR63 (defaults OFF, identity preserved); runtime work continues in PR64–PR76.
+- **M9 (complete):** deterministic parallelism — PR63–PR76 shipped (config + deterministic runner + cache safety + T1/T2/agents gates + ordered logs + identity & race tests + optional CI smoke and benches). Defaults keep parallelism OFF; identity path preserved.
+- **M10 (started):** reflection sessions — PR77 adds the gated config surface (`t3.allow_reflection`, `t3.reflection.*`, and scheduler budgets). Runtime `reflect()` and orchestrator wiring will land in PR78–PR79 (gated; disabled‑path identity preserved).
 
 Pre‑M8 hardening notes: **`Changelog/PreM8Hardening.txt`**.
 LLM adapter + fixtures: **`docs/m3/llm_adapter.md`**.
