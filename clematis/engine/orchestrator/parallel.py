@@ -41,6 +41,8 @@ class _TurnBuffer(TypedDict):
     dialogue: str
     graphs_touched: set[str]
     graph_versions: Dict[str, str]
+    t2_info: dict
+    plan_reflection: bool
 
 
 def _core_module():
@@ -107,7 +109,8 @@ def _run_turn_compute(ctx: TurnCtx, base_state: Any, agent_id: str, input_text: 
         ro = _make_readonly_snapshot(base_state)
         core = _core_module()
         core.Orchestrator().run_turn(subctx, ro, input_text)
-        deltas, utter, t1_info, _ = _extract_dryrun_artifacts(subctx)
+        deltas, utter, t1_info, t2_info = _extract_dryrun_artifacts(subctx)
+        plan_reflection = bool(getattr(subctx, "_dryrun_plan_reflection", False))
         logs = mux.dump()
         buf: _TurnBuffer = {
             "turn_id": subctx.turn_id,
@@ -118,6 +121,8 @@ def _run_turn_compute(ctx: TurnCtx, base_state: Any, agent_id: str, input_text: 
             "dialogue": utter,
             "graphs_touched": set(t1_info.get("graphs_touched", []) or []),
             "graph_versions": {},
+            "t2_info": t2_info,
+            "plan_reflection": plan_reflection,
         }
         return buf
     finally:
@@ -276,6 +281,21 @@ def _run_agents_parallel_batch(
             else:
                 raise
         results.append(TurnResult(line=buf["dialogue"], events=[]))
+
+        # PR79: invoke reflection after Apply in parallel path (no logging/writes here)
+        try:
+            core = _core_module()
+            plan_like = _SNS(reflection=bool(buf.get("plan_reflection", False)))
+            core._run_reflection_if_enabled(
+                ctx=ctx,
+                state=state,
+                plan=plan_like,
+                utter=buf.get("dialogue", ""),
+                t2_obj=buf.get("t2_info", {}) or {},
+            )
+        except Exception:
+            # Reflection must never break the turn
+            pass
 
     for rec in stager.drain_sorted():
         _append_unbuffered(rec.file_path, rec.payload)
