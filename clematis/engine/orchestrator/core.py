@@ -3,6 +3,7 @@ from typing import Any, Dict
 import time
 from datetime import datetime, timezone
 import os as _os
+import sys as _sys
 
 
 def _iso_from_ms(ms: int) -> str:
@@ -10,10 +11,10 @@ def _iso_from_ms(ms: int) -> str:
 
 
 from types import SimpleNamespace
-from .types import TurnCtx, TurnResult
-from .stages.t1 import t1_propagate
-from .stages.t2 import t2_semantic
-from .stages.t3 import (
+from ..types import TurnCtx, TurnResult
+from ..stages.t1 import t1_propagate as _t1_propagate
+from ..stages.t2 import t2_semantic as _t2_semantic
+from ..stages.t3 import (
     make_plan_bundle,
     make_dialog_bundle,
     deliberate,
@@ -23,10 +24,12 @@ from .stages.t3 import (
     build_llm_prompt,
     emit_trace,
 )
-from .stages.t4 import t4_filter
-from .apply import apply_changes
-from .snapshot import load_latest_snapshot
-from .gel import (
+from ..stages.t4 import t4_filter as _t4_filter
+from ..apply import apply_changes as _default_apply_changes
+
+apply_changes = _default_apply_changes
+from ..snapshot import load_latest_snapshot
+from ..gel import (
     observe_retrieval as gel_observe,
     tick as gel_tick,
     merge_candidates as gel_merge_candidates,
@@ -36,16 +39,12 @@ from .gel import (
     promote_clusters as gel_promote_clusters,
     apply_promotion as gel_apply_promotion,
 )
-from ..io.log import append_jsonl, _append_jsonl_unbuffered
+from ...io.log import append_jsonl as _append_jsonl_default, _append_jsonl_unbuffered
 
 # --- PR70: parallel driver helpers & readonly snapshot import ---
-from .stages.state_clone import readonly_snapshot
-from .util.logmux import LogMux, set_mux, reset_mux
-
-from .util.io_logging import enable_staging, disable_staging, default_key_for
-
-
-from .cache import CacheManager
+from ..stages.state_clone import readonly_snapshot
+from ..cache import CacheManager
+from . import logging as _logging
 
 # --- PR70: minimal compute/commit driver (not wired into run_turn default path) ---
 from types import SimpleNamespace as _SNS
@@ -78,6 +77,53 @@ def _extract_dryrun_artifacts(ctx: TurnCtx) -> tuple[list, str, dict, dict]:
     return deltas, utter, t1_info, t2_info
 
 
+def _get_apply_changes():
+    orch_module = _sys.modules.get("clematis.engine.orchestrator")
+    if orch_module is not None:
+        func = getattr(orch_module, "apply_changes", None)
+        if callable(func):
+            return func
+    return _default_apply_changes
+
+
+def _get_logging_callable(name: str):
+    orch_module = _sys.modules.get("clematis.engine.orchestrator")
+    if orch_module is not None:
+        func = getattr(orch_module, name, None)
+        if callable(func):
+            return func
+    return getattr(_logging, name)
+
+
+def _get_stage_callable(name: str, default):
+    orch_module = _sys.modules.get("clematis.engine.orchestrator")
+    if orch_module is not None:
+        func = getattr(orch_module, name, None)
+        if callable(func):
+            return func
+    return default
+
+
+def _append_unbuffered(path: str, payload: dict) -> None:
+    orch_module = _sys.modules.get("clematis.engine.orchestrator")
+    if orch_module is not None:
+        writer = getattr(orch_module, "_append_jsonl_unbuffered", None)
+        if callable(writer) and writer is not _append_unbuffered:
+            writer(path, payload)
+            return
+    _append_jsonl_unbuffered(path, payload)
+
+
+def _append_jsonl(file_path: str, payload: Dict[str, Any]) -> None:
+    orch_module = _sys.modules.get("clematis.engine.orchestrator")
+    if orch_module is not None:
+        writer = getattr(orch_module, "append_jsonl", None)
+        if callable(writer) and writer is not _append_jsonl:
+            writer(file_path, payload)
+            return
+    _append_jsonl_default(file_path, payload)
+
+
 def _run_turn_compute(
     ctx: TurnCtx, base_state: Any, agent_id: str, input_text: str
 ) -> "_TurnBuffer":
@@ -94,7 +140,7 @@ def _run_turn_compute(
     subctx = _clone_ctx_for_agent(ctx, agent_id, turn_id)
 
     # Activate log capture for this compute
-    mux, token = _begin_log_capture()
+    mux, token = _get_logging_callable("_begin_log_capture")()
     try:
         # IMPORTANT: read-only snapshot to avoid mutating the live state
         ro = _make_readonly_snapshot(base_state)
@@ -115,7 +161,7 @@ def _run_turn_compute(
         }
         return buf
     finally:
-        _end_log_capture(token)
+        _get_logging_callable("_end_log_capture")(token)
 
 
 def _run_agents_parallel_batch(
@@ -136,7 +182,7 @@ def _run_agents_parallel_batch(
         return out
 
     # PR71: centralize log writes via staging for deterministic ordering
-    stager = enable_staging()
+    stager = _get_logging_callable("enable_staging")()
 
     # Select independent batch in input order
     max_workers = int(
@@ -148,10 +194,13 @@ def _run_agents_parallel_batch(
     # Compute on a single read-only snapshot
     base = _make_readonly_snapshot(state)
     buffers: list = []
+    orch_module = _sys.modules.get("clematis.engine.orchestrator")
+    compute_fn = getattr(orch_module, "_run_turn_compute", _run_turn_compute)
+
     for aid, text in tasks:
         if aid not in picked:
             continue
-        buf = _run_turn_compute(ctx, base, aid, text)
+        buf = compute_fn(ctx, base, aid, text)
         buffers.append(buf)
 
     # Stage all compute-phase logs first (no disk writes yet)
@@ -159,14 +208,16 @@ def _run_agents_parallel_batch(
         turn_id = buf["turn_id"]
         slice_idx = int(buf.get("slice_idx", 0) or 0)
         for file_path, payload in buf["logs"]:
-            key = default_key_for(file_path=file_path, turn_id=turn_id, slice_idx=slice_idx)
+            key = _get_logging_callable("default_key_for")(
+                file_path=file_path, turn_id=turn_id, slice_idx=slice_idx
+            )
             try:
                 stager.stage(file_path, key, payload)
             except RuntimeError as e:
                 if str(e) == "LOG_STAGING_BACKPRESSURE":
                     # Backpressure is expected; drain deterministically and retry without surfacing stderr noise.
                     for rec in stager.drain_sorted():
-                        _append_jsonl_unbuffered(rec.file_path, rec.payload)
+                        _append_unbuffered(rec.file_path, rec.payload)
                     stager.stage(file_path, key, payload)
                 else:
                     raise
@@ -180,7 +231,7 @@ def _run_agents_parallel_batch(
             reasons=["PR70_COMMIT"],
             metrics={"counts": {"approved": len(buf["deltas"])}},
         )
-        apply = apply_changes(ctx, state, t4_like)
+        apply = _get_apply_changes()(ctx, state, t4_like)
         apply_payload = {
             "turn": buf["turn_id"],
             "agent": buf["agent_id"],
@@ -193,7 +244,7 @@ def _run_agents_parallel_batch(
             ),
             "ms": 0.0,
         }
-        key = default_key_for(
+        key = _get_logging_callable("default_key_for")(
             file_path="apply.jsonl",
             turn_id=buf["turn_id"],
             slice_idx=int(buf.get("slice_idx", 0) or 0),
@@ -215,7 +266,7 @@ def _run_agents_parallel_batch(
             if str(e) == "LOG_STAGING_BACKPRESSURE":
                 # Same fallback as above: flush staged logs and retry, keeping stderr quiet and behavior deterministic.
                 for rec in stager.drain_sorted():
-                    _append_jsonl_unbuffered(rec.file_path, rec.payload)
+                    _append_unbuffered(rec.file_path, rec.payload)
                 stager.stage("apply.jsonl", key, _ap)
             else:
                 raise
@@ -223,8 +274,8 @@ def _run_agents_parallel_batch(
 
     # Final drain and ordered writes
     for rec in stager.drain_sorted():
-        _append_jsonl_unbuffered(rec.file_path, rec.payload)
-    disable_staging()
+        _append_unbuffered(rec.file_path, rec.payload)
+    _get_logging_callable("disable_staging")()
 
     return results
 
@@ -243,7 +294,7 @@ def _maybe_load_scheduler():
         return
     try:
         # PR25 path: engine-local scheduler
-        from .scheduler import next_turn as _nt, on_yield as _oy  # type: ignore
+        from ..scheduler import next_turn as _nt, on_yield as _oy  # type: ignore
 
         _sched_next_turn, _sched_on_yield = _nt, _oy
     except Exception:
@@ -305,6 +356,12 @@ def _should_yield(slice_ctx: _SliceCtx, consumed: Dict[str, int]) -> str | None:
     Precedence: WALL_MS > BUDGET_* > QUANTUM_EXCEEDED.
     NOTE: PR26 scaffolding only logs; enforcement (early return) can be added later.
     """
+    orch_module = _sys.modules.get("clematis.engine.orchestrator")
+    if orch_module is not None:
+        fn = getattr(orch_module, "_should_yield", None)
+        if callable(fn) and fn is not _should_yield:
+            return fn(slice_ctx, consumed)
+
     budgets = slice_ctx["budgets"]
     # elapsed since slice start
     elapsed_ms = consumed.get("ms", 0)
@@ -340,6 +397,12 @@ def agent_ready(ctx, state, agent_id: str) -> tuple[bool, str]:
 
 def _get_cfg(ctx) -> Dict[str, Any]:
     """Normalize config access across ctx.cfg / ctx.config; always returns a dict."""
+    orch_module = _sys.modules.get("clematis.engine.orchestrator")
+    if orch_module is not None:
+        fn = getattr(orch_module, "_get_cfg", None)
+        if callable(fn) and fn is not _get_cfg:
+            return fn(ctx)
+
     cfg = getattr(ctx, "cfg", None)
     if isinstance(cfg, dict):
         return cfg
@@ -401,21 +464,6 @@ def _select_independent_batch(agent_ids: list[str], state: Any, max_workers: int
     return picked
 
 
-def _begin_log_capture() -> tuple[LogMux, object]:
-    """Activate a LogMux for the current task and return (mux, token)."""
-    mux = LogMux()
-    token = set_mux(mux)
-    return mux, token
-
-
-def _end_log_capture(token: object) -> None:
-    """Reset the active LogMux using the provided token."""
-    try:
-        reset_mux(token)
-    except Exception:
-        pass
-
-
 def _sort_turn_buffers(buffers: list[_TurnBuffer]) -> list[_TurnBuffer]:
     """Sort buffers deterministically by (turn_id, slice_idx).
     turn_id is compared as int when possible, else as string.
@@ -434,6 +482,11 @@ def _sort_turn_buffers(buffers: list[_TurnBuffer]) -> list[_TurnBuffer]:
 
 def _make_readonly_snapshot(state: Any) -> Any:
     """Create a read-only snapshot facade used by the compute phase."""
+    orch_module = _sys.modules.get("clematis.engine.orchestrator")
+    if orch_module is not None:
+        fn = getattr(orch_module, "_make_readonly_snapshot", None)
+        if callable(fn) and fn is not _make_readonly_snapshot:
+            return fn(state)
     return readonly_snapshot(state)
 
 
@@ -484,7 +537,7 @@ def _write_or_capture_scheduler_event(ctx, event: Dict[str, Any]) -> None:
     except Exception:
         # Fall back to writing
         pass
-    append_jsonl("scheduler.jsonl", event)
+    _append_jsonl("scheduler.jsonl", event)
 
 
 class Orchestrator:
@@ -582,9 +635,9 @@ class Orchestrator:
 
         # --- T1 ---
         t0 = time.perf_counter()
-        t1 = t1_propagate(ctx, state, input_text)
+        t1 = _get_stage_callable("t1_propagate", _t1_propagate)(ctx, state, input_text)
         t1_ms = round((time.perf_counter() - t0) * 1000.0, 3)
-        append_jsonl(
+        _append_jsonl(
             "t1.jsonl",
             {
                 "turn": turn_id,
@@ -628,7 +681,7 @@ class Orchestrator:
                 }
                 _write_or_capture_scheduler_event(ctx, event)
                 total_ms_now = round((time.perf_counter() - total_t0) * 1000.0, 3)
-                append_jsonl(
+                _append_jsonl(
                     "turn.jsonl",
                     {
                         "turn": turn_id,
@@ -678,13 +731,13 @@ class Orchestrator:
                 t2 = cached
                 cache_hit = True
             else:
-                t2 = t2_semantic(ctx, state, input_text, t1)
+                t2 = _get_stage_callable("t2_semantic", _t2_semantic)(ctx, state, input_text, t1)
                 cm.set(ns, key, t2)
         else:
-            t2 = t2_semantic(ctx, state, input_text, t1)
+            t2 = _get_stage_callable("t2_semantic", _t2_semantic)(ctx, state, input_text, t1)
 
         t2_ms = round((time.perf_counter() - t0) * 1000.0, 3)
-        append_jsonl(
+        _append_jsonl(
             "t2.jsonl",
             {
                 "turn": turn_id,
@@ -727,7 +780,7 @@ class Orchestrator:
                 }
                 _write_or_capture_scheduler_event(ctx, event)
                 total_ms_now = round((time.perf_counter() - total_t0) * 1000.0, 3)
-                append_jsonl(
+                _append_jsonl(
                     "turn.jsonl",
                     {
                         "turn": turn_id,
@@ -774,7 +827,7 @@ class Orchestrator:
                 turn_idx = None
             gel_metrics = gel_observe(ctx, state, items, turn=turn_idx, agent=agent_id)
             gel_ms = round((time.perf_counter() - t0_gel) * 1000.0, 3)
-            append_jsonl(
+            _append_jsonl(
                 "gel.jsonl",
                 {
                     "turn": turn_id,
@@ -789,10 +842,13 @@ class Orchestrator:
         # All pure stage functions; only logging here does I/O.
         t0 = time.perf_counter()
         bundle = make_plan_bundle(ctx, state, t1, t2)
-        # Allow tests to monkeypatch a module-level t3_deliberate(ctx, state, bundle)
-        delib_fn = globals().get("t3_deliberate")
+        orch_module = _sys.modules.get("clematis.engine.orchestrator")
+        delib_fn = getattr(orch_module, "t3_deliberate", None) if orch_module else None
         if callable(delib_fn):
-            plan = delib_fn(ctx, state, bundle)
+            try:
+                plan = delib_fn(ctx, state, bundle)
+            except TypeError:
+                plan = delib_fn(bundle)
         else:
             plan = deliberate(bundle)
         plan_ms = round((time.perf_counter() - t0) * 1000.0, 3)
@@ -826,7 +882,7 @@ class Orchestrator:
                 }
                 _write_or_capture_scheduler_event(ctx, event)
                 total_ms_now = round((time.perf_counter() - total_t0) * 1000.0, 3)
-                append_jsonl(
+                _append_jsonl(
                     "turn.jsonl",
                     {
                         "turn": turn_id,
@@ -865,7 +921,7 @@ class Orchestrator:
         def _retrieve_fn(payload: Dict[str, Any]) -> Dict[str, Any]:
             # Deterministic wrapper around T2: re-run with the provided query; map to the shape rag_once expects.
             q = str(payload.get("query") or input_text)
-            t2_alt = t2_semantic(ctx, state, q, t1)
+            t2_alt = _get_stage_callable("t2_semantic", _t2_semantic)(ctx, state, q, t1)
             # Normalize retrieved to list[dict]
             hits = []
             for r in getattr(t2_alt, "retrieved", []) or []:
@@ -959,7 +1015,7 @@ class Orchestrator:
         fallback_reason = None
 
         # let tests monkeypatch a module-level t3_dialogue with flexible signatures for speed and laziness.
-        dlg_fn = globals().get("t3_dialogue")
+        dlg_fn = getattr(orch_module, "t3_dialogue", None) if orch_module else None
         if callable(dlg_fn):
             try:
                 # pref sig: (dialog_bundle, plan)
@@ -967,7 +1023,7 @@ class Orchestrator:
             except TypeError:
                 # Fallback signature used by some tests: (ctx, state, dialog_bundle)
                 res = dlg_fn(ctx, state, dialog_bundle)
-            # normaliaztion: support returning just a string or (utter, metrics)
+            # normaliazation: support returning just a string or (utter, metrics)
             if isinstance(res, tuple):
                 utter = res[0]
                 speak_metrics = res[1] if len(res) > 1 and isinstance(res[1], dict) else {}
@@ -997,7 +1053,7 @@ class Orchestrator:
         policy_backend = (
             str(t3cfg.get("backend", "rulebased")) if isinstance(t3cfg, dict) else "rulebased"
         )
-        append_jsonl(
+        _append_jsonl(
             "t3_plan.jsonl",
             {
                 "turn": turn_id,
@@ -1040,7 +1096,7 @@ class Orchestrator:
         else:
             dlg_extra.update({"backend": "rulebased"})
 
-        append_jsonl(
+        _append_jsonl(
             "t3_dialogue.jsonl",
             {
                 "turn": turn_id,
@@ -1065,9 +1121,9 @@ class Orchestrator:
         if t4_enabled:
             # --- T4 ---
             t0 = time.perf_counter()
-            t4 = t4_filter(ctx, state, t1, t2, plan, utter)
+            t4 = _get_stage_callable("t4_filter", _t4_filter)(ctx, state, t1, t2, plan, utter)
             t4_ms = round((time.perf_counter() - t0) * 1000.0, 3)
-            append_jsonl(
+            _append_jsonl(
                 "t4.jsonl",
                 {
                     "turn": turn_id,
@@ -1136,7 +1192,7 @@ class Orchestrator:
                     }
                     _write_or_capture_scheduler_event(ctx, event)
                     total_ms_now = round((time.perf_counter() - total_t0) * 1000.0, 3)
-                    append_jsonl(
+                    _append_jsonl(
                         "turn.jsonl",
                         {
                             "turn": turn_id,
@@ -1186,7 +1242,7 @@ class Orchestrator:
                     turn_idx2 = None
                 decay_metrics = gel_tick(ctx, state, decay_dt=1, turn=turn_idx2, agent=agent_id)
                 decay_ms = round((time.perf_counter() - t0_decay) * 1000.0, 3)
-                append_jsonl(
+                _append_jsonl(
                     "gel.jsonl",
                     {
                         "turn": turn_id,
@@ -1245,7 +1301,7 @@ class Orchestrator:
                                 promo_applied += 1
 
                         msp_ms = round((time.perf_counter() - t0_msp) * 1000.0, 3)
-                        append_jsonl(
+                        _append_jsonl(
                             "gel.jsonl",
                             {
                                 "turn": turn_id,
@@ -1264,7 +1320,7 @@ class Orchestrator:
                     pass
             # --- Apply & persist ---
             t0 = time.perf_counter()
-            apply = apply_changes(ctx, state, t4)
+            apply = _get_apply_changes()(ctx, state, t4)
             apply_ms = round((time.perf_counter() - t0) * 1000.0, 3)
             _ap = {
                 "turn": turn_id,
@@ -1287,7 +1343,7 @@ class Orchestrator:
                     _ap.pop("now", None)
             if _os.environ.get("CI", "").lower() == "true":
                 _ap["ms"] = 0.0
-            append_jsonl("apply.jsonl", _ap)
+            _append_jsonl("apply.jsonl", _ap)
             # --- M5 boundary check after Apply ---
             if slice_ctx is not None:
                 consumed = {
@@ -1317,7 +1373,7 @@ class Orchestrator:
                     }
                     _write_or_capture_scheduler_event(ctx, event)
                     total_ms_now = round((time.perf_counter() - total_t0) * 1000.0, 3)
-                    append_jsonl(
+                    _append_jsonl(
                         "turn.jsonl",
                         {
                             "turn": turn_id,
@@ -1368,12 +1424,12 @@ class Orchestrator:
             )
 
         # --- Health summary + per-turn rollup ---
-        from . import health
+        from .. import health
 
-        health.check_and_log(ctx, state, t1, t2, t4, apply, append_jsonl)
+        health.check_and_log(ctx, state, t1, t2, t4, apply, _append_jsonl)
 
         total_ms = round((time.perf_counter() - total_t0) * 1000.0, 3)
-        append_jsonl(
+        _append_jsonl(
             "turn.jsonl",
             {
                 "turn": turn_id,
