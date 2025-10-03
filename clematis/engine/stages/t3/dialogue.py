@@ -124,7 +124,6 @@ def build_llm_prompt(dialog_bundle: Dict[str, Any], plan: Plan) -> str:
 
 def llm_speak(dialog_bundle: Dict[str, Any], plan: Plan, adapter: Any) -> Tuple[str, Dict[str, Any]]:
     speak_op = _first_speak_op(plan)
-    intent = getattr(speak_op, "intent", "ack") if speak_op else "ack"
     style_prefix = str(dialog_bundle.get("agent", {}).get("style_prefix", ""))
     snippet_ids = _top_snippet_ids(dialog_bundle)
 
