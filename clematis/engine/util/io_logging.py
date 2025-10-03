@@ -63,6 +63,8 @@ def normalize_for_identity(name: str, rec: Dict[str, Any]) -> Dict[str, Any]:
         durations = out.get("durations_ms")
         if isinstance(durations, dict):
             out["durations_ms"] = {k: 0.0 for k in durations.keys()}
+        out.pop("slice_idx", None)
+        out.pop("yielded", None)
     return out
 
 

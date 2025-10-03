@@ -389,7 +389,7 @@ perf:
   - Canonical stream order via `stage_ord`:
     `t1.jsonl` → `t2.jsonl` → `t3_plan.jsonl` → `t3_dialogue.jsonl` → `t4.jsonl` → `apply.jsonl` → `health.jsonl` → `turn.jsonl` → `scheduler.jsonl`.
   - Bounded memory (`byte_limit`, default 32 MB). On limit, raise `LOG_STAGING_BACKPRESSURE` to trigger a deterministic drain→flush→retry cycle.
-- **Orchestrator (parallel path)** now stages *all* compute-phase logs and the commit-phase `apply.jsonl` records, then performs a single ordered flush.
+- **Orchestrator split** — the sequential loop stays in `orchestrator/core.py`, log plumbing moved to `orchestrator/logging.py`, and the agent fan-out helpers (`_run_turn_compute`, `_run_agents_parallel_batch`) live in the new `orchestrator/parallel.py`; the parallel path stages *all* compute-phase logs plus commit `apply.jsonl` entries, then performs one ordered flush.
 - **Unbuffered writer** (`clematis/io/log.py::_append_jsonl_unbuffered`) mirrors the exact JSON serialization of `append_jsonl(...)` to preserve byte parity.
 
 ### Gate & invariants
