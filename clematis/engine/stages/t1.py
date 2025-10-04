@@ -2,6 +2,7 @@ from __future__ import annotations
 from collections import defaultdict
 import heapq
 from typing import Dict, Any, List, Tuple
+import numpy as np
 from ..types import T1Result
 from ..cache import LRUCache, stable_key, ThreadSafeCache, ThreadSafeBytesCache
 from ..util.ring import DedupeRing
@@ -62,7 +63,7 @@ def _get_cache(ctx, cfg_t1: dict):
     return _T1_CACHE, _T1_CACHE_KIND
 
 
-EPS = 1e-6
+EPS = 1e-8
 
 
 def _cfg_get(obj, path, default=None):
@@ -128,6 +129,276 @@ def _compute_decay(distance: int, cfg_t1: dict) -> float:
     rate = float(cfg_t1["decay"].get("rate", 0.6))
     floor = float(cfg_t1["decay"].get("floor", 0.05))
     return max(rate**distance, floor)
+
+
+# === PR98: Native parity harness scaffolding (no behavior change by default) ===
+from typing import Sequence, Optional
+
+
+def _t1_one_graph_python_inner(
+    *,
+    indptr: np.ndarray,
+    indices: np.ndarray,
+    weights: np.ndarray,
+    rel_mult: np.ndarray,
+    seeds: np.ndarray,
+    params: Dict[str, Any],
+    key_rank: np.ndarray,
+    seed_weights: Optional[np.ndarray] = None,
+    rel_code: Optional[np.ndarray] = None,
+) -> Tuple[np.ndarray, np.ndarray, Dict[str, Any]]:
+    """Factored single-graph propagation kernel (Python reference).
+
+    This is the semantics-preserving inner loop used for strict parity.
+    Inputs are CSR arrays with per-edge relation multipliers, a stable key_rank
+    (lexicographic rank of node ids), and seed node ids (indices in key_rank space).
+
+    Returns (d_nodes[int32], d_vals[float32], metrics[dict]).
+
+    Notes:
+    • Only "perf-OFF" semantics are implemented here (no dedupe ring, no visited LRU,
+      no explicit frontier caps). That matches the PR98 goal.
+    • "rel_code" is accepted but unused by the Python path; retained for forward-compat.
+    • If seed_weights is omitted, unit weights are assumed for seeds.
+    """
+    # Canonical dtypes
+    indptr = indptr.astype(np.int32, copy=False)
+    indices = indices.astype(np.int32, copy=False)
+    weights = weights.astype(np.float32, copy=False)
+    rel_mult = rel_mult.astype(np.float32, copy=False)
+    seeds = seeds.astype(np.int32, copy=False)
+    key_rank = key_rank.astype(np.int32, copy=False)
+    if seed_weights is None:
+        seed_weights = np.ones_like(seeds, dtype=np.float32)
+    else:
+        seed_weights = seed_weights.astype(np.float32, copy=False)
+
+    # Params
+    decay_p = params.get("decay", {}) if isinstance(params, dict) else {}
+    rate = float(decay_p.get("rate", 0.6))
+    floor = float(decay_p.get("floor", 0.05))
+    radius_cap = int(params.get("radius_cap", 4))
+    iter_cap_layers = int(params.get("iter_cap_layers", 50))
+    node_budget = float(params.get("node_budget", 1.5))
+
+    n_nodes = int(key_rank.max()) + 1 if key_rank.size > 0 else 0
+    # If key_rank is empty, infer from CSR
+    if n_nodes == 0 and indptr.size > 0:
+        n_nodes = indptr.size - 1
+
+    # Accumulator and distances
+    acc = np.zeros(n_nodes, dtype=np.float32)
+    dist = np.full(n_nodes, -1, dtype=np.int32)
+
+    # Priority queue as a Python heap of tuples: (-|w|, node, w)
+    import heapq as _heapq
+    pq: List[Tuple[float, int, float]] = []
+
+    local_max_delta = 0.0
+    for s, sw in zip(seeds.tolist(), seed_weights.tolist()):
+        acc[s] += float(sw)
+        dist[s] = 0
+        _heapq.heappush(pq, (-abs(sw), int(s), float(sw)))
+        local_max_delta = max(local_max_delta, abs(float(sw)))
+
+    pops = 0
+    propagations = 0
+    layers_processed = 0
+    radius_cap_hits_local = 0
+    layer_cap_hits_local = 0
+    node_budget_hits_local = 0
+
+    def _decay(d: int) -> float:
+        return max(rate ** d, floor)
+
+    while pq:
+        _negw, u, w = _heapq.heappop(pq)
+        pops += 1
+        layer = int(dist[u]) if dist[u] >= 0 else 0
+        if layer > 0 and layer > layers_processed:
+            layers_processed = layer
+            if layers_processed > iter_cap_layers:
+                # Do not expand beyond iter cap; continue draining queue
+                continue
+
+        if abs(acc[u]) >= node_budget:
+            node_budget_hits_local += 1
+            continue
+
+        # CSR row for u
+        row_start = int(indptr[u])
+        row_end = int(indptr[u + 1])
+        if row_end <= row_start:
+            continue
+
+        for e_idx in range(row_start, row_end):
+            v = int(indices[e_idx])
+            d = layer + 1
+            if d > radius_cap:
+                radius_cap_hits_local += 1
+                continue
+            if d > iter_cap_layers:
+                layer_cap_hits_local += 1
+                continue
+
+            contrib = float(w) * float(weights[e_idx]) * float(rel_mult[e_idx]) * _decay(d)
+            if abs(contrib) < EPS:
+                continue
+
+            acc[v] += contrib
+            propagations += 1
+            local_max_delta = max(local_max_delta, abs(contrib))
+            if dist[v] < 0 or d < dist[v]:
+                dist[v] = d
+            if abs(acc[v]) < node_budget:
+                _heapq.heappush(pq, (-abs(contrib), v, contrib))
+            else:
+                node_budget_hits_local += 1
+
+    # Build deterministic outputs: sort by node id
+    nz = np.nonzero(np.abs(acc) >= EPS)[0]
+    if nz.size:
+        nz_sorted = np.sort(nz.astype(np.int32, copy=False))
+        d_nodes = nz_sorted.astype(np.int32, copy=False)
+        d_vals = acc[nz_sorted].astype(np.float32, copy=False)
+    else:
+        d_nodes = np.asarray([], dtype=np.int32)
+        d_vals = np.asarray([], dtype=np.float32)
+
+    metrics = {
+        "pops": int(pops),
+        "iters": int(min(layers_processed, iter_cap_layers)),
+        "propagations": int(propagations),
+        "radius_cap_hits": int(radius_cap_hits_local),
+        "layer_cap_hits": int(layer_cap_hits_local),
+        "node_budget_hits": int(node_budget_hits_local),
+        "_max_delta_local": float(local_max_delta),
+    }
+    return d_nodes, d_vals, metrics
+
+
+def _t1_one_graph_native(
+    *,
+    indptr: np.ndarray,
+    indices: np.ndarray,
+    weights: np.ndarray,
+    rel_code: np.ndarray,
+    rel_mult: np.ndarray,
+    key_rank: np.ndarray,
+    seeds: np.ndarray,
+    params: Dict[str, Any],
+    seed_weights: Optional[np.ndarray] = None,
+) -> Tuple[np.ndarray, np.ndarray, Dict[str, Any]]:
+    """Calls the 'native' (currently Python) kernel with Rust-compatible signature."""
+    from clematis.native import t1 as native_t1  # lazy import to avoid cycles
+    if seed_weights is None:
+        seed_weights = np.ones_like(seeds, dtype=np.float32)
+
+    # Expand param dict into positional call expected by the stub
+    decay = params.get("decay", {}) if isinstance(params, dict) else {}
+    rate = float(decay.get("rate", 0.6))
+    floor = float(decay.get("floor", 0.05))
+    radius_cap = int(params.get("radius_cap", 4))
+    iter_cap_layers = int(params.get("iter_cap_layers", 50))
+    node_budget = float(params.get("node_budget", 1.5))
+
+    return native_t1.propagate_one_graph_rs(
+        indptr=indptr,
+        indices=indices,
+        weights=weights,
+        rel_code=rel_code,
+        rel_mult=rel_mult,
+        seed_nodes=seeds,
+        seed_weights=seed_weights,
+        key_rank=key_rank,
+        rate=rate,
+        floor=floor,
+        radius_cap=radius_cap,
+        iter_cap_layers=iter_cap_layers,
+        node_budget=node_budget,
+    )
+
+
+def _native_t1_allowed(cfg) -> bool:
+    # Mirrors PR97 validation: backend ∈ {"rust","python"}
+    try:
+        block = cfg["perf"]["native"]["t1"]
+        backend = block.get("backend", "rust")
+        return backend in {"rust", "python"}
+    except Exception:
+        return False
+
+
+def _t1_one_graph_dispatch(
+    *,
+    cfg,
+    indptr: np.ndarray,
+    indices: np.ndarray,
+    weights: np.ndarray,
+    rel_code: np.ndarray,
+    rel_mult: np.ndarray,
+    key_rank: np.ndarray,
+    seeds: np.ndarray,
+    params: Dict[str, Any],
+    seed_weights: Optional[np.ndarray] = None,
+) -> Tuple[np.ndarray, np.ndarray, Dict[str, Any]]:
+    """Test-visible dispatcher for strict parity.
+
+    If cfg.perf.native.t1.enabled and native available + allowed:
+      - strict_parity=True → compute both paths, assert identical, return python.
+      - else → return native result.
+    Otherwise returns python result.
+    """
+    block = (((cfg or {}).get("perf") or {}).get("native") or {}).get("t1") or {}
+    strict = bool(block.get("strict_parity", False))
+    enabled = bool(block.get("enabled", False))
+
+    if enabled and _native_t1_allowed(cfg):
+        from clematis.native import t1 as native_t1  # lazy
+        if native_t1.available():
+            n_nodes, n_vals, n_met = _t1_one_graph_native(
+                indptr=indptr,
+                indices=indices,
+                weights=weights,
+                rel_code=rel_code,
+                rel_mult=rel_mult,
+                key_rank=key_rank,
+                seeds=seeds,
+                params=params,
+                seed_weights=seed_weights,
+            )
+            if strict:
+                p_nodes, p_vals, p_met = _t1_one_graph_python_inner(
+                    indptr=indptr,
+                    indices=indices,
+                    weights=weights,
+                    rel_mult=rel_mult,
+                    seeds=seeds,
+                    params=params,
+                    key_rank=key_rank,
+                    seed_weights=seed_weights,
+                    rel_code=rel_code,
+                )
+                if not (np.array_equal(n_nodes, p_nodes) and np.allclose(n_vals, p_vals, rtol=0, atol=0)):
+                    raise AssertionError("strict_parity: native != python")
+                if set(n_met.keys()) != set(p_met.keys()):
+                    raise AssertionError("strict_parity: metrics keys differ")
+                return p_nodes, p_vals, p_met
+            return n_nodes, n_vals, n_met
+
+    # Fallback: python path
+    return _t1_one_graph_python_inner(
+        indptr=indptr,
+        indices=indices,
+        weights=weights,
+        rel_mult=rel_mult,
+        seeds=seeds,
+        params=params,
+        key_rank=key_rank,
+        seed_weights=seed_weights,
+        rel_code=rel_code,
+    )
+# === End PR98 scaffolding ===
 
 
 def t1_propagate(ctx, state, text: str) -> T1Result:

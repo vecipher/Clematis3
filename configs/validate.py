@@ -331,8 +331,8 @@ ALLOWED_GRAPH_PROMOTION = {
 }
 _ALLOWED_SCHED_POLICIES = {"round_robin", "fair_queue"}
 
-# PERF (M6) allowed keys
-ALLOWED_PERF = {"enabled", "t1", "t2", "snapshots", "metrics", "parallel"}
+ # PERF (M6) allowed keys
+ALLOWED_PERF = {"enabled", "t1", "t2", "snapshots", "metrics", "parallel", "native"}
 ALLOWED_PERF_T1 = {"queue_cap", "dedupe_window", "cache", "caps"}
 ALLOWED_PERF_T1_CACHE = {"max_entries", "max_bytes"}
 ALLOWED_PERF_T1_CAPS = {"frontier", "visited"}
@@ -343,6 +343,10 @@ ALLOWED_PERF_T2_READER_PARTITIONS = {"enabled", "layout", "path", "by"}
 ALLOWED_PERF_SNAP = {"compression", "level", "delta_mode", "every_n_turns"}
 ALLOWED_PERF_METRICS = {"report_memory"}
 ALLOWED_PERF_PARALLEL = {"enabled", "max_workers", "t1", "t2", "agents"}
+
+# PERF.native subtree allowed sets (PR97)
+ALLOWED_PERF_NATIVE = {"t1"}
+ALLOWED_PERF_NATIVE_T1 = {"enabled", "backend", "strict_parity"}
 
 ALLOWED_T2_QUALITY = {
     "enabled",
@@ -469,11 +473,14 @@ def _validate_config_normalize_impl(cfg: Dict[str, Any]) -> Dict[str, Any]:
     raw_perf_t1_caps = _ensure_dict(raw_perf_t1.get("caps"))
     raw_perf_t2 = _ensure_dict(raw_perf.get("t2"))
     raw_perf_t2_cache = _ensure_dict(raw_perf_t2.get("cache"))
-    raw_perf_t2_reader = _ensure_dict(raw_perf_t2.get("reader"))
+    raw_perf_t2_reader = _ensure_dict(raw_perf.get("t2", {}).get("reader"))  # safe fallback
     raw_perf_t2_reader_partitions = _ensure_dict(raw_perf_t2_reader.get("partitions"))
     raw_perf_snap = _ensure_dict(raw_perf.get("snapshots"))
     raw_perf_metrics = _ensure_dict(raw_perf.get("metrics"))
     raw_perf_parallel = _ensure_dict(raw_perf.get("parallel"))
+    # PERF.native subtree (PR97)
+    raw_perf_native = _ensure_dict(raw_perf.get("native"))
+    raw_perf_native_t1 = _ensure_dict(raw_perf_native.get("t1"))
 
     raw_t2_quality = _ensure_dict(raw_t2.get("quality"))
     raw_q_norm = _ensure_dict(raw_t2_quality.get("normalizer"))
@@ -669,6 +676,17 @@ def _validate_config_normalize_impl(cfg: Dict[str, Any]) -> Dict[str, Any]:
                 sug = _suggest_key(k, ALLOWED_PERF_PARALLEL)
                 hint = f" (did you mean '{sug}')" if sug else ""
                 _err(errors, f"perf.parallel.{k}", f"unknown key{hint}")
+        # perf.native unknown key checks (PR97)
+        for k in raw_perf_native.keys():
+            if k not in ALLOWED_PERF_NATIVE:
+                sug = _suggest_key(k, ALLOWED_PERF_NATIVE)
+                hint = f" (did you mean '{sug}')" if sug else ""
+                _err(errors, f"perf.native.{k}", f"unknown key{hint}")
+        for k in raw_perf_native_t1.keys():
+            if k not in ALLOWED_PERF_NATIVE_T1:
+                sug = _suggest_key(k, ALLOWED_PERF_NATIVE_T1)
+                hint = f" (did you mean '{sug}')" if sug else ""
+                _err(errors, f"perf.native.t1.{k}", f"unknown key{hint}")
 
     # T2.quality unknown key checks (RQ prep only)
     if raw_t2_quality:
@@ -1404,6 +1422,31 @@ def _validate_config_normalize_impl(cfg: Dict[str, Any]) -> Dict[str, Any]:
                     pt2["reader"] = rd_out
             if pt2:
                 p["t2"] = pt2
+
+        # perf.native (PR97)
+        if raw_perf_native:
+            pn: Dict[str, Any] = {}
+            # perf.native.t1
+            if raw_perf_native_t1:
+                pn_t1: Dict[str, Any] = {}
+                if "enabled" in raw_perf_native_t1:
+                    pn_t1["enabled"] = _coerce_bool(raw_perf_native_t1.get("enabled"))
+                # backend normalization (rust|python)
+                if "backend" in raw_perf_native_t1:
+                    be = str(raw_perf_native_t1.get("backend", "rust")).lower()
+                    if be not in {"rust", "python"}:
+                        _err(errors, "perf.native.t1.backend", "must be one of {rust,python}")
+                        be = "rust"
+                    pn_t1["backend"] = be
+                else:
+                    # default only when the native.t1 block is present
+                    pn_t1["backend"] = "rust"
+                if "strict_parity" in raw_perf_native_t1:
+                    pn_t1["strict_parity"] = _coerce_bool(raw_perf_native_t1.get("strict_parity"))
+                if pn_t1:
+                    pn["t1"] = pn_t1
+            if pn:
+                p["native"] = pn
 
         # perf.snapshots
         if raw_perf_snap:
