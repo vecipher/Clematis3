@@ -144,10 +144,10 @@ def make_planner_prompt(ctx) -> str:
         "agent": getattr(ctx, "agent_id", "agent"),
     }
     return (
-        "SYSTEM: Return ONLY valid JSON with keys {plan: list[str], rationale: str}. "
+        "SYSTEM: Return ONLY valid JSON with keys {plan: list[str], rationale: str, reflection: boolean}. "
         "No prose. No markdown. No trailing commas.\n"
         f"STATE: {_json.dumps(summary, separators=(',', ':'))}\n"
-        "USER: Propose up to 4 next steps as short strings; include a brief rationale."
+        "USER: Propose up to 4 next steps as short strings; include a brief rationale and set reflection to true only if a reflection pass is recommended."
     )
 
 
@@ -292,6 +292,12 @@ def run_policy(
         out = plan_with_llm(ctx, state, cfg_root)
         plan = out.get("plan", []) if isinstance(out, dict) else []
         rationale = out.get("rationale", "") if isinstance(out, dict) else ""
+        # Stash planner reflection flag for orchestrator consumption without changing return shape
+        try:
+            if state is not None and isinstance(out, dict):
+                setattr(state, "_planner_reflection_flag", bool(out.get("reflection", False)))
+        except Exception:
+            pass
         return {"plan": plan, "rationale": rationale}
 
     plan_obj = deliberate(inputs)

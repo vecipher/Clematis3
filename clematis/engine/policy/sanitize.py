@@ -8,8 +8,11 @@ from .json_schemas import (
     RATIONALE_MAX_LEN,
 )
 
+
 # Raw size guards so we never try to parse megabyte-scale blobs in CI
 _MAX_RAW_LEN = 20000
+
+
 
 
 def _strip_triple_fences(s: str) -> Tuple[str, Optional[str]]:
@@ -37,6 +40,7 @@ def parse_and_validate(text: str, schema: dict) -> Tuple[bool, Any]:
       • Input must be either pure JSON or a single fenced JSON block.
       • Reject any extra prose/prefix/suffix.
       • Enforce caps (max items/lengths). No additional properties.
+      • Optional top-level `reflection` flag is allowed; coerced to bool if given.
     """
     if not isinstance(text, str):
         return False, "non-string LLM output"
@@ -69,7 +73,7 @@ def parse_and_validate(text: str, schema: dict) -> Tuple[bool, Any]:
 
     # additionalProperties == False
     for k in obj.keys():
-        if k not in ("plan", "rationale"):
+        if k not in ("plan", "rationale", "reflection"):
             return False, f"unknown key: {k}"
 
     plan = obj["plan"]
@@ -94,5 +98,61 @@ def parse_and_validate(text: str, schema: dict) -> Tuple[bool, Any]:
     if (not isinstance(rat, str)) or (len(rat) == 0) or (len(rat) > RATIONALE_MAX_LEN):
         return False, "rationale length/type invalid"
 
+    # optional reflection flag
+    ref: bool = False
+    if "reflection" in obj:
+        ok_b, bv = _coerce_bool(obj["reflection"])
+        if not ok_b:
+            return False, "reflection must be boolean (or 'true'/'false','1'/'0')"
+        ref = bool(bv)
+
     # Normalized pass-through
-    return True, {"plan": plan, "rationale": rat}
+    return True, {"plan": plan, "rationale": rat, "reflection": ref}
+
+def _coerce_bool(v):
+    if isinstance(v, bool):
+        return True, v
+    if isinstance(v, int) and v in (0, 1):
+        return True, bool(v)
+    if isinstance(v, str):
+        s = v.strip().lower()
+        if s in ("true", "t", "yes", "y", "1"):
+            return True, True
+        if s in ("false", "f", "no", "n", "0"):
+            return True, False
+    return False, None
+
+def sanitize_plan(plan_dict, errors):
+    """
+    Lightweight sanitizer for unit tests and rulebased planners.
+
+    Validates 'ops' and 'reflection' keys in the input dict, but returns only:
+        {'reflection': bool}
+
+    - 'ops' is validated (and errors appended) but NOT included in the return value
+      to avoid colliding with callers that pass ops explicitly.
+    - Appends human-readable strings to `errors`; does not raise.
+    """
+    out = {} if plan_dict is None else dict(plan_dict)
+
+    # ops
+    ops = out.get("ops", [])
+    if not isinstance(ops, list):
+        errors.append("ops must be an array")
+        ops = []
+    else:
+        bad = [x for x in ops if not isinstance(x, str) or (len(x.strip()) == 0)]
+        if bad:
+            errors.append("ops must be non-empty strings")
+            ops = [x for x in ops if isinstance(x, str) and len(x.strip()) > 0]
+
+    # reflection (optional)
+    ref = False
+    if "reflection" in out:
+        ok_b, bv = _coerce_bool(out["reflection"])
+        if not ok_b:
+            errors.append("plan.reflection must be boolean (or boolean-like 'true'/'false','1'/'0').")
+        else:
+            ref = bool(bv)
+
+    return {"reflection": ref}

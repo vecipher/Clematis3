@@ -4,7 +4,7 @@ Clematis is a deterministic, turn‑based scaffold for agential AI. It models ag
 
 > **Status:** **v0.9.0a1** (2025‑10‑03) — **M9 complete** ✅. Deterministic parallelism shipped behind flags; default path remains byte‑identical.
 >
-> **M10 — Reflection Sessions (started):** **PR77** adds the reflection config surface (gate OFF by default; no runtime effect). See **[docs/m10/reflection.md](docs/m10/reflection.md)**. For M9 details, see **[docs/m9/overview.md](docs/m9/overview.md)**, **[docs/m9/parallel_helper.md](docs/m9/parallel_helper.md)**, **[docs/refactors/PR76](docs/refactors/PR76)**, and **[docs/m9/migration.md](docs/m9/migration.md)**.
+> **M10 — Reflection Sessions (in progress):** Config surface **PR77** (gate OFF by default), deterministic writer + budgets **PR80–PR83**, fixtures‑only LLM backend **PR84**, and planner flag wiring **PR85** are landed. Logging/telemetry (**PR86**) and docs/smoke (**PR87–PR88/PR89**) are next. See **[docs/m10/reflection.md](docs/m10/reflection.md)**. For M9 details, see **[docs/m9/overview.md](docs/m9/overview.md)**, **[docs/m9/parallel_helper.md](docs/m9/parallel_helper.md)**, **[docs/refactors/PR76](docs/refactors/PR76)**, and **[docs/m9/migration.md](docs/m9/migration.md)**.
 
 ---
 
@@ -20,8 +20,8 @@ Clematis is a deterministic, turn‑based scaffold for agential AI. It models ag
 - **Memories:** LanceDB vector store (BGE small); tiered retrieval; deterministic scoring.
 - **Concept graph:** nodes/edges with decay and relations; surface views for I/O.
 - **Stages:**
-  T1 keyword/seeded propagation → T2 semantic retrieval (+ residual) → T3 bounded policy (rule‑based now; LLM adapter gated) → T4 meta‑filter & apply/persist.
-  Reflection (M10) and scheduler features are gated for determinism; the reflection config surface was added in v0.9.0a1 and is **OFF by default**.
+  T1 keyword/seeded propagation → T2 semantic retrieval (+ residual) → T3 bounded policy (rule‑based by default; fixtures‑only LLM backend available) → T4 meta‑filter & apply/persist.
+  **Reflection (M10):** gated and deterministic. Default OFF; when enabled it runs post‑Apply, never mutates T1/T2/T4/apply artifacts for the current turn. Rule‑based backend is pure/deterministic; LLM backend is **fixtures‑only** for determinism.
 - **Determinism:** golden logs, identity path when gates are OFF; shadow/quality traces never affect results.
 
 ## Quick start
@@ -41,6 +41,58 @@ python -m clematis --dir ./.logs rotate-logs -- --dry-run
 ```
 
 CLI details, delegation rules, and recipes live in **[docs/m8/cli.md](docs/m8/cli.md)**. Packaging/extras and quality gates: **[docs/m8/packaging_cli.md](docs/m8/packaging_cli.md)** · **[CONTRIBUTING.md](CONTRIBUTING.md)**.
+
+### M10: reflection sessions (deterministic, gated)
+
+Reflection is OFF by default. To enable the **rule‑based** deterministic backend:
+
+```yaml
+t3:
+  allow_reflection: true
+  reflection:
+    backend: "rulebased"   # deterministic, no network
+    summary_tokens: 128
+    embed: true
+    log: true
+    topk_snippets: 3
+scheduler:
+  budgets:
+    time_ms_reflection: 6000
+    ops_reflection: 5
+```
+
+To enable the **fixtures‑only LLM** backend (deterministic via fixtures):
+
+```yaml
+t3:
+  allow_reflection: true
+  reflection:
+    backend: "llm"         # fixtures-only
+  llm:
+    fixtures:
+      enabled: true
+      path: tests/fixtures/llm/reflection.json   # must be a non-empty string
+scheduler:
+  budgets:
+    time_ms_reflection: 6000
+    ops_reflection: 5
+```
+
+**Planner requirement:** reflection runs only when **both** are true:
+1) `t3.allow_reflection: true`, and
+2) the planner sets `reflection: true` in its output (PR85). The LLM planner path carries this flag via the policy state; rule‑based planners default to `false`.
+
+**Determinism invariants (current):**
+- No network; CI uses `CLEMATIS_NETWORK_BAN=1`.
+- Rule‑based summary is normalization + token clamp; embeddings use `DeterministicEmbeddingAdapter(dim=32)`.
+- Budgets enforced: wall‑clock timeout (`time_ms_reflection`) and entry cap (`ops_reflection`).
+- Fail‑soft: reflection errors never break the turn; on error/timeout, no writes are persisted.
+- Writer (PR80) fixes `ts` from `ctx.now_iso` and produces stable IDs; ops‑cap is double‑enforced.
+
+**Troubleshooting:**
+- *“Nothing happens”*: ensure `t3.allow_reflection: true` **and** planner `reflection: true`. Dry‑run modes skip reflection.
+- *LLM backend rejected*: set `t3.llm.fixtures.enabled: true` and provide a non‑empty `path`. The validator rejects empty or missing paths.
+- *Missing fixture at runtime*: seed a fixture for the canonical prompt JSON (see `FixtureLLMAdapter` docs).
 
 ### M9: deterministic parallelism (flag‑gated)
 The PR63 surface adds a validated config for deterministic parallelism. Defaults keep behavior identical to previous milestones. As of PR66, T1 can fan‑out **per active graph** via the deterministic runner, with stable merge ordering; as of PR67, minimal observability metrics are available when enabled. As of **PR68**, T2 can fan‑out across **in‑memory** shards with a deterministic, tier‑ordered merge (score‑desc, id‑asc; de‑dupe by id); as of **PR69**, T2 can also fan‑out across **LanceDB** partitions behind the same gate; OFF path remains byte‑identical. As of **PR70**, an **agent‑level parallel driver** allows multiple agents’ turns to compute concurrently while preserving deterministic logs; it is gated separately via `perf.parallel.agents`.
@@ -156,6 +208,9 @@ See **docs/m9/overview.md** for determinism rules, identity guarantees, and trou
   - `state.py` — index/labels helpers
   - `metrics.py` — assemble/finalize metrics (side‑effect free)
   - `lance_reader.py`, `quality_ops.py`, `quality_mmr.py`, `quality_norm.py`, `quality_trace.py`, `shard.py`
+- `clematis/engine/stages/t3/reflect.py` — reflection backends (`rulebased`, `llm` fixtures‑only); deterministic summary + optional embedding.
+- `clematis/engine/stages/t3/policy.py` — planner prompt + policy glue; surfaces the planner’s `reflection` flag (PR85).
+- `clematis/engine/orchestrator/reflection.py` — deterministic write path for reflection entries (stable `ts` and IDs).
 - `tests/t2/test_t2_parallel_merge.py` — gate semantics, tie‑break, tier‑ordered K‑clamp, normalization.
 - `clematis/cli/` — umbrella + wrapper subcommands (delegates to `clematis.scripts.*`).
 - `scripts/` — direct script shims (`*_hint.py`, tolerant import, single stderr hint).
@@ -186,7 +241,7 @@ to zero `ms`, drop `now`, and keep byte identity across runs.
   – pre-commit + Ruff/Mypy configs; dual Ruff CI gates (repo safety + CLI strict).
   – declare NumPy as a runtime dependency (examples smoke).
 - **M9 (complete):** deterministic parallelism — PR63–PR76 shipped (config + deterministic runner + cache safety + T1/T2/agents gates + ordered logs + identity & race tests + optional CI smoke and benches). Defaults keep parallelism OFF; identity path preserved.
-- **M10 (started):** reflection sessions — PR77 adds the gated config surface (`t3.allow_reflection`, `t3.reflection.*`, and scheduler budgets). Runtime `reflect()` and orchestrator wiring will land in PR78–PR79 (gated; disabled‑path identity preserved).
+- **M10 (in progress):** reflection sessions — PR77 (config surface), PR80–PR83 (deterministic writer + budgets + identity tests), PR84 (fixtures‑only LLM backend), PR85 (planner flag + wiring). Next: PR86 (logs/telemetry), PR87/PR88 (bench + smoke), PR89 (docs).
 
 Pre‑M8 hardening notes: **`Changelog/PreM8Hardening.txt`**.
 LLM adapter + fixtures: **`docs/m3/llm_adapter.md`**.
