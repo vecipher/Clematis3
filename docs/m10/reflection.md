@@ -15,6 +15,7 @@
 - **Gate conditions:** reflection runs only if **both** are true:
   1. `t3.allow_reflection == true`, and
   2. the planner requests it (`plan.reflection == true`; for the LLM planner this flag is carried via policy state).
+  3. not in dry‑run mode (the orchestrator’s `_dry_run` is **false**).
 - Under parallel agent batches, reflection logs are staged and flushed in deterministic order (stage ordinal reserved: `STAGE_ORD["t3_reflection.jsonl"]=10`).
 
 ## 3) Configuration (added in v0.9.0a1)
@@ -59,6 +60,21 @@ scheduler:
 - Non-negative integer bounds on `summary_tokens`, `topk_snippets`, and `ops_reflection`.
 - If `backend: llm` and `t3.allow_reflection: true` but `t3.llm.fixtures.enabled` is `false`, validation errors (fixtures-only enforcement).
 - `t3.llm.fixtures.path` must be a **non-empty string**; empty string is rejected.
+
+### 3.1 Configuration reference (keys & defaults)
+
+| Key                                   | Type / Enum                 | Default | Notes |
+|---------------------------------------|-----------------------------|---------|-------|
+| `t3.allow_reflection`                 | bool                        | `false` | Global gate; OFF preserves identity path. |
+| `t3.reflection.backend`               | `rulebased` \| `llm`        | `rulebased` | `llm` requires fixtures (no network). |
+| `t3.reflection.summary_tokens`        | int ≥ 0                     | `128`   | Whitespace token cap for the summary. |
+| `t3.reflection.embed`                 | bool                        | `true`  | When `true`, encodes summary via DeterministicEmbeddingAdapter(dim=32). |
+| `t3.reflection.log`                   | bool                        | `true`  | Emits `t3_reflection.jsonl` (not an identity log). |
+| `t3.reflection.topk_snippets`         | int ≥ 0                     | `3`     | Pass top‑K snippets from T2 into the summariser. |
+| `scheduler.budgets.time_ms_reflection`| int ms ≥ 0                  | `6000`  | Wall‑clock budget; on timeout → `reason="reflection_timeout"` and no writes. |
+| `scheduler.budgets.ops_reflection`    | int ≥ 0                     | `5`     | Max number of memory entries the reflection step may write. |
+| `t3.llm.fixtures.enabled`             | bool                        | `false` | Must be `true` to use `backend: llm`. |
+| `t3.llm.fixtures.path`                | string (non‑empty)          | —       | Required when fixtures are enabled; path to JSONL fixtures. |
 
 ## 4) APIs & Data Model
 Reflection is implemented inside `clematis/engine/stages/t3/reflect.py`.
@@ -106,6 +122,30 @@ ReflectionResult = {
 - Computes `fixture_key = sha256(prompt_json)[:12]` and queries `FixtureLLMAdapter(path).generate(prompt_json, max_tokens=summary_tokens, temperature=0.0)`.
 - Missing fixture or adapter error raises a local `FixtureMissingError`; the orchestrator fail-softs this into `reason="reflect_error:FixtureMissingError"` and writes nothing.
 
+#### 4.3 Fixture key / prompt hash helper
+
+To recompute the prompt hash used by the fixtures path:
+
+```python
+import json, hashlib
+
+prompt_obj = {
+    "agent": "unknown",
+    "plan_reflection": False,
+    "snippets": ["example snippet"],
+    "summary_tokens": 128,
+    "task": "reflect_summary",
+    "turn": 0,
+    "utter": "assistant: summary: . next: question",
+    "version": 1,
+}
+prompt_json = json.dumps(prompt_obj, sort_keys=True, separators=(",", ":"))
+print(prompt_json)
+print(hashlib.sha256(prompt_json.encode("utf-8")).hexdigest())
+```
+
+The fixtures file uses `{"prompt_hash": "<sha256 hex>", "completion": "<text>"}` lines; see `tests/fixtures/reflection_llm.jsonl`.
+
 ## 5) Logging
 Reflection uses a dedicated log file, not part of identity logs.
 
@@ -115,12 +155,13 @@ Reflection uses a dedicated log file, not part of identity logs.
 {
   "turn": 1,
   "agent": "AgentA",
-  "backend": "rulebased",
+  "backend": "rulebased",      // or "llm"
   "summary_len": 87,
   "ops_written": 1,
   "embed": true,
-  "ms": 0.0,                     // normalized to 0.0 when CI=true
-  "reason": null                 // e.g., "reflection_timeout" on budget abort
+  "ms": 0.0,                   // normalized to 0.0 when CI=true
+  "reason": null,              // e.g., "reflection_timeout" or "reflect_error:<Type>"
+  "fixture_key": "abc123def456" // present only for LLM fixtures path
 }
 ```
 
@@ -141,9 +182,11 @@ Reflection uses a dedicated log file, not part of identity logs.
    t3:
      allow_reflection: true
    ```
-2. Keep `reflection.backend: rulebased` unless you’ve enabled fixtures for an LLM backend (see example above).
-   - For LLM: set `t3.llm.fixtures.enabled: true` and provide a non-empty `t3.llm.fixtures.path`.
-3. Run a small scenario and inspect `t3_reflection.jsonl`. Identity logs must remain identical when the gate is off.
+2. Ensure the **planner requests reflection**: the plan must include `reflection: true` (the LLM policy branch stashes this flag into policy state; the orchestrator honors either the plan flag or the stashed value).
+3. Keep `reflection.backend: rulebased` unless you’ve enabled fixtures for an LLM backend (see example above).
+4. Run a small scenario and inspect `t3_reflection.jsonl`. Identity logs must remain identical when the gate is off.
+
+Examples: `examples/reflection/enabled.yaml`, `examples/reflection/llm_fixture.yaml`.
 
 > **Note:** Do not enable reflection in CI identity jobs. It is optional and should be covered by targeted reflection tests.
 
