@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 """
-PR42 — Examples smoke checker
+PR42 — Examples smoke checker (updated PR94: HS1/GEL examples)
 
 Runs a tiny, deterministic smoke over the shipped example configs to catch drift:
   • Validates each YAML with validate_config_verbose
@@ -10,6 +10,7 @@ Runs a tiny, deterministic smoke over the shipped example configs to catch drift
   • Checks determinism across repeated runs
   • When the triple gate is ON, expects the reader mode metric (t2.reader_mode)
   • Supports --examples-glob and --fail-fast
+  • Includes HS1/GEL examples (enabled/disabled)
 
 Exit non‑zero if any example fails. Keep output terse and actionable.
 """
@@ -232,7 +233,7 @@ def _run_example(
 def main(argv: Optional[Sequence[str]] = None) -> int:
     validate_config_verbose, run_t2 = _import_or_die()
 
-    p = argparse.ArgumentParser(description="Smoke-check example YAMLs for M7")
+    p = argparse.ArgumentParser(description="Run small, deterministic example configs (quality + HS1/GEL)")
     p.add_argument(
         "--examples", nargs="*", help="Specific example YAMLs to run (glob patterns supported)"
     )
@@ -242,7 +243,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         help="Additional glob patterns for examples (e.g., 'examples/quality/*.yaml')",
     )
     p.add_argument(
-        "--all", action="store_true", help="Run the default set of examples/quality/*.yaml"
+        "--all", action="store_true", help="Run the default set of examples (quality + HS1/GEL)"
     )
     p.add_argument(
         "--repeat",
@@ -267,6 +268,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         "examples/quality/mmr.yaml",
         "examples/quality/normalizer_aliases.yaml",
         "examples/quality/reader_parity.yaml",
+        # HS1/GEL substrate examples (v3): enabled (observe+decay only) and disabled (identity)
+        "examples/gel/enabled.yaml",
+        "examples/gel/disabled.yaml",
     ]
 
     targets: List[str] = []

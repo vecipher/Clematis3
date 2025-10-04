@@ -43,7 +43,21 @@ python -m clematis --dir ./.logs rotate-logs -- --dry-run
 # Some scripts need optional extras. See docs/m8/packaging_cli.md (e.g., pip install "clematis[zstd]" or "clematis[lancedb]").
 ```
 
-CLI details, delegation rules, and recipes live in **[docs/m8/cli.md](docs/m8/cli.md)**. Packaging/extras and quality gates: **[docs/m8/packaging_cli.md](docs/m8/packaging_cli.md)** · **[CONTRIBUTING.md](CONTRIBUTING.md)**.
+
+### GEL (HS1) examples
+
+Ready-to-run configs:
+
+- Enabled (observe + decay only; ops OFF): `examples/gel/enabled.yaml`
+- Disabled (identity path): `examples/gel/disabled.yaml`
+
+Run:
+```bash
+python scripts/examples_smoke.py --config examples/gel/enabled.yaml
+python scripts/examples_smoke.py --config examples/gel/disabled.yaml
+# or the bundled set
+python scripts/examples_smoke.py --all
+```
 
 ### M10: reflection sessions (deterministic, gated)
 
@@ -233,6 +247,7 @@ See **docs/m9/overview.md** for determinism rules, identity guarantees, and trou
 - `clematis/cli/` — umbrella + wrapper subcommands (delegates to `clematis.scripts.*`).
 - `scripts/` — direct script shims (`*_hint.py`, tolerant import, single stderr hint).
 - `clematis/scripts/` — local microbenches and helpers (e.g., `bench_t1.py`, `bench_t2.py`).
+- `examples/gel/` — HS1/GEL substrate example configs (enabled vs disabled).
 - `docs/` — milestone docs and updates (see `docs/m9/overview.md`, `docs/m9/parallel_helper.md`, `docs/m9/cache_safety.md`).
 - `tests/` — deterministic tests, golden comparisons, CLI checks.
 

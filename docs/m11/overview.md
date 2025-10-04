@@ -173,6 +173,26 @@ graph:
   promotion: { enabled: false }
 ```
 
+## Examples
+
+The repository includes ready-to-run configs:
+
+- **Enabled (observe + decay only; ops OFF):** `examples/gel/enabled.yaml`
+- **Disabled (identity path):** `examples/gel/disabled.yaml`
+
+Run either via the smoke harness:
+
+```bash
+python scripts/examples_smoke.py --config examples/gel/enabled.yaml
+python scripts/examples_smoke.py --config examples/gel/disabled.yaml
+```
+
+Or run the built-in set (includes both):
+
+```bash
+python scripts/examples_smoke.py --all
+```
+
 ---
 
 ## Snapshot schema
@@ -200,17 +220,9 @@ v4 introduces a *field‑control nudge planner* that consumes GEL as a potential
 
 ---
 
-## Pointers
-
-- Follow‑ups for M11:
-  - PR92: Identity assertions w/ `graph.*` in config (disabled path).
-  - PR93: Runtime smoke asserting no `gel.jsonl` when disabled.
-  - PR94: Example configs (`examples/gel/{enabled,disabled}.yaml`) + doc polish.
-- See also: **Reflection (M10)** → `docs/m10/reflection.md` (section “Next: HS1/GEL”).
-
 ## Tests & Identity (how we verify this)
 
-**Status:** ✅ PR92 and ✅ PR93 **landed**. Disabled path stays byte-identical and produces **no GEL artifacts**.
+**Status:** ✅ PR92, ✅ PR93, and ✅ PR94 **landed**. Disabled path stays byte‑identical and produces **no GEL artifacts**. Examples ship under `examples/gel/`.
 
 - **PR92 — Config + runtime log identity**
   - `tests/test_identity_disabled_path.py::test_disabled_path_identity_config_roundtrip_graph_subtree`
@@ -230,7 +242,9 @@ v4 introduces a *field‑control nudge planner* that consumes GEL as a potential
 
 These tests run with `CI=true` and `CLEMATIS_NETWORK_BAN=1`. If `run_smoke_turn` is unavailable on a branch, runtime tests **skip** rather than fail.
 
+---
+
 ## Pointers
 
-- Next up for M11: **PR94** — example configs (`examples/gel/{enabled,disabled}.yaml`) + doc polish.
+- M11 (HS1/GEL) substrate docs + examples: complete (PR91–PR94). Close out with **PR96 — CHANGELOG & milestone**.
 - See also: **Reflection (M10)** → `docs/m10/reflection.md` (section “Next: HS1/GEL”).
