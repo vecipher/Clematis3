@@ -13,7 +13,8 @@ except Exception:  # pragma: no cover
 try:
     from tests.helpers.identity import _strip_perf_and_quality_and_graph as _strip
 except Exception:  # pragma: no cover
-    _strip = lambda x: x  # fallback; test will still check presence of keys
+    def _strip(x):
+        return x  # fallback; test will still check presence of keys
 
 
 def test_accepts_native_t1_block_minimal():
