@@ -35,3 +35,54 @@ scheduler:
 #
 # Note: until PR78/PR79 integrate runtime reflection, enabling this overlay only configures
 # the gate; it introduces no behavior change in the turn loop.
+
+# Reflection (M10) — enabled overlay (rule-based, deterministic)
+# Merge with your base config via your loader or CLI flag, e.g.:
+#   -c examples/reflection/enabled.yaml
+#
+# Invariants:
+# • Default identity path unchanged; this overlay only enables the reflection gate.
+# • Reflection runs post-Apply when the planner requests it (plan.reflection=true) and not in dry-run.
+# • No network; deterministic outputs. t3_reflection.jsonl is NOT part of identity logs.
+# • In CI, timing is normalized to 0.0 ms.
+
+t3:
+  allow_reflection: true
+  reflection:
+    backend: rulebased          # deterministic summariser; no fixtures required
+    summary_tokens: 128
+    embed: true                 # DeterministicEmbeddingAdapter(dim=32)
+    log: true                   # emits t3_reflection.jsonl (non-identity)
+    topk_snippets: 3
+
+scheduler:
+  budgets:
+    time_ms_reflection: 6000    # wall budget for the reflection step
+    ops_reflection: 5           # cap on memory entries written by reflection
+
+# ── Quick usage ──────────────────────────────────────────────────────────────
+# Microbench (deterministic JSON to stdout):
+#   python -m clematis.scripts.bench_reflection -c examples/reflection/enabled.yaml
+#
+# Orchestrator path (after tests land and planner requests reflection):
+#   pytest -q tests/reflection/test_reflection_determinism.py
+#
+# Notes:
+#   • Reflection never mutates T1/T2/T4/Apply artifacts for the current turn.
+#   • Identity logs remain byte-for-byte unchanged; reflection logs are separate.
+#
+# ── LLM backend (fixtures-only; deterministic) ───────────────────────────────
+# Requires PR84 and a seeded fixtures file. To switch:
+#
+# t3:
+#   allow_reflection: true
+#   reflection:
+#     backend: llm
+#     summary_tokens: 128
+#     embed: true
+#     log: true
+#     topk_snippets: 3
+#   llm:
+#     fixtures:
+#       enabled: true
+#       path: tests/fixtures/reflection_llm.jsonl

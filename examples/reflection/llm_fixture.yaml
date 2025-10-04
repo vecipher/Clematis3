@@ -1,0 +1,43 @@
+
+
+# Reflection (M10) — LLM fixtures overlay (deterministic, no network)
+# Merge with your base config via your loader or CLI flag, e.g.:
+#   -c examples/reflection/llm_fixture.yaml
+#
+# Requirements:
+# • PR84 fixtures path is implemented in validator.
+# • A seeded fixtures file exists; otherwise reflect() will fail‑soft with reason="reflect_error:FixtureMissingError".
+# • Identity logs remain unchanged; t3_reflection.jsonl is non‑identity and time is normalized in CI.
+#
+# Notes:
+# • backend: llm uses FixtureLLMAdapter; prompt is canonicalized; output is deterministic from fixtures.
+# • Embeddings still use DeterministicEmbeddingAdapter(dim=32) when embed: true.
+
+t3:
+  allow_reflection: true
+  reflection:
+    backend: llm
+    summary_tokens: 128
+    embed: true
+    log: true
+    topk_snippets: 3
+  llm:
+    fixtures:
+      enabled: true
+      path: tests/fixtures/reflection_llm.jsonl   # relative to repo root
+
+scheduler:
+  budgets:
+    time_ms_reflection: 6000
+    ops_reflection: 5
+
+# ── Quick usage ──────────────────────────────────────────────────────────────
+# Microbench (deterministic JSON to stdout, includes fixture_key):
+#   python -m clematis.scripts.bench_reflection -c examples/reflection/llm_fixture.yaml
+#
+# Orchestrator path (after tests land and planner requests reflection):
+#   pytest -q tests/reflection/test_reflection_llm_fixture.py
+#
+# Fixture seeding tip:
+#   # Use your fixture-key tool or script to compute the key for a given prompt JSON,
+#   # then add a record under tests/fixtures/reflection_llm.jsonl with that key and output.
