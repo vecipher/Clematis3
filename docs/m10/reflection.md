@@ -1,6 +1,6 @@
 # M10 — Reflection Sessions (Deterministic, Gated)
 
-**Status:** in progress. Starting from **v0.9.0a1** the configuration surface is present but **disabled by default**. Enabling reflection must not change the identity path for prior milestones when the gate is off. Landed to date: PR77 (config), PR80–PR83 (writer/budgets/tests), PR84 (fixtures-only LLM backend), PR85 (planner flag & wiring), PR86 (telemetry & trace), **PR87 (microbench & examples)**, **PR88 (optional CI smoke)**.
+**Status:** complete and gated. The configuration surface has been present since **v0.9.0a1** and remains **disabled by default**; the feature was finalized across PR77 and PR80–PR90. Enabling reflection must not change the identity path for prior milestones when the gate is off. Landed: PR77 (config), PR80–PR83 (writer/budgets/tests), PR84 (fixtures‑only LLM backend), PR85 (planner flag & wiring), PR86 (telemetry & trace), **PR87 (microbench & examples)**, **PR88 (optional CI smoke)**, **PR89 (docs)**, **PR90 (goldens/identity maintenance)**.
 
 ## 1) Scope & Invariants
 - Add a post-turn reflection step that can **summarize** the turn and **persist** small memory entries for future retrieval.
@@ -281,3 +281,9 @@ An opt‑in GitHub Actions workflow validates the microbench paths without touch
 **Determinism**
 - `CI=true` is set in the workflow to normalize `"ms": 0.0`.
 - No network access is required; fixtures are local and deterministic.
+
+## Next: HS1 / GEL (M11)
+
+Reflection in v3 is deterministic and strictly gated. The next layer is HS1/GEL (M11), which maintains an optional concept graph via co‑activation updates and half‑life decay, with conservative maintenance passes (merge/split/promotion).
+See **[M11 — Field‑Control GEL (HS1) Overview](../m11/overview.md)**.
+*(Note: the “field‑control nudge planner” is a v4 feature; M11 documents the substrate only.)*

@@ -2,9 +2,11 @@
 
 Clematis is a deterministic, turn‑based scaffold for agential AI. It models agents with concept graphs and tiered reasoning (T1→T4), uses small LLMs where needed, and keeps runtime behavior reproducible (no hidden network calls in tests/CI).
 
-> **Status:** **v0.9.0a1** (2025‑10‑03) — **M9 complete** ✅. Deterministic parallelism shipped behind flags; default path remains byte‑identical.
+> **Status:** **v0.9.0a1** (2025‑10‑03) — **M10 complete** ✅. Defaults unchanged; all reflection paths are **gated and deterministic**. M9 deterministic parallelism remains flag‑gated and OFF by default.
 >
-> **M10 — Reflection Sessions (in progress):** Config surface (**PR77**, gate OFF by default), deterministic writer + budgets (**PR80–PR83**), fixtures‑only LLM backend (**PR84**), planner flag wiring (**PR85**), telemetry/trace (**PR86**), microbench & examples (**PR87**), and optional CI smoke (**PR88**) are landed. Docs are being polished in **PR89**. See **[docs/m10/reflection.md](docs/m10/reflection.md)**. For M9 details, see **[docs/m9/overview.md](docs/m9/overview.md)**, **[docs/m9/parallel_helper.md](docs/m9/parallel_helper.md)**, **[docs/refactors/PR76](docs/refactors/PR76)**, and **[docs/m9/migration.md](docs/m9/migration.md)**.
+> **M10 — Reflection Sessions (complete):** Finalized across **PR77** and **PR80–PR90** (config, writer/budgets/tests, fixtures‑only LLM backend, planner flag, telemetry/trace, microbench, optional CI smoke, docs, goldens/identity maintenance). See **[docs/m10/reflection.md](docs/m10/reflection.md)**.
+>
+> **M11 — Field‑Control GEL (HS1):** Substrate documented (contracts + optional ops, default **OFF**). No ranking changes by default; identity path preserved. See **[docs/m11/overview.md](docs/m11/overview.md)**.
 
 ---
 
@@ -22,6 +24,7 @@ Clematis is a deterministic, turn‑based scaffold for agential AI. It models ag
 - **Stages:**
   T1 keyword/seeded propagation → T2 semantic retrieval (+ residual) → T3 bounded policy (rule‑based by default; fixtures‑only LLM backend available) → T4 meta‑filter & apply/persist.
   **Reflection (M10):** gated and deterministic. Default OFF; when enabled it runs post‑Apply, never mutates T1/T2/T4/apply artifacts for the current turn. Rule‑based backend is pure/deterministic; LLM backend is **fixtures‑only** for determinism.
+  **GEL (M11):** optional field‑control substrate (co‑activation update + half‑life decay; merge/split/promotion available), **default OFF**. See **[docs/m11/overview.md](docs/m11/overview.md)**.
 - **Determinism:** golden logs, identity path when gates are OFF; shadow/quality traces never affect results.
 
 ## Quick start
@@ -254,7 +257,8 @@ When `CI=true`, log writes route through `clematis/engine/orchestrator/logging.a
   – pre-commit + Ruff/Mypy configs; dual Ruff CI gates (repo safety + CLI strict).
   – declare NumPy as a runtime dependency (examples smoke).
 - **M9 (complete):** deterministic parallelism — PR63–PR76 shipped (config + deterministic runner + cache safety + T1/T2/agents gates + ordered logs + identity & race tests + optional CI smoke and benches). Defaults keep parallelism OFF; identity path preserved.
-- **M10 (in progress):** reflection sessions — PR77 (config surface), PR80–PR83 (deterministic writer + budgets + identity tests), PR84 (fixtures‑only LLM backend), PR85 (planner flag + wiring), **PR86 (telemetry & trace)**. PR87 (microbench) and PR88 (optional smoke) landed; PR89 (docs) in progress.
+- **M10 (complete):** reflection sessions — PR77 (config surface), PR80–PR83 (deterministic writer + budgets + identity tests), PR84 (fixtures‑only LLM backend), PR85 (planner flag + wiring), PR86 (telemetry & trace), PR87 (microbench & examples), PR88 (optional smoke), PR89 (docs), PR90 (goldens/identity maintenance). Defaults keep reflection OFF; identity path preserved.
+- **M11 (HS1/GEL, substrate documented):** contracts + plumbing present; observe/update + decay enabled only when `graph.enabled=true`; merge/split/promotion documented but **OFF** by default; disabled path is byte‑identical. See **docs/m11/overview.md**.
 
 Pre‑M8 hardening notes: **`Changelog/PreM8Hardening.txt`**.
 LLM adapter + fixtures: **`docs/m3/llm_adapter.md`**.
