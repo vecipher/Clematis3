@@ -9,6 +9,48 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added (PR80 — M10-04: Reflection write path; deterministic)
+- **Writer module:** `clematis/engine/orchestrator/reflection.py` with `write_reflection_entries(ctx, state, cfg_root, result) -> WriteReport`.
+- **Determinism:** fixed `ts_iso` from `ctx.now_iso`; stable episode IDs `refl-<turn>-<agent>-<slot>-<sha12>`.
+- **Schema clamp:** `{id, owner, ts, kind, tags, text[, vec_full]}`; double-enforces `ops_reflection` cap.
+- **Fail‑soft:** index missing/add‑error logs `memory_write_error` and never crash the turn.
+- **Hook:** orchestrator sets `ctx.now_iso` once and stashes `ctx._reflection_write_report` after writes.
+- **Tests:** `tests/reflection/test_reflection_write_path.py` — determinism (IDs/ts), ops‑cap reporting, error resilience.
+
+### Added (PR81 — M10-05: Log staging & ordering for reflection)
+- **Staging:** `engine/util/io_logging.py` adds `STAGE_ORD["t3_reflection.jsonl"] = 10` without renumbering prior ordinals.
+- **Identity:** `_IDENTITY_LOGS` unchanged (reflection logs are **not** part of identity).
+- **Test:** `tests/reflection/test_reflection_stage_ord.py` asserts ordinal and identity exclusion.
+
+### Added (PR82 — M10-06: Disabled‑path identity for reflection)
+- **Test:** `tests/reflection/test_reflection_disabled_identity.py` runs a demo twice with reflection OFF; byte‑compares `t1.jsonl`, `t2.jsonl`, `t4.jsonl`, `apply.jsonl`, `turn.jsonl`; asserts **absence** of `t3_reflection.jsonl`.
+- **Invariant:** M9 identity remains intact when `t3.allow_reflection=false`.
+
+### Added (PR83 — M10-07: Reflection determinism, budget, ops cap)
+- **Determinism:** identical inputs ⇒ byte‑identical `ReflectionResult`, memory rows (id/ts/text/tags/vec), and `WriteReport`.
+- **Budgets:** wall‑clock timeout (`time_ms_reflection`) sets `metrics.reason="reflection_timeout"`; produces **no writes**.
+- **Ops cap:** writer enforces `ops_reflection` cap even if the backend returns more entries.
+- **Tests:** `tests/reflection/test_reflection_determinism.py`, `..._budget_timeout.py`, `..._ops_cap.py`.
+
+### Added (PR84 — M10-08: LLM backend (fixtures‑only); default OFF)
+- **Backend switch:** `t3/reflect.py` keeps rule‑based path unchanged and adds an `llm` path via `FixtureLLMAdapter`.
+- **Canonical prompt:** JSON with sorted keys and whitespace‑collapsed fields; `fixture_key = sha256(prompt_json)[:12]`.
+- **Determinism:** `generate(..., temperature=0.0)`; output clamped via existing token truncator; deterministic embeddings when `embed=true`.
+- **Validation:** enabling `backend=llm` **requires** fixtures; validator rejects empty/missing `t3.llm.fixtures.path`.
+- **Exports:** `FixtureMissingError` re‑exported from `t3/__init__.py`; orchestrator wraps failures as `metrics.reason="reflect_error:<Type>"`.
+- **Tests:** `tests/reflection/test_reflection_llm_*.py` — fixture determinism and missing‑fixture error.
+
+### Added (PR85 — M10-09: Policy glue — planner flag & schema wiring)
+- **Schema:** `engine/policy/json_schemas.py` allows top‑level `reflection: boolean` (default `false`), `additionalProperties=false` preserved.
+- **Sanitizer:** `engine/policy/sanitize.py` coerces boolean‑likes (`"true"/"false"`, `1/0`); `sanitize_plan(...)` validates `ops` and returns normalized `{"reflection": bool}` for tests.
+- **Planner prompt:** `t3/policy.py` requires `reflection` in the JSON and **stashes** the LLM planner’s flag on `state._planner_reflection_flag` (keeps return shape stable).
+- **Orchestrator:** `core._run_reflection_if_enabled(...)` honors `Plan.reflection` **or** `state._planner_reflection_flag` for gate/log/dry‑run.
+- **Tests:** `tests/policy/test_reflection_flag.py` and `tests/reflection/test_reflection_gate_plumbing.py` cover coercion and gate plumbing.
+
+### Docs
+- **README:** M10 status updated; added “Reflection sessions (deterministic, gated)” quick‑start (rule‑based & fixtures‑only).
+- **docs/m10/reflection.md:** gate conditions, LLM fixtures example, `ReflectionResult`/metrics schema, fixture key notes, troubleshooting.
+
 ## [0.9.0a1] - 2025-10-03
 
 ### Added (PR77 — M10-01: Reflection gate & budgets; defaults OFF)

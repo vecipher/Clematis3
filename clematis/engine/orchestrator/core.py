@@ -270,7 +270,17 @@ def _run_reflection_if_enabled(ctx, state, plan, utter, t2_obj):
             cfg = {}
     t3cfg = (cfg.get("t3") or {}) if isinstance(cfg, dict) else {}
     allow_reflection = bool(t3cfg.get("allow_reflection", False))
-    if not (allow_reflection and bool(getattr(plan, "reflection", False))):
+    # Accept either a Plan.reflection flag or a stashed planner flag on state (LLM path)
+    plan_reflect = bool(getattr(plan, "reflection", False))
+    if not plan_reflect:
+        try:
+            if isinstance(state, dict):
+                plan_reflect = bool(state.get("_planner_reflection_flag", False))
+            else:
+                plan_reflect = bool(getattr(state, "_planner_reflection_flag", False))
+        except Exception:
+            plan_reflect = False
+    if not (allow_reflection and plan_reflect):
         return None
 
     ref_cfg = (t3cfg.get("reflection") or {})
@@ -892,6 +902,16 @@ class Orchestrator:
         policy_backend = (
             str(t3cfg.get("backend", "rulebased")) if isinstance(t3cfg, dict) else "rulebased"
         )
+        # Compute reflection flag for logging: Plan.reflection or stashed planner flag
+        _plan_reflection_flag = bool(getattr(plan, "reflection", False))
+        if not _plan_reflection_flag:
+            try:
+                if isinstance(state, dict):
+                    _plan_reflection_flag = bool(state.get("_planner_reflection_flag", False))
+                else:
+                    _plan_reflection_flag = bool(getattr(state, "_planner_reflection_flag", False))
+            except Exception:
+                _plan_reflection_flag = False
         _append_jsonl(
             "t3_plan.jsonl",
             {
@@ -907,7 +927,7 @@ class Orchestrator:
                 "ops_counts": ops_counts,
                 "requested_retrieve": bool(requested_retrieve),
                 "rag_used": bool(rag_metrics.get("rag_used", False)),
-                "reflection": bool(getattr(plan, "reflection", False)),
+                "reflection": _plan_reflection_flag,
                 "ms_deliberate": plan_ms,
                 "ms_rag": rag_ms,
                 **({"now": now} if now else {}),
@@ -999,7 +1019,16 @@ class Orchestrator:
                             "cache_hit": bool(cache_hit),
                         },
                     )
-                    setattr(ctx, "_dryrun_plan_reflection", bool(getattr(plan, "reflection", False)))
+                    try:
+                        _dry_flag = bool(getattr(plan, "reflection", False))
+                        if not _dry_flag:
+                            if isinstance(state, dict):
+                                _dry_flag = bool(state.get("_planner_reflection_flag", False))
+                            else:
+                                _dry_flag = bool(getattr(state, "_planner_reflection_flag", False))
+                        setattr(ctx, "_dryrun_plan_reflection", _dry_flag)
+                    except Exception:
+                        pass
                 except Exception:
                     pass
                 return TurnResult(line=utter if 'utter' in locals() else "", events=[])

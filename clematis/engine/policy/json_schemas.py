@@ -1,7 +1,7 @@
 """JSON Schemas used by the T3 LLM policy.
 
 These schemas are intentionally small and dependency-free so CI stays deterministic.
-Keep the limits in sync with the enforcement in `sanitize.parse_and_validate`.
+Keep the limits and the `reflection` flag in sync with the enforcement in `sanitize.parse_and_validate`.
 """
 
 from typing import Final, Dict, Any
@@ -33,6 +33,10 @@ PLANNER_V1: Final[Dict[str, Any]] = {
             "minLength": 1,
             "maxLength": RATIONALE_MAX_LEN,
         },
+        "reflection": {
+            "type": "boolean",
+            "default": False
+        }
     },
 }
 
