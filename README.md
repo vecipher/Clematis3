@@ -4,7 +4,7 @@ Clematis is a deterministic, turn‑based scaffold for agential AI. It models ag
 
 > **Status:** **v0.9.0a1** (2025‑10‑03) — **M9 complete** ✅. Deterministic parallelism shipped behind flags; default path remains byte‑identical.
 >
-> **M10 — Reflection Sessions (in progress):** Config surface **PR77** (gate OFF by default), deterministic writer + budgets **PR80–PR83**, fixtures‑only LLM backend **PR84**, planner flag wiring **PR85**, telemetry/trace **PR86**, **microbench & examples **PR87**, and **optional CI smoke **PR88** are landed. Docs are being polished in **PR89**. See **[docs/m10/reflection.md](docs/m10/reflection.md)**. For M9 details, see **[docs/m9/overview.md](docs/m9/overview.md)**, **[docs/m9/parallel_helper.md](docs/m9/parallel_helper.md)**, **[docs/refactors/PR76](docs/refactors/PR76)**, and **[docs/m9/migration.md](docs/m9/migration.md)**.
+> **M10 — Reflection Sessions (in progress):** Config surface (**PR77**, gate OFF by default), deterministic writer + budgets (**PR80–PR83**), fixtures‑only LLM backend (**PR84**), planner flag wiring (**PR85**), telemetry/trace (**PR86**), microbench & examples (**PR87**), and optional CI smoke (**PR88**) are landed. Docs are being polished in **PR89**. See **[docs/m10/reflection.md](docs/m10/reflection.md)**. For M9 details, see **[docs/m9/overview.md](docs/m9/overview.md)**, **[docs/m9/parallel_helper.md](docs/m9/parallel_helper.md)**, **[docs/refactors/PR76](docs/refactors/PR76)**, and **[docs/m9/migration.md](docs/m9/migration.md)**.
 
 ---
 
@@ -78,9 +78,10 @@ scheduler:
     ops_reflection: 5
 ```
 
-**Planner requirement:** reflection runs only when **both** are true:
+**Planner requirement:** reflection runs only when **all** are true:
 1) `t3.allow_reflection: true`, and
-2) the planner sets `reflection: true` in its output (PR85). The LLM planner path carries this flag via the policy state; rule‑based planners default to `false`.
+2) the planner sets `reflection: true` in its output (PR85). The LLM planner path carries this flag via the policy state; the orchestrator honors either the explicit plan flag or the stashed value.
+3) not in dry‑run mode (the orchestrator’s `_dry_run` is **false**).
 
 **Determinism invariants (current):**
 - No network; CI uses `CLEMATIS_NETWORK_BAN=1`.
@@ -240,7 +241,7 @@ See **docs/m9/overview.md** for determinism rules, identity guarantees, and trou
   If both are set, `CLEMATIS_LOG_DIR` wins; otherwise we fall back to `<repo>/.logs`.
   The directory is created on demand so wrappers/scripts can log immediately.
 
-When `CI=true`, log writes route through `clematis/io/log.append_jsonl`, which applies `clematis/engine/util/io_logging.normalize_for_identity`. Identity logs keep their existing rules (e.g., drop `now`, clamp times) to ensure byte identity. For the reflection stream `t3_reflection.jsonl`, only the `ms` field is normalized to `0.0`; this stream is **not** part of the identity set.
+When `CI=true`, log writes route through `clematis/engine/orchestrator/logging.append_jsonl`, which applies `clematis/engine/util/io_logging.normalize_for_identity`. Identity logs keep their existing rules (e.g., drop `now`, clamp times) to ensure byte identity. For the reflection stream `t3_reflection.jsonl`, only the `ms` field is normalized to `0.0`; this stream is **not** part of the identity set.
 
 ## Milestones snapshot
 - **M1–M4:** core stages + apply/persist + logs.
@@ -253,7 +254,7 @@ When `CI=true`, log writes route through `clematis/io/log.append_jsonl`, which a
   – pre-commit + Ruff/Mypy configs; dual Ruff CI gates (repo safety + CLI strict).
   – declare NumPy as a runtime dependency (examples smoke).
 - **M9 (complete):** deterministic parallelism — PR63–PR76 shipped (config + deterministic runner + cache safety + T1/T2/agents gates + ordered logs + identity & race tests + optional CI smoke and benches). Defaults keep parallelism OFF; identity path preserved.
-- **M10 (in progress):** reflection sessions — PR77 (config surface), PR80–PR83 (deterministic writer + budgets + identity tests), PR84 (fixtures‑only LLM backend), PR85 (planner flag + wiring), **PR86 (telemetry & trace)**. Next: PR87/PR88 (bench + smoke), PR89 (docs).
+- **M10 (in progress):** reflection sessions — PR77 (config surface), PR80–PR83 (deterministic writer + budgets + identity tests), PR84 (fixtures‑only LLM backend), PR85 (planner flag + wiring), **PR86 (telemetry & trace)**. PR87 (microbench) and PR88 (optional smoke) landed; PR89 (docs) in progress.
 
 Pre‑M8 hardening notes: **`Changelog/PreM8Hardening.txt`**.
 LLM adapter + fixtures: **`docs/m3/llm_adapter.md`**.

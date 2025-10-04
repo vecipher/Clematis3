@@ -95,11 +95,24 @@ All notable changes to this project will be documented in this file.
   - Uploads `bench_rule.json` and `bench_llm.json` as artifacts.
 - **Determinism:** Sets `CI=true` and `CLEMATIS_NETWORK_BAN=1`; no network; `"ms"` normalized to `0.0`; identity logs untouched.
 
+#### Updates (polish)
+- **Action summary:** bench JSON is appended to the GitHub job summary via `$GITHUB_STEP_SUMMARY` for quick inspection (no artifact download required).
+- **Fixtures guard:** the LLM fixtures step is conditional on `hashFiles('tests/fixtures/reflection_llm.jsonl')`; when absent, a friendly skipped step is shown and summarized.
+
 ### Docs
 - **README:** M10 status updated; added “Reflection sessions (deterministic, gated)” quick‑start (rule‑based & fixtures‑only).
 - **docs/m10/reflection.md:** gate conditions, LLM fixtures example, `ReflectionResult`/metrics schema, fixture key notes, troubleshooting.
 - **README (PR87/PR88):** adds a “Reflection Microbench (PR87)” quick‑start (commands for rule‑based & fixtures) and links to the optional “Reflection Smoke (optional)” workflow.
 - **docs/m10/reflection.md (PR87/PR88):** adds §12 “Microbench (PR87)” and §13 “Optional CI Smoke (PR88)”, and corrects the fixtures path to `tests/fixtures/reflection_llm.jsonl`.
+
+
+### Docs (PR89 — M10-13: Reflection docs finalize & cross-links)
+- **docs/m10/reflection.md:** finalized with (a) explicit dry‑run gate in the conditions, (b) §3.1 **Configuration reference** table (keys, types, defaults), (c) telemetry schema now documents optional `fixture_key` for the LLM fixtures path, (d) **fixture key helper** snippet to recompute the SHA‑256 prompt hash, (e) enablement requires the **planner** to set `reflection: true`, plus links to `examples/reflection/{enabled.yaml,llm_fixture.yaml}`.
+- **README:** tightened M10 status line; corrected CI logging path to `engine/orchestrator/logging.append_jsonl`; clarified that the orchestrator honors either the plan flag or the stashed policy flag; added “no dry‑run” as a gate condition.
+- **docs/m9/overview.md:** short banner pointing forward to M10 dossier.
+
+### Changed
+- **.gitignore:** deduplicated entries; clarified JSONL ignore patterns for local logs while keeping identity goldens intact.
 
 ## [0.9.0a1] - 2025-10-03
 

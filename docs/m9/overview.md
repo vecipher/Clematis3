@@ -1,7 +1,7 @@
 
 # Milestone 9 — Deterministic Parallelism (Overview)
 
-> **Status:** M9 is **complete**. As of **v0.9.0a1** (2025-10-03) we begin **M10 — Reflection Sessions**. For the reflection config surface (gate OFF by default), see [docs/m10/reflection.md](../m10/reflection.md).
+> **Status:** M9 is **complete**. As of **v0.9.0a1** (2025-10-03) we begin **M10 — Reflection Sessions**. For the reflection config surface (gate OFF by default), see [docs/m10/reflection.md](../m10/reflection.md). For microbench and the optional CI smoke, see the same M10 doc.
 
 
 This page summarizes the M9 deterministic parallelism work across **PR63–PR76**: the config surface, determinism/identity guarantees, and how to enable/verify it. Defaults keep parallel execution **OFF** and preserve byte‑for‑byte identity.
@@ -35,7 +35,7 @@ Provide a stable, validated config contract for later PRs (PR64+). Teams can sta
 ## Determinism & identity (summary)
 
 - **Ordered logs.** Parallel paths **stage** logs with a stable composite key *(turn_id, stage_ord, slice_idx, seq)*, then **ordered‑write** → results are **sequential‑identical** for `t1/t2/t4/apply/turn/scheduler`.
-- **Identity normalization (CI).** All `append_jsonl` calls flow through `clematis/io/log.py` → `clematis/engine/util/io_logging.normalize_for_identity`, zeroing `ms`/`durations_ms` and dropping `now` when `CI=true` so goldens stay byte‑identical.
+- **Identity normalization (CI).** All `append_jsonl` calls flow through `clematis/engine/orchestrator/logging.append_jsonl` → `clematis/engine/util/io_logging.normalize_for_identity`, zeroing `ms`/`durations_ms` and dropping `now` when `CI=true` so goldens stay byte‑identical.
 - **Back‑pressure.** When stager buffers hit the cap, we raise `LOG_STAGING_BACKPRESSURE` and deterministically **drain → flush → retry**.
 - **Pools & merges.** Work submission uses a fixed order; merges tie‑break lexicographically by ID (and tier‑stable in T2) to remove nondeterminism.
 - **Tests.** `tests/integration/test_identity_parallel.py` asserts byte equality vs sequential; contention and tiny‑stager cases also remain identical.
@@ -261,8 +261,8 @@ t2:
 
 See **docs/m9/benchmarks.md** for bench usage, shapes, and caveats.
 
--## Cross‑references
 ## Cross‑references
+- M10 — Reflection Sessions: see [docs/m10/reflection.md](../m10/reflection.md) for the next milestone (deterministic, gated).
 - PR76 — T2 refactor: extraction of quality/state/metrics and file moves under
 		t2/; see [docs/refactors/PR76](../refactors/PR76) for details.
 - PR63 surface (this page): config keys, normalization, and identity guarantees.
@@ -395,7 +395,7 @@ perf:
     `t1.jsonl` → `t2.jsonl` → `t3_plan.jsonl` → `t3_dialogue.jsonl` → `t4.jsonl` → `apply.jsonl` → `health.jsonl` → `turn.jsonl` → `scheduler.jsonl`.
   - Bounded memory (`byte_limit`, default 32 MB). On limit, raise `LOG_STAGING_BACKPRESSURE` to trigger a deterministic drain→flush→retry cycle.
 - **Orchestrator split** — the sequential loop stays in `orchestrator/core.py`, log plumbing moved to `orchestrator/logging.py`, and the agent fan-out helpers (`_run_turn_compute`, `_run_agents_parallel_batch`) live in the new `orchestrator/parallel.py`; the parallel path stages *all* compute-phase logs plus commit `apply.jsonl` entries, then performs one ordered flush.
-- **Unbuffered writer** (`clematis/io/log.py::_append_jsonl_unbuffered`) mirrors the exact JSON serialization of `append_jsonl(...)` to preserve byte parity.
+- **Unbuffered writer** (`clematis/io/log.py::_append_jsonl_unbuffered`) mirrors the exact JSON serialization of the production writer to preserve byte parity. **Note:** production writes now go through `clematis/engine/orchestrator/logging.append_jsonl`.
 
 ### Gate & invariants
 - **Enabled only** when all are true:
