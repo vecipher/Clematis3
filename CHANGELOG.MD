@@ -8,7 +8,52 @@ All notable changes to this project will be documented in this file.
 
 
 
+
 ## [Unreleased]
+**Summary:** PR98 lands the Python FFI surface and strict‑parity harness (defaults OFF; identity‑safe).
+
+
+### Added (PR98 — M12-02: Python FFI surface & strict-parity harness; identity-safe)
+- **Native stub (FFI shape):** `clematis/native/t1.py`
+  - Implements `propagate_one_graph_rs(...)` (Python) with canonical dtypes (`int32`/`float32`) and forward-compatible `rel_code`.
+  - Packs decay/limits from positional args: `{rate, floor, radius_cap, iter_cap_layers, node_budget}`; lazy-imports `_t1_one_graph_python_inner(...)`.
+  - `available() -> False` by default; tests may monkeypatch to `True`.
+- **Engine wiring (gated, lazy):** `clematis/engine/stages/t1.py`
+  - Factors legacy inner loop into `_t1_one_graph_python_inner(...)` (no behavior change).
+  - Adds `_t1_one_graph_native(...)` (calls the Python stub), `_native_t1_allowed(cfg)`, and `_t1_one_graph_dispatch(...)`.
+  - Dispatcher logic:
+    ```
+    if cfg.perf.native.t1.enabled and native.available() and _native_t1_allowed(cfg):
+        if strict_parity: compute both & assert exact equality
+        else:             return native result
+    else:
+        return python result
+    ```
+  - All imports of `clematis.native` are **lazy**; default path untouched.
+- **Tests:** (pure Python)
+  - `tests/native/test_contract_shapes.py` — exercises the FFI call shape; asserts dtypes/shapes; metrics dict present.
+  - `tests/native/test_strict_parity_stub.py` — monkeypatches `available()->True`; strict-parity compares stub vs python inner; must match exactly.
+- **Invariants**
+  - Native **OFF by default**; disabled-path identity stays byte-identical to `0.9.0a2`.
+  - No Rust code yet; no wheels/CI matrix changes.
+  - Any attempt to import the native kernel when unavailable remains inert (stub).
+- **How to verify (quick):**
+  ```
+  pytest -q tests/native/test_contract_shapes.py
+  pytest -q tests/native/test_strict_parity_stub.py
+  pytest -q              # full sweep; identity unchanged
+  rg "^from clematis\\.native" -n clematis/engine/stages/t1.py || true  # only lazy imports inside functions
+  ```
+- **Risks / notes**
+  - Parity mode computes both paths; failures raise `AssertionError` with short messages.
+  - Keep `_t1_one_graph_python_inner(...)` a verbatim move of the legacy inner loop to ensure a trustworthy baseline for PR99.
+
+#### Roadmap
+- **PR99:** Rust kernel (perf‑OFF semantics) + parity tests.
+- **PR100:** Wheels/CI matrix; installed-wheel tests.
+- **PR101–102:** Bench doc + diagnostics/hardening; optional nightly strict-parity job.
+- **PR103:** Version bump (0.9.0a3) + release.
+
 
 ### Added (PR97 — M12-01: Native T1 scaffold; config + stubs; identity-safe)
 - **Config:** Validator now accepts `perf.native.t1` with keys `{enabled, backend, strict_parity}`. Unknown‑key detection added for `perf.native` and `perf.native.t1`. `backend` is normalized to `{"rust","python"}` (defaults to `rust` when the block is present). The `native` subtree only appears in the normalized config **when provided**; defaults remain unchanged.
@@ -19,8 +64,7 @@ All notable changes to this project will be documented in this file.
 - Native is **OFF by default**; disabled‑path identity stays **byte‑identical** to `0.9.0a2`.
 - No imports or branches were added to T1; behavior and logs remain unchanged.
 
-#### Roadmap
-- **PR98:** Python FFI & strict‑parity harness (still Python only).
+- **PR98:** (shipped) Python FFI & strict‑parity harness — see Unreleased PR98 above.
 - **PR99:** Rust kernel (perf‑OFF semantics) + parity tests.
 - **PR100+**: Wheels/CI matrix, diagnostics/hardening, release.
 

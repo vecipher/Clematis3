@@ -1,8 +1,7 @@
-
-
 # M12 — Native Kernel Acceleration (T1)
 
-**Status**: PR97 scaffold (config + stubs). No runtime changes yet. The native kernel is introduced in later PRs; this page documents the target design and how to use it once available.
+**Status**: PR98 — Python FFI surface & strict‑parity harness (defaults OFF; identity‑safe). Still inert by default (
+`available() -> False`). The compiled native kernel lands in PR99; this page documents the target design and how to use it once available.
 
 ---
 
@@ -54,6 +53,9 @@ All of the following must hold:
    - No `perf.t1.dedupe_window`.
 4. Optional: `backend: rust` (default) or `python` (forces legacy path even if enabled).
 
+> **Tip (PR98):**
+> `available()` deliberately returns **False** until PR99 ships the compiled extension. Enabling `perf.native.t1` in PR98 therefore does not activate the native path outside of tests; use strict‑parity tests with a monkeypatched `available()` to validate the harness.
+
 If any of these fail, the engine uses the Python loop. A gated counter may be incremented for observability in later PRs (not in PR97).
 
 ---
@@ -62,16 +64,16 @@ If any of these fail, the engine uses the Python loop. A gated counter may be in
 This is the stable interface between Python and the native kernel.
 
 **Inputs** (NumPy arrays unless noted):
-- `indptr: int64[n_nodes+1]`, `indices: int64[n_edges]` — CSR over *outgoing* edges.
+- `indptr: int32[n_nodes+1]`, `indices: int32[n_edges]` — CSR over *outgoing* edges.
 - `weights: float32[n_edges]` — edge weights.
-- `rel_code: int8[n_edges]` — relation code per edge (`supports=0`, `associates=1`, `contradicts=2`).
-- `rel_mult: float32[3]` — multiplier table for relation codes.
-- `seed_nodes: int64[k]`, `seed_weights: float32[k]` — initial wavefront.
-- `key_rank: int64[n_nodes]` — stable lexicographic rank for tie‑breaks.
+- `rel_code: int32[n_edges]` — per‑edge relation code (reserved for future use; ignored by the Python reference).
+- `rel_mult: float32[n_edges]` — per‑edge relation multiplier. *(Note: a compact table form `float32[3]` may be added later; both are Rust‑compatible.)*
+- `seed_nodes: int32[k]`, `seed_weights: float32[k]` — initial wavefront.
+- `key_rank: int32[n_nodes]` — stable lexicographic rank for tie‑breaks.
 - Scalars: `rate: float32`, `floor: float32`, `radius_cap: int32`, `iter_cap_layers: int32`, `node_budget: float32`.
 
 **Outputs**:
-- `d_nodes: int64[m]`, `d_vals: float32[m]` — non‑zero node deltas.
+- `d_nodes: int32[m]`, `d_vals: float32[m]` — non‑zero node deltas.
 - `metrics: dict` — at least:
   - `pops: int`
   - `iters: int` (layers processed)
@@ -82,6 +84,25 @@ This is the stable interface between Python and the native kernel.
   - `_max_delta_local: float`
 
 **Deterministic ordering**: the kernel uses a heap ordered by `(priority=-abs(w), key_rank[u], node_id)` to replicate Python’s processing order.
+
+### PR98 parity harness (dispatcher)
+The engine exposes a test‑visible dispatcher that selects the native path when eligible:
+
+```python
+_t1_one_graph_dispatch(cfg, indptr, indices, weights, rel_code, rel_mult, key_rank, seeds, params)
+```
+
+Logic:
+
+```
+if cfg.perf.native.t1.enabled and native.available() and _native_t1_allowed(cfg):
+    if strict_parity: compute both & assert exact equality
+    else:             return native result
+else:
+    return python result
+```
+
+In PR98, `native.available()` returns **False** by default; tests can monkeypatch it to `True` to exercise strict‑parity without requiring the Rust kernel.
 
 ---
 
@@ -138,15 +159,16 @@ If the extension is unavailable or a gate is not met, the run still completes vi
 ---
 
 ## Troubleshooting (once enabled)
-- **"native T1 kernel not available (PR97 stub)"** — expected during PR97; the kernel hasn’t landed yet.
+- **Native path not active (PR98)** — expected: `available()` returns False until PR99 ships the compiled extension. The engine will fall back to the Python loop even if `perf.native.t1.enabled=true`.
+- **Strict‑parity assertion error** — capture logs and open an issue; include config & a minimal repro. In PR98 this means the Python stub and Python inner disagree (should not happen).
 - **Extension import fails** — ensure you installed a wheel that matches your Python/OS/arch, or build from source with Rust.
 - **Parity assertion error (strict mode)** — capture logs and open an issue; include the config and a minimal repro.
 
 ---
 
 ## Roadmap & scope notes
-- **PR97**: Config surface + stubs (this doc).
-- **PR98**: Python FFI & strict‑parity harness (still Python only).
+- **PR97**: Config surface + stubs.
+- **PR98**: (shipped) Python FFI & strict‑parity harness (still Python only; default OFF; identity‑safe).
 - **PR99**: Rust kernel (perf‑OFF semantics), parity tests.
 - **PR100+**: Wheels/CI, docs, hardening.
 - **Post‑M12**: perf‑ON semantics in kernel (dedupe & caps), GEL micro‑kernels.
