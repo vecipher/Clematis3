@@ -1,6 +1,6 @@
 # M10 — Reflection Sessions (Deterministic, Gated)
 
-**Status:** in progress. Starting from **v0.9.0a1** the configuration surface is present but **disabled by default**. Enabling reflection must not change the identity path for prior milestones when the gate is off. Landed to date: PR77 (config), PR80–PR83 (writer/budgets/tests), PR84 (fixtures-only LLM backend), PR85 (planner flag & wiring).
+**Status:** in progress. Starting from **v0.9.0a1** the configuration surface is present but **disabled by default**. Enabling reflection must not change the identity path for prior milestones when the gate is off. Landed to date: PR77 (config), PR80–PR83 (writer/budgets/tests), PR84 (fixtures-only LLM backend), PR85 (planner flag & wiring), PR86 (telemetry & trace).
 
 ## 1) Scope & Invariants
 - Add a post-turn reflection step that can **summarize** the turn and **persist** small memory entries for future retrieval.
@@ -15,7 +15,7 @@
 - **Gate conditions:** reflection runs only if **both** are true:
   1. `t3.allow_reflection == true`, and
   2. the planner requests it (`plan.reflection == true`; for the LLM planner this flag is carried via policy state).
-- Under parallel agent batches, reflection logs are staged and flushed in deterministic order (stage ordinal reserved for reflection logs).
+- Under parallel agent batches, reflection logs are staged and flushed in deterministic order (stage ordinal reserved: `STAGE_ORD["t3_reflection.jsonl"]=10`).
 
 ## 3) Configuration (added in v0.9.0a1)
 
@@ -91,7 +91,7 @@ ReflectionResult = {
     }
   ],
   "metrics": {
-    "backend": "rulebased" | "llm-fixture",
+    "backend": "rulebased" | "llm",
     "summary_len": int,
     "embed": bool,
     "fixture_key": Optional[str],    # present for llm-fixture
@@ -123,7 +123,12 @@ Reflection uses a dedicated log file, not part of identity logs.
   "reason": null                 // e.g., "reflection_timeout" on budget abort
 }
 ```
-For LLM fixtures, a `fixture_key` may also be logged for debugging.
+
+**Implementation notes**
+- Writer path: `orchestrator/logging.log_t3_reflection(...) → orchestrator/logging.append_jsonl(...) → util/io_logging.normalize_for_identity(...)`.
+- Stage ordering: `STAGE_ORD["t3_reflection.jsonl"]=10` ensures deterministic flush relative to other stages.
+- CI normalization: only the `ms` field is normalized (`0.0`) when `CI=true`. No other fields are mutated. Reflection logs are **not** part of identity logs.
+- Fail-soft: logging errors are swallowed; they do not affect the turn.
 
 ## 6) Budgets & Failure Modes
 - `scheduler.budgets.time_ms_reflection`: wall budget; on expiry reflection returns an empty or truncated result and sets `metrics.reason = "reflection_timeout"`.
@@ -162,7 +167,11 @@ For LLM fixtures, a `fixture_key` may also be logged for debugging.
 - **PR82–PR83** — Tests: identity OFF, determinism, budgets/limits.
 - **PR84** — Optional LLM backend (fixtures-only); default remains rulebased.
 - **PR85** — Planner `reflection` flag (schema + sanitizer + policy/orchestrator wiring).
-- **PR86–PR90** — Telemetry polish, microbench, CI smoke, goldens, docs.
+- **PR86** — Telemetry & trace (`t3_reflection.jsonl`, CI-only `ms` normalization, helper & wiring).
+- **PR87** — Microbench & example configs.
+- **PR88** — CI: optional reflection smoke.
+- **PR89** — Docs (this dossier), README, CHANGELOG.
+- **PR90** — Goldens/identity maintenance.
 
 ## 11) Troubleshooting
 - **Unknown key under `t3.reflection`** → remove/rename; the validator rejects unknowns.
@@ -170,3 +179,4 @@ For LLM fixtures, a `fixture_key` may also be logged for debugging.
 - **No `t3_reflection.jsonl` written** → ensure both the gate is enabled and the plan requested reflection; also check budgets (timeouts will still create a log with `reason`).
 - **Memory write errors** → check LanceDB/in-memory settings; writes should fail-soft and be noted in logs.
 - **Planner flag not picked up** → LLM path carries `reflection` via policy state; ensure your policy call ran and the orchestrator reads either `Plan.reflection` or the stashed state flag.
+- **`ms` is not 0.0 locally** → expected: normalization to `0.0` happens only when `CI=true`. Local runs will show the measured milliseconds.

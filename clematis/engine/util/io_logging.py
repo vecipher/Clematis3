@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 from contextvars import ContextVar
 import os
+import json
 
 __all__ = [
     "LogKey",
@@ -13,7 +14,9 @@ __all__ = [
     "disable_staging",
     "staging_enabled",
     "default_key_for",
+    "STAGE_ORD",
     "normalize_for_identity",
+    "stable_json_dumps",
 ]
 
 # Context flags/state (kept local to avoid global side effects when disabled)
@@ -51,34 +54,44 @@ def normalize_for_identity(name: str, rec: Dict[str, Any]) -> Dict[str, Any]:
     - zero `ms`
     - drop `now`
     No-op when CI is not set.
+    Note: When CI=true, this function also zeroes the `"ms"` field for the `"t3_reflection.jsonl"` stream
+    even though it is not part of identity logs.
     """
     if os.environ.get("CI", "").lower() != "true":
         return rec
-    if name not in _IDENTITY_LOGS:
-        return rec
-    out = dict(rec)
-    if "ms" in out:
-        out["ms"] = 0.0
-    out.pop("now", None)
-    if name == "turn.jsonl":
-        durations = out.get("durations_ms")
-        if isinstance(durations, dict):
-            out["durations_ms"] = {k: 0.0 for k in durations.keys()}
-        # Preserve scheduling context fields introduced in PR27 when a yield
-        # actually occurred, but strip them in the steady path so legacy
-        # identity baselines remain byte-identical.
-        yielded = out.get("yielded")
-        if yielded:
-            if "slice_idx" in out:
-                try:
-                    out["slice_idx"] = int(out["slice_idx"])
-                except Exception:
-                    pass
-            out["yielded"] = True
-        else:
-            out.pop("yielded", None)
-            out.pop("slice_idx", None)
-    return out
+    # Special handling for t3_reflection.jsonl: zero ms if present, return shallow copy
+    if name == "t3_reflection.jsonl":
+        out = dict(rec)
+        if "ms" in out:
+            out["ms"] = 0.0
+        return out
+    # Identity logs
+    if name in _IDENTITY_LOGS:
+        out = dict(rec)
+        if "ms" in out:
+            out["ms"] = 0.0
+        out.pop("now", None)
+        if name == "turn.jsonl":
+            durations = out.get("durations_ms")
+            if isinstance(durations, dict):
+                out["durations_ms"] = {k: 0.0 for k in durations.keys()}
+            # Preserve scheduling context fields introduced in PR27 when a yield
+            # actually occurred, but strip them in the steady path so legacy
+            # identity baselines remain byte-identical.
+            yielded = out.get("yielded")
+            if yielded:
+                if "slice_idx" in out:
+                    try:
+                        out["slice_idx"] = int(out["slice_idx"])
+                    except Exception:
+                        pass
+                out["yielded"] = True
+            else:
+                out.pop("yielded", None)
+                out.pop("slice_idx", None)
+        return out
+    # All other logs: return unchanged
+    return rec
 
 
 @dataclass(frozen=True)
@@ -202,3 +215,9 @@ def default_key_for(*, file_path: str, turn_id: int, slice_idx: int) -> LogKey:
     name = os.path.basename(file_path)
     stage_ord = STAGE_ORD.get(name, 99)
     return LogKey(turn_id=turn_id, stage_ord=stage_ord, slice_idx=slice_idx, seq=stager.next_seq())
+
+def stable_json_dumps(obj: Any) -> str:
+    """
+    Deterministic JSON serialization for log lines: sorted keys, UTF-8, compact separators.
+    """
+    return json.dumps(obj, sort_keys=True, ensure_ascii=False, separators=(",", ":"))

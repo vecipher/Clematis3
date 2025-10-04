@@ -14,7 +14,7 @@ def _iso_from_ms(ms: int) -> str:
 
 from types import SimpleNamespace
 
-from .logging import _append_jsonl, _get_logging_callable
+from .logging import _append_jsonl, _get_logging_callable, log_t3_reflection
 from .types import TurnCtx, TurnResult
 from ..stages.t1 import t1_propagate as _t1_propagate
 from ..stages.t2 import t2_semantic as _t2_semantic
@@ -1319,6 +1319,69 @@ class Orchestrator:
                 setattr(ctx, "_reflection_write_report", None)
             except Exception:
                 pass
+        # --- PR86: Reflection telemetry log (fail-soft; one line when reflection ran) ---
+        try:
+            res = getattr(ctx, "_reflection_result", None)
+            if res is not None:
+                # Determine ops_written from writer report if available; otherwise fall back to entry count
+                write_report = getattr(ctx, "_reflection_write_report", None)
+                ops_written = 0
+                if isinstance(write_report, dict):
+                    if "ops_written" in write_report:
+                        try:
+                            ops_written = int(write_report["ops_written"])
+                        except Exception:
+                            ops_written = 0
+                    elif "written" in write_report:
+                        try:
+                            ops_written = int(write_report["written"])
+                        except Exception:
+                            ops_written = 0
+                    elif "count" in write_report:
+                        try:
+                            ops_written = int(write_report["count"])
+                        except Exception:
+                            ops_written = 0
+                if ops_written == 0:
+                    try:
+                        ops_written = len(res.memory_entries or [])
+                    except Exception:
+                        ops_written = 0
+                # Backend/embed from config; reason/ms/fixture_key from metrics
+                cfg_root = _get_cfg(ctx)
+                t3cfg_local = (cfg_root.get("t3") or {}) if isinstance(cfg_root, dict) else {}
+                refl_cfg = (t3cfg_local.get("reflection") or {}) if isinstance(t3cfg_local, dict) else {}
+                backend = str(refl_cfg.get("backend", "rulebased"))
+                embed = bool(refl_cfg.get("embed", True))
+                met = getattr(res, "metrics", {}) or {}
+                ms_val = float(met.get("ms", 0.0)) if isinstance(met, dict) else 0.0
+                reason = met.get("reason") if isinstance(met, dict) else None
+                extra = {}
+                fk = met.get("fixture_key") if isinstance(met, dict) else None
+                if fk:
+                    extra["fixture_key"] = str(fk)
+                # Summary length is whitespace-token count on the already-truncated summary
+                summary_len = 0
+                try:
+                    summary_len = len((res.summary or "").split())
+                except Exception:
+                    summary_len = 0
+                # Use staged writer; pass None for mux (falls back to global)
+                log_t3_reflection(
+                    None,  # current mux (optional in writer)
+                    ctx,
+                    agent_id,
+                    summary_len=summary_len,
+                    ops_written=ops_written,
+                    embed=embed,
+                    backend=backend,
+                    ms=ms_val,
+                    reason=reason,
+                    extra=(extra or None),
+                )
+        except Exception:
+            # Never allow reflection telemetry to break the turn
+            pass
         # --- Health summary + per-turn rollup ---
         from .. import health
 
