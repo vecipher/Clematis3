@@ -83,6 +83,7 @@ testpaths = ["tests"]
 markers = [
   "perf: opt-in performance tests",
   "manual: tests that require external runtimes/models or network; excluded in CI",
+  "reflection: optional reflection/golden tests for M10",
 ]
 
 [tool.setuptools.package-data]

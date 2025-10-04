@@ -1,6 +1,7 @@
 import os
 import hashlib
 import subprocess
+import sys
 from pathlib import Path
 
 EXPECT = ("apply.jsonl", "t1.jsonl", "t2.jsonl", "t4.jsonl", "turn.jsonl")
@@ -80,6 +81,7 @@ def test_disabled_path_identity(tmp_path: Path):
             "CI": "true",
             "CLEMATIS_NETWORK_BAN": "1",
             "CLEMATIS_GIT_SHA": "testsha",
+            "CLEMATIS_T3__ALLOW_REFLECTION": "false",
             # hard-off all feature gates
             "CLEMATIS_SCHEDULER__ENABLED": "false",
             "CLEMATIS_PERF__PARALLEL__ENABLED": "false",
@@ -97,7 +99,7 @@ def test_disabled_path_identity(tmp_path: Path):
     # Keep it short and fix the "now" for determinism
     subprocess.run(
         [
-            "python",
+            sys.executable,
             "-m",
             "clematis.scripts.demo",
             "--steps",
@@ -112,6 +114,9 @@ def test_disabled_path_identity(tmp_path: Path):
     )
 
     actual_dir = _ensure_outputs_dir(out_dir)
+    # Also ensure forbidden logs are absent in other known locations
+    for extra_dir in (Path(".") / ".data" / "logs", Path(".") / ".logs", Path("clematis") / ".logs"):
+        _assert_forbidden_absent(extra_dir)
     _assert_forbidden_absent(actual_dir)
 
     # Compare exact bytes for each expected log
