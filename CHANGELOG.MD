@@ -7,7 +7,23 @@ All notable changes to this project will be documented in this file.
 
 
 
+
 ## [Unreleased]
+
+### Added (PR97 — M12-01: Native T1 scaffold; config + stubs; identity-safe)
+- **Config:** Validator now accepts `perf.native.t1` with keys `{enabled, backend, strict_parity}`. Unknown‑key detection added for `perf.native` and `perf.native.t1`. `backend` is normalized to `{"rust","python"}` (defaults to `rust` when the block is present). The `native` subtree only appears in the normalized config **when provided**; defaults remain unchanged.
+- **Scaffolds:** `clematis/native/__init__.py` (docstring‑only) and `clematis/native/t1.py` (PR97 stub). `available() -> False`; `propagate_one_graph_rs(...)` raises a clear stub error. **No runtime wiring** yet — the engine never calls the stub in PR97.
+- **Docs:** `docs/m12/native_t1.md` — scope, invariants, gates, API/contract, parity modes, build/troubleshooting. Marked **PR97 scaffold**; enablement occurs in later PRs.
+
+#### Invariants
+- Native is **OFF by default**; disabled‑path identity stays **byte‑identical** to `0.9.0a2`.
+- No imports or branches were added to T1; behavior and logs remain unchanged.
+
+#### Roadmap
+- **PR98:** Python FFI & strict‑parity harness (still Python only).
+- **PR99:** Rust kernel (perf‑OFF semantics) + parity tests.
+- **PR100+**: Wheels/CI matrix, diagnostics/hardening, release.
+
 
 ### Added (PR80 — M10-04: Reflection write path; deterministic)
 - **Writer module:** `clematis/engine/orchestrator/reflection.py` with `write_reflection_entries(ctx, state, cfg_root, result) -> WriteReport`.
