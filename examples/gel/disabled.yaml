@@ -1,0 +1,14 @@
+
+
+# GEL (HS1) — disabled path (identity)
+# Full subtree present but inert when enabled:false
+graph:
+  enabled: false
+  coactivation_threshold: 0.33
+  observe_top_k: 7
+  update: { mode: proportional, alpha: 0.07, clamp_min: -0.9, clamp_max: 0.9 }
+  decay:  { half_life_turns: 123, floor: 0.01 }
+  # Intentionally toggled ON but must remain inert while enabled:false
+  merge:     { enabled: true,  min_size: 2, cap_per_turn: 3 }
+  split:     { enabled: true,  weak_edge_thresh: 0.05 }
+  promotion: { enabled: true,  label_mode: concat_k, attach_weight: 0.30 }

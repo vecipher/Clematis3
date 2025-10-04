@@ -130,6 +130,15 @@ jobs:
           set -euo pipefail
           pytest -q -m "not manual"
 
+      - name: Examples smoke (GEL)
+        env:
+          CLEMATIS_NETWORK_BAN: "1"
+          CI: "true"
+        run: |
+          set -euo pipefail
+          python scripts/examples_smoke.py --examples examples/gel/disabled.yaml
+          python scripts/examples_smoke.py --examples examples/gel/enabled.yaml
+
   reproducible_build:
     name: Reproducible build (wheel + sdist)
     needs: test
@@ -226,6 +235,15 @@ jobs:
           # Capture sdist file listing for debugging
           SDIST="$(ls dist/clematis-*.tar.gz)"
           tar -tzf "$SDIST" | sort > "$RUNNER_TEMP/sdist1.txt"
+
+      - name: Verify examples included in artifacts
+        run: |
+          set -euo pipefail
+          echo "Verify GEL examples are present in sdist and wheel"
+          # sdist paths include a top-level project dir (e.g., name-version/)
+          tar -tzf dist/*.tar.gz | grep -E '(^|/)examples/gel/(enabled|disabled)\.yaml$'
+          # wheel paths use the data-files target path
+          unzip -l dist/*.whl | grep -E 'share/examples/clematis/gel/(enabled|disabled)\.yaml'
 
       - name: Clean tree (before build #2)
         run: |

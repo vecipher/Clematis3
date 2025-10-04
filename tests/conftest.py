@@ -41,3 +41,20 @@ def _ban_network():
         yield
     finally:
         socket.socket.connect = real_connect
+
+
+# Ensure the repository's ./.logs directory exists for CLI tests that use --dir ./.logs
+@pytest.fixture(autouse=True, scope="session")
+def _ensure_repo_logs_dir():
+    """
+    Ensure the repository's ./.logs directory exists so CLI tests that
+    pass --dir ./.logs don't fail due to a missing directory.
+    This fixture is intentionally no-op on teardown.
+    """
+    repo_logs = os.path.join(ROOT, ".logs")
+    try:
+        os.makedirs(repo_logs, exist_ok=True)
+    except Exception:
+        # best-effort; tests that require this path will fail loudly otherwise
+        pass
+    yield

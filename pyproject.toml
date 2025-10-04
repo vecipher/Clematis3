@@ -1,6 +1,6 @@
 [project]
 name = "clematis"
-version = "0.9.0a1"
+version = "0.9.0a2"
 description = "Clematis — deterministic mind-like simulation engine (M1–M8 baseline)"
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
@@ -84,6 +84,7 @@ markers = [
   "perf: opt-in performance tests",
   "manual: tests that require external runtimes/models or network; excluded in CI",
   "reflection: optional reflection/golden tests for M10",
+  "identity: disabled-path identity and byte-equality checks",
 ]
 
 [tool.setuptools.package-data]
@@ -91,6 +92,7 @@ clematis = ["fixtures/**/*", "examples/**/*", "VERSION"]
 
 [tool.setuptools.data-files]
 "share/man/man1" = ["man/*.1"]
+"share/examples/clematis/gel" = ["examples/gel/*.yaml"]
 
 [project.scripts]
 clematis = "clematis.cli.main:main"

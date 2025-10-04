@@ -1,0 +1,13 @@
+
+
+# GEL (HS1) — enabled substrate, observe+decay only
+# This does not change retrieval ranking by default.
+# Merge/Split/Promotion remain OFF. Hybrid reranker stays OFF unless explicitly enabled elsewhere.
+graph:
+  enabled: true
+  coactivation_threshold: 0.20
+  update: { mode: additive, alpha: 0.02, clamp_min: -1.0, clamp_max: 1.0 }
+  decay:  { half_life_turns: 200, floor: 0.0 }
+  merge:  { enabled: false }
+  split:  { enabled: false }
+  promotion: { enabled: false }

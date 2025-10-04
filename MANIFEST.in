@@ -24,6 +24,9 @@ recursive-include docs *.md
 prune examples
 prune fixtures
 
+# Allowlist: ship select repo-level examples (GEL YAML) for docs parity
+recursive-include examples/gel *.yaml
+
 # Exclusions to stabilize sdist
 prune tests
 prune .github

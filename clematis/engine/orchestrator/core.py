@@ -166,22 +166,61 @@ def agent_ready(ctx, state, agent_id: str) -> tuple[bool, str]:
 # --- Config accessor for harmonized config usage ---
 
 
+# --- Config accessor for harmonized config usage ---
+def _to_plain(obj):
+    """Recursively convert SimpleNamespace / dataclass / nested containers to plain Python types."""
+    try:
+        from types import SimpleNamespace as _SN
+    except Exception:
+        _SN = None
+    # Dataclass -> dict
+    if is_dataclass(obj):
+        try:
+            return asdict(obj)
+        except Exception:
+            pass
+    # SimpleNamespace -> dict
+    if _SN is not None and isinstance(obj, _SN):
+        try:
+            return {k: _to_plain(v) for k, v in vars(obj).items()}
+        except Exception:
+            # Fallback shallow conversion
+            try:
+                return dict(obj.__dict__)
+            except Exception:
+                return {}
+    # dict -> dict (deep)
+    if isinstance(obj, dict):
+        return {k: _to_plain(v) for k, v in obj.items()}
+    # list/tuple -> list (deep)
+    if isinstance(obj, (list, tuple)):
+        return [_to_plain(v) for v in obj]
+    return obj
+
 def _get_cfg(ctx) -> Dict[str, Any]:
-    """Normalize config access across ctx.cfg / ctx.config; always returns a dict."""
-    cfg = getattr(ctx, "cfg", None)
-    if isinstance(cfg, dict):
-        return cfg
-    if isinstance(cfg, SimpleNamespace):
-        return dict(cfg.__dict__)
-    if cfg is not None and is_dataclass(cfg):
-        return asdict(cfg)
-    cfg2 = getattr(ctx, "config", None)
-    if isinstance(cfg2, dict):
-        return cfg2
-    if isinstance(cfg2, SimpleNamespace):
-        return dict(cfg2.__dict__)
-    if cfg2 is not None and is_dataclass(cfg2):
-        return asdict(cfg2)
+    """Normalize config access across ctx.cfg / ctx.config; always returns a plain dict with plain nested types."""
+    # Prefer ctx.cfg then ctx.config
+    for attr in ("cfg", "config"):
+        if hasattr(ctx, attr):
+            raw = getattr(ctx, attr)
+            if raw is None:
+                continue
+            # Deep-normalize namespaces into plain dicts
+            try:
+                plain = _to_plain(raw)
+            except Exception:
+                # Best-effort shallow fallbacks
+                if isinstance(raw, dict):
+                    plain = dict(raw)
+                elif is_dataclass(raw):
+                    plain = asdict(raw)
+                else:
+                    try:
+                        plain = dict(raw.__dict__)
+                    except Exception:
+                        plain = {}
+            # Ensure we return a dict
+            return plain if isinstance(plain, dict) else {}
     return {}
 
 
@@ -1428,6 +1467,71 @@ class Orchestrator:
 
         return TurnResult(line=utter, events=[])
 
+
+def run_smoke_turn(cfg: Dict[str, Any] | None = None, log_dir: str | None = None, input_text: str = "") -> TurnResult:
+    """
+    Stable, test-friendly wrapper for a single tiny turn.
+    - Accepts a plain dict `cfg` and optional `log_dir`.
+    - Validates the config (fills defaults) and converts it to attribute-access form.
+    - Prepares a minimal ctx/state and delegates to `run_turn`.
+    - Does not change core behavior; intended for smoke/identity tests.
+    """
+    # Ensure logs go to the requested directory if provided
+    if log_dir:
+        try:
+            _os.makedirs(log_dir, exist_ok=True)
+        except Exception:
+            pass
+        _os.environ["CLEMATIS_LOG_DIR"] = str(log_dir)
+
+    # Import here to avoid hard import costs at module import time
+    try:
+        from configs.validate import validate_config  # type: ignore
+    except Exception:
+        # Fall back to raw dict if validate_config isn't available
+        def validate_config(x):  # type: ignore
+            return x or {}
+
+    # Normalize/validate cfg and convert to attribute-access + dict semantics
+    raw_cfg: Dict[str, Any] = validate_config(cfg or {})
+
+    class _AttrDict(dict):
+        """Dict that also supports attribute access recursively."""
+        def __getattr__(self, name):
+            try:
+                return self[name]
+            except KeyError as e:
+                raise AttributeError(name) from e
+        def __setattr__(self, name, value):
+            self[name] = value
+        def __delattr__(self, name):
+            try:
+                del self[name]
+            except KeyError as e:
+                raise AttributeError(name) from e
+
+    def _to_attrdict(obj):
+        if isinstance(obj, dict):
+            return _AttrDict({k: _to_attrdict(v) for k, v in obj.items()})
+        if isinstance(obj, list):
+            return [_to_attrdict(v) for v in obj]
+        return obj
+
+    cfg_ad = _to_attrdict(raw_cfg)
+
+    # Build a minimal deterministic context
+    ctx = SimpleNamespace(
+        turn_id="1",
+        agent_id="smoke",
+        now=None,        # allow orchestrator to manage timestamp normalization
+        now_ms=0,        # stable for CI/identity paths
+        cfg=cfg_ad,
+    )
+    # Minimal state; orchestrator boot/load/snapshot routines are fail-soft
+    state: Dict[str, Any] = {
+        "version_etag": "0",
+    }
+    return Orchestrator().run_turn(ctx, state, str(input_text or ""))  # type: ignore[call-arg]
 
 def run_turn(ctx: TurnCtx, state: Dict[str, Any], input_text: str) -> TurnResult:
     """
