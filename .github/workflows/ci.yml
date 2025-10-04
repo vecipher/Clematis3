@@ -240,10 +240,10 @@ jobs:
         run: |
           set -euo pipefail
           echo "Verify GEL examples are present in sdist and wheel"
-          SDIST="$(ls dist/clematis-*.tar.gz)"
-          tar -tzf "$SDIST" | grep -E '^examples/gel/(enabled|disabled)\.yaml$'
-          WHEEL="$(ls dist/clematis-*.whl)"
-          unzip -l "$WHEEL" | grep -E 'share/examples/clematis/gel/(enabled|disabled)\.yaml'
+          # sdist paths include a top-level project dir (e.g., name-version/)
+          tar -tzf dist/*.tar.gz | grep -E '(^|/)examples/gel/(enabled|disabled)\.yaml$'
+          # wheel paths use the data-files target path
+          unzip -l dist/*.whl | grep -E 'share/examples/clematis/gel/(enabled|disabled)\.yaml'
 
       - name: Clean tree (before build #2)
         run: |
