@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Tuple, Optional
 import sys as _sys
 
 from ..util.logmux import LogMux, set_mux, reset_mux
 from ..util.io_logging import LogStager, enable_staging, disable_staging, default_key_for
+from ..util import io_logging as IOL
 from ...io.log import append_jsonl as _append_jsonl_default, _append_jsonl_unbuffered
 
 __all__ = [
@@ -21,6 +22,7 @@ __all__ = [
     "_append_unbuffered",
     "_append_jsonl",
     "append_jsonl",
+    "log_t3_reflection",
 ]
 
 
@@ -57,8 +59,12 @@ def _append_jsonl(file_path: str, payload: Dict[str, Any]) -> None:
 
 
 def append_jsonl(file_path: str, payload: Dict[str, Any]) -> None:
-    """Public append hook; mirrors `_append_jsonl` for compatibility."""
-    _append_jsonl(file_path, payload)
+    """Public append hook; applies CI/identity normalization, then delegates."""
+    try:
+        rec = IOL.normalize_for_identity(file_path, payload)
+    except Exception:
+        rec = payload
+    _append_jsonl(file_path, rec)
 
 
 def _begin_log_capture() -> Tuple[LogMux, object]:
@@ -74,3 +80,40 @@ def _end_log_capture(token: object) -> None:
         reset_mux(token)
     except Exception:
         pass
+
+
+# Helper for t3_reflection telemetry logging
+def log_t3_reflection(
+    log_mux: LogMux,
+    ctx,
+    agent: str,
+    *,
+    summary_len: int,
+    ops_written: int,
+    embed: bool,
+    backend: str,
+    ms: float,
+    reason: Optional[str] = None,
+    extra: Optional[Dict[str, str]] = None,
+) -> None:
+    """
+    Emit a single reflection telemetry record to the staged 't3_reflection.jsonl' stream.
+    Fail-soft: any error during logging is swallowed.
+    """
+    payload: Dict[str, Any] = {
+        "turn": int(getattr(ctx, "turn_id", 0)),
+        "agent": str(agent),
+        "summary_len": int(summary_len),
+        "ops_written": int(ops_written),
+        "embed": bool(embed),
+        "backend": str(backend),
+        "ms": float(ms),
+        "reason": (None if reason is None else str(reason)),
+    }
+    if extra and extra.get("fixture_key"):
+        payload["fixture_key"] = str(extra["fixture_key"])
+    try:
+        append_jsonl("t3_reflection.jsonl", payload)
+    except Exception:
+        # Never crash the turn on logging issues
+        return

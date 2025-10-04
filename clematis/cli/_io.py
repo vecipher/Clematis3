@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import json
 import sys
+from ..engine.util.io_logging import stable_json_dumps
 from typing import Any, Iterable, Mapping, Sequence, cast
 
 # Verbosity gates
@@ -22,12 +22,12 @@ def eprint_once(msg: str) -> None:
 def print_json(obj: Any = None, *, preencoded: str | None = None) -> None:
     """
     If preencoded is provided it is printed as-is (preserves existing JSON).
-    Otherwise dumps obj using compact, stable separators (no color).
+    Otherwise dumps obj using a deterministic serializer (sorted keys, compact separators; no color).
     """
     if preencoded is not None:
         sys.stdout.write(preencoded if preencoded.endswith("\n") else preencoded + "\n")
         return
-    sys.stdout.write(json.dumps(obj, separators=(",", ":")) + "\n")
+    sys.stdout.write(stable_json_dumps(obj) + "\n")
 
 
 def _stringify(x: Any) -> str:

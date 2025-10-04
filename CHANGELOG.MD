@@ -40,12 +40,42 @@ All notable changes to this project will be documented in this file.
 - **Exports:** `FixtureMissingError` re‑exported from `t3/__init__.py`; orchestrator wraps failures as `metrics.reason="reflect_error:<Type>"`.
 - **Tests:** `tests/reflection/test_reflection_llm_*.py` — fixture determinism and missing‑fixture error.
 
+
 ### Added (PR85 — M10-09: Policy glue — planner flag & schema wiring)
 - **Schema:** `engine/policy/json_schemas.py` allows top‑level `reflection: boolean` (default `false`), `additionalProperties=false` preserved.
 - **Sanitizer:** `engine/policy/sanitize.py` coerces boolean‑likes (`"true"/"false"`, `1/0`); `sanitize_plan(...)` validates `ops` and returns normalized `{"reflection": bool}` for tests.
 - **Planner prompt:** `t3/policy.py` requires `reflection` in the JSON and **stashes** the LLM planner’s flag on `state._planner_reflection_flag` (keeps return shape stable).
 - **Orchestrator:** `core._run_reflection_if_enabled(...)` honors `Plan.reflection` **or** `state._planner_reflection_flag` for gate/log/dry‑run.
 - **Tests:** `tests/policy/test_reflection_flag.py` and `tests/reflection/test_reflection_gate_plumbing.py` cover coercion and gate plumbing.
+
+### Added (PR86 — M10-10: Reflection telemetry & trace; identity-safe)
+- **New stream:** `t3_reflection.jsonl` with stable schema
+  `{turn, agent, summary_len, ops_written, embed, backend, ms, reason[, fixture_key]}`.
+  Ordering is staged with `STAGE_ORD["t3_reflection.jsonl"]=10`; **not** part of identity logs.
+- **Normalization (CI-only):** `engine/util/io_logging.normalize_for_identity(...)` zeroes `"ms"` for this stream when `CI=true`. No other fields are touched; identity logs remain unchanged.
+- **Orchestrator helper:** `engine/orchestrator/logging.log_t3_reflection(...)`
+  Emits exactly one record per reflected turn; fail-soft. Picks `ops_written` from the write report when present, falls back to entry count. Propagates `backend`, `embed`, `reason`, and (LLM fixtures) `fixture_key`. `summary_len` is computed as whitespace-token count.
+- **Core wiring:** `engine/orchestrator/core.py` calls the helper after the deterministic write path (PR80), only when the reflection gate is open. Reflection never alters T1/T2/T4/Apply outputs.
+- **Writer:** `engine/orchestrator/logging.append_jsonl(...)` now applies identity normalization before delegating to the unbuffered writer. **On-disk serialization remains unchanged** for identity logs; we did **not** change `io/log.py` formatting to preserve Gate A goldens.
+- **Utility:** Added `stable_json_dumps(obj)` (sorted keys, compact) in `engine/util/io_logging.py`. Used for deterministic CLI JSON in `clematis/cli/_io.py` (polish; unrelated to identity logs).
+
+#### Tests
+- `tests/reflection/test_reflection_logging_shape.py` — rule-based path: CI normalizes `ms` to `0.0`; schema stable; deterministic payload across runs.
+- `tests/reflection/test_reflection_logging_llm_fixture_extra.py` — LLM fixtures path includes `fixture_key`; deterministic under CI normalization.
+- `tests/reflection/test_reflection_logging_timeout_reason.py` — `reason="reflection_timeout"` propagated; CI normalizes `ms`.
+
+#### Notes / invariants
+- Default OFF path unchanged; `t3_reflection.jsonl` is written **only** when reflection runs.
+- Reflection logs are **not** in `_IDENTITY_LOGS`; Gate A identity remains byte-for-byte.
+- CI normalization targets **only** this stream; identity streams are unaffected.
+
+#### Heads‑up (compat shim)
+- A thin compatibility shim still exists at `clematis/engine/util/io_logging.py::write_jsonl(...)`. It is **not** used by production call sites (which call `engine/orchestrator/logging.append_jsonl`).
+  If you want to remove it later, search for usages with:
+  ```
+  grep -R "io_logging.write_jsonl" -n
+  ```
+  and delete the function/export once no references remain.
 
 ### Docs
 - **README:** M10 status updated; added “Reflection sessions (deterministic, gated)” quick‑start (rule‑based & fixtures‑only).

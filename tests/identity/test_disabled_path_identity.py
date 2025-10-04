@@ -4,6 +4,7 @@ import subprocess
 from pathlib import Path
 
 EXPECT = ("apply.jsonl", "t1.jsonl", "t2.jsonl", "t4.jsonl", "turn.jsonl")
+FORBID = ("t3_reflection.jsonl",)
 
 
 def _sha256(fp: Path) -> str:
@@ -27,6 +28,12 @@ def _ensure_outputs_dir(out_dir: Path) -> Path:
             return d
     checked = ", ".join(str(c) for c in candidates)
     raise AssertionError(f"Expected logs not found. Checked: {checked}")
+
+
+def _assert_forbidden_absent(base_dir: Path) -> None:
+    for name in FORBID:
+        p = base_dir / name
+        assert not p.exists(), f"Forbidden log present in disabled path: {p}"
 
 
 def test_disabled_path_identity(tmp_path: Path):
@@ -105,6 +112,7 @@ def test_disabled_path_identity(tmp_path: Path):
     )
 
     actual_dir = _ensure_outputs_dir(out_dir)
+    _assert_forbidden_absent(actual_dir)
 
     # Compare exact bytes for each expected log
     for name in EXPECT:
