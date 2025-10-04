@@ -2,7 +2,12 @@
 
 #!/usr/bin/env python3
 from __future__ import annotations
-import argparse, json, os, sys, time, pathlib
+import argparse
+import json
+import os
+import sys
+import time
+import pathlib
 from typing import Any, Dict, List
 
 try:
