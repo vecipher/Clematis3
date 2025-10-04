@@ -53,8 +53,8 @@ Ready-to-run configs:
 
 Run:
 ```bash
-python scripts/examples_smoke.py --config examples/gel/enabled.yaml
-python scripts/examples_smoke.py --config examples/gel/disabled.yaml
+python scripts/examples_smoke.py --examples examples/gel/enabled.yaml
+python scripts/examples_smoke.py --examples examples/gel/disabled.yaml
 # or the bundled set
 python scripts/examples_smoke.py --all
 ```

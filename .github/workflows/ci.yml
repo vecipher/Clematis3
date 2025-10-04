@@ -136,8 +136,8 @@ jobs:
           CI: "true"
         run: |
           set -euo pipefail
-          python scripts/examples_smoke.py --config examples/gel/disabled.yaml
-          python scripts/examples_smoke.py --config examples/gel/enabled.yaml
+          python scripts/examples_smoke.py --examples examples/gel/disabled.yaml
+          python scripts/examples_smoke.py --examples examples/gel/enabled.yaml
 
   reproducible_build:
     name: Reproducible build (wheel + sdist)

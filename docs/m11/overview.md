@@ -183,8 +183,8 @@ The repository includes ready-to-run configs:
 Run either via the smoke harness:
 
 ```bash
-python scripts/examples_smoke.py --config examples/gel/enabled.yaml
-python scripts/examples_smoke.py --config examples/gel/disabled.yaml
+python scripts/examples_smoke.py --examples examples/gel/enabled.yaml
+python scripts/examples_smoke.py --examples examples/gel/disabled.yaml
 ```
 
 Or run the built-in set (includes both):
