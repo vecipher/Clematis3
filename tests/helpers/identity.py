@@ -1,4 +1,3 @@
-# tests/helpers/identity.py
 from __future__ import annotations
 import json
 import copy
@@ -14,8 +13,11 @@ _DROP_KEYS = {
     "now",
     "version_etag",
     "tier_sequence",  # added to stabilize disabled-path identity
+    "ms",             # plain 'ms' timing field
 }
-_DROP_SUFFIXES = ("_ms", "ms")  # e.g., duration_ms, total_ms, etc.
+# Suffixes/prefixes for volatile timing keys
+_DROP_SUFFIXES = ("_ms",)       # e.g., duration_ms, total_ms
+_DROP_PREFIXES = ("ms_",)       # e.g., ms_deliberate, ms_rag
 
 
 def _normalize(obj: Any) -> Any:
@@ -23,6 +25,8 @@ def _normalize(obj: Any) -> Any:
         out = {}
         for k, v in obj.items():
             if k in _DROP_KEYS:
+                continue
+            if any(k.startswith(pre) for pre in _DROP_PREFIXES):
                 continue
             if any(k.endswith(suf) for suf in _DROP_SUFFIXES):
                 continue
@@ -63,6 +67,34 @@ def normalize_logs_dir(p: str, base: str | None = None) -> str:
     return os.path.normpath(os.path.realpath(p))
 
 
+def normalize_log_bytes_for_identity(file_map: dict[str, bytes]) -> dict[str, bytes]:
+    """
+    Normalize a map of log files ({relative_path: bytes}) for disabled-path identity comparisons.
+    Rules:
+      - For any *.jsonl file, decode UTF-8 lines and apply `normalize_json_line` to each non-empty line,
+        which drops keys in _DROP_KEYS and any keys ending with suffixes in _DROP_SUFFIXES or starting with prefixes in _DROP_PREFIXES.
+      - Preserve the presence/absence of a trailing newline to avoid accidental diffs.
+      - Non-JSONL files are returned unchanged.
+    Returns a new dict; input is not mutated.
+    """
+    out: dict[str, bytes] = {}
+    for rel, blob in file_map.items():
+        if rel.endswith(".jsonl"):
+            try:
+                text = blob.decode("utf-8")
+            except Exception:
+                # If decoding fails, pass through unchanged
+                out[rel] = blob
+                continue
+            lines = text.splitlines()
+            norm_lines = normalize_json_lines(lines)
+            trailing = "\n" if text.endswith("\n") else ""
+            out[rel] = ("\n".join(norm_lines) + trailing).encode("utf-8")
+        else:
+            out[rel] = blob
+    return out
+
+
 # ---------------------------------------------------------------------------
 # PR72 helpers: routing, IO, hashing, and snapshot collection
 # ---------------------------------------------------------------------------
@@ -71,6 +103,7 @@ __all__ = [
     "normalize_json_line",
     "normalize_json_lines",
     "normalize_logs_dir",
+    "normalize_log_bytes_for_identity",
     "route_logs",
     "read_lines",
     "hash_file",
