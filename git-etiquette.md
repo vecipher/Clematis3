@@ -1,5 +1,3 @@
-
-
 # Git etiquette & guardrails
 
 Practical defaults to avoid detached HEAD, lost files, and broken CI. Use this as the house style for day‑to‑day work.
@@ -21,11 +19,26 @@ Practical defaults to avoid detached HEAD, lost files, and broken CI. Use this a
    # regular git if you prefer
    git switch -c <feature-name> [base-ref]
    ```
+**Branch naming conventions**
+- Use short, descriptive names: `feat/<topic>`, `fix/<bug>`, `chore/<task>`, or `prNN`.
+- Avoid slashes that imply ownership or PII. Stick to ASCII and `-`/`_`.
+- If the branch is stacked, suffix with an ordinal: `feat/<topic>-2-of-3`.
 3. **Edit → stage → commit**
    ```bash
    git add -A
    git commit -m "PRNN: concise summary"
    ```
+#### Commit message style
+- Use **imperative mood**: “Add X”, not “Adds/Added X”.
+- Keep the **subject ≤ 72 chars**; wrap the body at ~72 cols.
+- Subject: `PRNN: concise summary` (include `PRNN` when known).
+- Body (optional but encouraged): explain **why**, **scope**, and **trade‑offs**. Link issues/PRs.
+- Useful trailers:
+  ```
+  Co-authored-by: Full Name <name@example.com>
+  Reverts: <short-sha>
+  ```
+- For small follow‑ups, use **fixup commits** and autosquash (see below).
 4. **Push + open PR**
    ```bash
    git push -u origin <feature-name>
@@ -39,6 +52,22 @@ Practical defaults to avoid detached HEAD, lost files, and broken CI. Use this a
    git pull --ff-only
    ```
 
+### Rebase & fixup workflow (before pushing)
+Keep history clean without losing review context.
+```bash
+# Create a fixup commit against an earlier commit
+git commit --fixup=<target-sha>
+# Autosquash and rebase onto your base (origin/main or a tag)
+git fetch origin
+git rebase -i --autosquash origin/main
+# If your branch was based on a tag:
+git rebase -i --autosquash v0.8.0a2
+```
+**Notes**
+- It’s fine to force‑push your **feature** branch: `git push -f` (never to `main`).
+- Prefer **squash‑merge** for PRs (matches the flow above).
+- If rebasing after review, leave a brief comment so reviewers aren’t surprised.
+
 ### Tag & publish (when the PR ships artifacts)
 - **SBOM/attest (pkg build):** push a tag `v*` to trigger SBOM + SLSA.
 - **OCI image (GHCR):** push a tag `v*` to build/push multi‑arch images.
@@ -47,6 +76,16 @@ TAG=v0.8.0a2
 git tag -a "$TAG" -m "Ship PRNN"
 git push origin "$TAG"
 ```
+### Large files & generated assets
+- Don’t commit build artifacts or huge binaries; put them in releases or an artifact store.
+- If you must version binaries, use **Git LFS** and add patterns to `.gitattributes`.
+  ```bash
+  git lfs install
+  git lfs track "*.bin" "*.onnx" "*.mp4"
+  git add .gitattributes
+  git commit -m "track large assets via LFS"
+  ```
+- Keep `.gitignore` updated for tool caches (e.g., `.pytest_cache`, `dist/`, `build/`, `.DS_Store`).
 
 ---
 
@@ -89,6 +128,19 @@ cp ~/.git-templates/hooks/* .git/hooks/
 chmod +x .git/hooks/pre-commit .git/hooks/pre-push
 ```
 
+### (Optional) Add secret‑scanning to pre‑push
+If you have `gitleaks` installed, add this to `.git/hooks/pre-push` *after* the branch checks:
+```bash
+if command -v gitleaks >/dev/null 2>&1; then
+  echo "🛡  gitleaks protect..."
+  gitleaks protect --staged --redact --no-git --verbose || {
+    echo "❌ Possible secret detected. Aborting push."
+    exit 1
+  }
+fi
+```
+Alternatives: `git-secrets` or a centralized pre‑commit framework can be used instead.
+
 ### B) Alias: one command to “always branch”
 ```bash
 git config --global alias.start '!f(){
@@ -102,7 +154,19 @@ git start pr57            # from current HEAD
 git start pr57 v0.8.0a2   # from a tag/sha without detached HEAD
 ```
 
-### C) Quick sanity before switching
+### C) Helpful aliases (fixups & undo)
+```bash
+# Create a fixup commit against the last commit (or provide a sha)
+git config --global alias.fixup '!f(){ git commit --fixup="${1:-HEAD}"; }; f'
+# Interactive autosquash rebase onto origin/main
+git config --global alias.rsquash '!git fetch origin && git rebase -i --autosquash origin/main'
+# Show current branch or DETACHED
+git config --global alias.where '!git symbolic-ref -q --short HEAD || echo DETACHED'
+# Soft undo (keep changes staged)
+git config --global alias.undo '!git reset --soft HEAD~1'
+```
+
+### D) Quick sanity before switching
 ```bash
 git symbolic-ref -q --short HEAD || echo "DETACHED"
 git status --porcelain=v1
@@ -151,20 +215,7 @@ git merge --no-ff rescue/<topic>   # or: git cherry-pick <sha>...
 git push origin main
 ```
 
----
-
-## Quick PR wrap‑up (copy/paste)
-```bash
-# Edit → commit → PR
-git switch main && git pull --ff-only
-git start prNN
-git add -A && git commit -m "PRNN: concise summary"
-git push -u origin prNN
-gh pr create --fill --base main --head prNN
-gh pr merge --squash --auto
-
-# Tag if the PR publishes artifacts
-TAG=v0.8.0a2
-git tag -a "$TAG" -m "Ship PRNN"
-git push origin "$TAG"
-```
+### Reverting vs resetting (public history)
+- On **public branches** (e.g., `main`), prefer `git revert <sha>` to create a new commit that undoes a bad change.
+- Avoid `git reset --hard` on public branches; it rewrites history and will be blocked by protection rules.
+- When you revert, reference the original commit in the message (use the `Reverts:` trailer).

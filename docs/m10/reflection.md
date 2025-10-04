@@ -1,6 +1,6 @@
 # M10 — Reflection Sessions (Deterministic, Gated)
 
-**Status:** in progress. Starting from **v0.9.0a1** the configuration surface is present but **disabled by default**. Enabling reflection must not change the identity path for prior milestones when the gate is off. Landed to date: PR77 (config), PR80–PR83 (writer/budgets/tests), PR84 (fixtures-only LLM backend), PR85 (planner flag & wiring), PR86 (telemetry & trace).
+**Status:** in progress. Starting from **v0.9.0a1** the configuration surface is present but **disabled by default**. Enabling reflection must not change the identity path for prior milestones when the gate is off. Landed to date: PR77 (config), PR80–PR83 (writer/budgets/tests), PR84 (fixtures-only LLM backend), PR85 (planner flag & wiring), PR86 (telemetry & trace), **PR87 (microbench & examples)**, **PR88 (optional CI smoke)**.
 
 ## 1) Scope & Invariants
 - Add a post-turn reflection step that can **summarize** the turn and **persist** small memory entries for future retrieval.
@@ -46,7 +46,7 @@ t3:
   llm:
     fixtures:
       enabled: true
-      path: tests/fixtures/llm/reflection.json
+      path: tests/fixtures/reflection_llm.jsonl
 scheduler:
   budgets:
     time_ms_reflection: 6000
@@ -180,3 +180,61 @@ Reflection uses a dedicated log file, not part of identity logs.
 - **Memory write errors** → check LanceDB/in-memory settings; writes should fail-soft and be noted in logs.
 - **Planner flag not picked up** → LLM path carries `reflection` via policy state; ensure your policy call ran and the orchestrator reads either `Plan.reflection` or the stashed state flag.
 - **`ms` is not 0.0 locally** → expected: normalization to `0.0` happens only when `CI=true`. Local runs will show the measured milliseconds.
+
+## 12) Microbench (PR87)
+
+A deterministic microbench exercises the reflection unit in isolation and prints one stable JSON object.
+
+**Rule-based (deterministic):**
+```bash
+python -m clematis.scripts.bench_reflection -c examples/reflection/enabled.yaml
+```
+
+**LLM fixtures (deterministic, no network):**
+```bash
+python -m clematis.scripts.bench_reflection -c examples/reflection/llm_fixture.yaml
+```
+
+**Output schema (example):**
+```jsonc
+{
+  "backend": "rulebased",           // or "llm"
+  "allow_reflection": true,
+  "tokens_budget": 128,
+  "summary_len": 17,                // whitespace tokens in the summary
+  "ops": 1,                         // ≤ ops_cap
+  "embed": true,
+  "ops_cap": 5,
+  "time_budget_ms": 6000,
+  "ms": 0.0,                        // normalized to 0.0 when CI=true (default for tests)
+  "reason": null,                   // or "reflection_timeout", "reflect_error:<Type>"
+  "fixture_key": "abc123def456"     // present only for LLM fixtures path
+}
+```
+
+Notes:
+- The microbench uses stable inputs and does **not** write identity logs.
+- Timing is normalized to `0.0` when `CI=true` to eliminate flakes (tests force this).
+
+## 13) Optional CI Smoke (PR88)
+
+An opt‑in GitHub Actions workflow validates the microbench paths without touching identity logs.
+
+**Workflow:** `.github/workflows/reflection_smoke.yml`
+
+**How to run**
+- **Manual one‑off:** Actions → *Reflection Smoke (optional)* → Run workflow → set `run=true`.
+- **Auto on push (temporary while iterating):** in the workflow’s top‑level `env:` set
+  ```yaml
+  RUN_REFLECTION_SMOKE: "true"
+  ```
+  and revert to `"false"` before merging.
+
+**What it does**
+- Runs the microbench twice (rule‑based and LLM fixtures) and asserts deterministic fields.
+- Runs the dedicated microbench test file only: `tests/test_bench_reflection.py`.
+- Uploads artifacts `bench_rule.json` and `bench_llm.json` for inspection.
+
+**Determinism**
+- `CI=true` is set in the workflow to normalize `"ms": 0.0`.
+- No network access is required; fixtures are local and deterministic.

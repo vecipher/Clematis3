@@ -75,11 +75,31 @@ All notable changes to this project will be documented in this file.
   ```
   grep -R "io_logging.write_jsonl" -n
   ```
+
   and delete the function/export once no references remain.
+
+### Added (PR87 — M10-11: Reflection microbench & examples; deterministic, identity‑safe)
+- **Script:** `clematis/scripts/bench_reflection.py` — runs the reflection unit in isolation and prints one stable JSON object (sorted keys, compact separators). When `CI=true`, the microbench normalizes `"ms": 0.0` to eliminate flakes.
+- **Examples:** `examples/reflection/enabled.yaml` (rule‑based, deterministic) and `examples/reflection/llm_fixture.yaml` (fixtures‑only LLM backend; no network).
+- **Fixtures:** `tests/fixtures/reflection_llm.jsonl` — SHA256‑based `prompt_hash → completion` mapping; deterministic; used only by the fixtures path.
+- **Tests:** `tests/test_bench_reflection.py` — zero‑flake: forces CI‑style timing via `monkeypatch`; asserts stable fields; optional fixtures test runs only when the fixture file is present.
+- **Invariants:** Does **not** write identity logs; default path unchanged when reflection is disabled; embeddings remain deterministic when `embed=true`.
+
+### CI (PR88 — M10-12: Optional Reflection Smoke; non‑required)
+- **Workflow:** `.github/workflows/reflection_smoke.yml` — **opt‑in** CI that validates the microbench paths without touching identity logs.
+  - Trigger via **workflow_dispatch** (set `run=true`) or temporarily set `RUN_REFLECTION_SMOKE: "true"` in the workflow `env:` while iterating.
+  - Uses a small `gate` job to compute an `enabled` output (robust to context access rules); `smoke` runs only when enabled.
+- **What it runs:**
+  - Microbench (rule‑based) and microbench (LLM fixtures) — each validated with tiny Python assertions.
+  - `pytest -q tests/test_bench_reflection.py` only.
+  - Uploads `bench_rule.json` and `bench_llm.json` as artifacts.
+- **Determinism:** Sets `CI=true` and `CLEMATIS_NETWORK_BAN=1`; no network; `"ms"` normalized to `0.0`; identity logs untouched.
 
 ### Docs
 - **README:** M10 status updated; added “Reflection sessions (deterministic, gated)” quick‑start (rule‑based & fixtures‑only).
 - **docs/m10/reflection.md:** gate conditions, LLM fixtures example, `ReflectionResult`/metrics schema, fixture key notes, troubleshooting.
+- **README (PR87/PR88):** adds a “Reflection Microbench (PR87)” quick‑start (commands for rule‑based & fixtures) and links to the optional “Reflection Smoke (optional)” workflow.
+- **docs/m10/reflection.md (PR87/PR88):** adds §12 “Microbench (PR87)” and §13 “Optional CI Smoke (PR88)”, and corrects the fixtures path to `tests/fixtures/reflection_llm.jsonl`.
 
 ## [0.9.0a1] - 2025-10-03
 
