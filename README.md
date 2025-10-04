@@ -2,11 +2,11 @@
 
 Clematis is a deterministic, turn‑based scaffold for agential AI. It models agents with concept graphs and tiered reasoning (T1→T4), uses small LLMs where needed, and keeps runtime behavior reproducible (no hidden network calls in tests/CI).
 
-> **Status:** **v0.9.0a1** (2025‑10‑03) — **M10 complete** ✅. Defaults unchanged; all reflection paths are **gated and deterministic**. M9 deterministic parallelism remains flag‑gated and OFF by default.
+> **Status:** **v0.9.0a2** (2025‑10‑04) — **M11 complete** ✅ (HS1/GEL substrate). Defaults unchanged; all GEL paths are **gated and OFF by default**; identity path preserved. M10 remains complete; M9 deterministic parallelism remains flag‑gated and OFF by default.
 >
 > **M10 — Reflection Sessions (complete):** Finalized across **PR77** and **PR80–PR90** (config, writer/budgets/tests, fixtures‑only LLM backend, planner flag, telemetry/trace, microbench, optional CI smoke, docs, goldens/identity maintenance). See **[docs/m10/reflection.md](docs/m10/reflection.md)**.
 >
-> **M11 — Field‑Control GEL (HS1):** Substrate documented (contracts + optional ops, default **OFF**). No ranking changes by default; identity path preserved. See **[docs/m11/overview.md](docs/m11/overview.md)**.
+> **M11 — Field‑Control GEL (HS1) (complete):** Substrate landed across **PR91–PR96** (docs, identity tests, runtime smoke, examples, CLI inspector, milestone close). Default **OFF**; no ranking changes by default; identity preserved. See **[docs/m11/overview.md](docs/m11/overview.md)**. _Nudge planner is deferred to v4._
 
 ---
 
@@ -273,7 +273,7 @@ When `CI=true`, log writes route through `clematis/engine/orchestrator/logging.a
   – declare NumPy as a runtime dependency (examples smoke).
 - **M9 (complete):** deterministic parallelism — PR63–PR76 shipped (config + deterministic runner + cache safety + T1/T2/agents gates + ordered logs + identity & race tests + optional CI smoke and benches). Defaults keep parallelism OFF; identity path preserved.
 - **M10 (complete):** reflection sessions — PR77 (config surface), PR80–PR83 (deterministic writer + budgets + identity tests), PR84 (fixtures‑only LLM backend), PR85 (planner flag + wiring), PR86 (telemetry & trace), PR87 (microbench & examples), PR88 (optional smoke), PR89 (docs), PR90 (goldens/identity maintenance). Defaults keep reflection OFF; identity path preserved.
-- **M11 (HS1/GEL, substrate documented):** contracts + plumbing present; observe/update + decay enabled only when `graph.enabled=true`; merge/split/promotion documented but **OFF** by default; disabled path is byte‑identical. See **docs/m11/overview.md**.
+- **M11 (complete):** HS1/GEL substrate — contracts + plumbing present; observe/update + decay enabled only when `graph.enabled=true`; merge/split/promotion documented but **OFF** by default; disabled path is byte‑identical. See **docs/m11/overview.md**.
 
 Pre‑M8 hardening notes: **`Changelog/PreM8Hardening.txt`**.
 LLM adapter + fixtures: **`docs/m3/llm_adapter.md`**.

@@ -244,7 +244,58 @@ These tests run with `CI=true` and `CLEMATIS_NETWORK_BAN=1`. If `run_smoke_turn`
 
 ---
 
+## Inspecting GEL state (CLI)
+
+You can peek into snapshots with the built‑in inspector:
+
+```bash
+# Inspect the most recent snapshot (macOS/Linux)
+clematis cli inspect-snapshot "$(ls -t logs/snapshots/*.jsonl | head -n1)"
+```
+
+GEL lives under `state.graph.*` in the snapshot. Handy one‑liners:
+
+```bash
+# Show graph metadata
+clematis cli inspect-snapshot "$(ls -t logs/snapshots/*.jsonl | head -n1)" | jq '.state.graph.meta'
+
+# Count nodes and edges
+clematis cli inspect-snapshot "$(ls -t logs/snapshots/*.jsonl | head -n1)" | jq '{nodes: (.state.graph.nodes|length), edges: (.state.graph.edges|length)}'
+
+# Top 10 strongest edges (u, v, weight)
+clematis cli inspect-snapshot "$(ls -t logs/snapshots/*.jsonl | head -n1)" \
+  | jq -r '.state.graph.edges | sort_by(-.weight) | .[:10] | .[] | [.u, .v, .weight] | @tsv'
+
+# List node labels with degree
+clematis cli inspect-snapshot "$(ls -t logs/snapshots/*.jsonl | head -n1)" \
+  | jq -r '
+    .state.graph as $g
+    | ($g.nodes | map({id, label}) | from_entries? // (reduce .[] as $n ({}; .[$n.id] = $n.label))) as $label
+    | $g.edges
+    | (reduce .[] as $e ({}; .[$e.u]+=1 | .[$e.v]+=1))
+    | to_entries
+    | sort_by(-.value)[:10]
+    | .[] | "\($label[.key] // .key)\t\(.value)"'
+```
+
+> Notes
+> - When `graph.enabled=false` (default), snapshots may have `state.graph` absent or empty.
+> - The commands above rely on `jq`. If `jq` isn’t installed, install it or pipe to a file to view raw JSON.
+
+**Tip:** To generate a quick snapshot with GEL substrate enabled (observe+decay only), run:
+
+```bash
+python scripts/examples_smoke.py --examples examples/gel/enabled.yaml
+```
+
+---
+
 ## Pointers
 
 - M11 (HS1/GEL) substrate docs + examples: complete (PR91–PR94). Close out with **PR96 — CHANGELOG & milestone**.
 - See also: **Reflection (M10)** → `docs/m10/reflection.md` (section “Next: HS1/GEL”).
+
+
+---
+
+_Milestone note:_ **v3 HS1 (GEL substrate) is complete.** The field‑control **nudge planner** is **deferred to v4**.

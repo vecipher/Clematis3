@@ -114,6 +114,43 @@ All notable changes to this project will be documented in this file.
 ### Changed
 - **.gitignore:** deduplicated entries; clarified JSONL ignore patterns for local logs while keeping identity goldens intact.
 
+
+## [0.9.0a2] - 2025-10-04
+
+### M11 — Field‑Control GEL (HS1): contracts + safe plumbing (no planner)
+
+#### Added (PR91 — M11-01: Docs overview)
+- **Docs:** `docs/m11/overview.md` — what GEL is in v3 (contracts + optional ops), what it is not (no nudge planner), call sites & gates, algorithm summaries (update/decay/merge/split/promotion), determinism, defaults.
+- **README:** short pointer under Architecture/Examples (GEL substrate).
+
+#### Added (PR92 — M11-02: Disabled‑path identity for graph.*)
+- **Helpers:** `tests/helpers/identity.py` — `_strip_perf_and_quality(...)`, `_strip_perf_and_quality_and_graph(...)`; shared normalizers consolidated here.
+- **Engine test hook:** `clematis/engine/orchestrator/core.py` adds `run_smoke_turn(cfg, log_dir=None, input_text="")` (stable smoke entrypoint; no behavior change).
+- **Tests:** `tests/test_identity_disabled_path.py` — config round‑trip equality with `graph.enabled=false` (inert subtree); runtime smoke asserts **no `gel.jsonl`** and **byte‑identical logs** vs baseline.
+
+#### Added (PR93 — M11-03: Runtime identity + snapshots)
+- **Tests:** `tests/test_gel_disabled_path_runtime.py` — repeats smoke run; asserts log identity and **snapshot parity** (same files; identical content hashes when present).
+
+#### Added (PR94 — M11-04: Examples + doc polish)
+- **Examples:** `examples/gel/enabled.yaml` (observe+decay only; ops OFF) and `examples/gel/disabled.yaml` (full subtree, inert with `enabled:false`).
+- **Script:** `scripts/examples_smoke.py` — includes the two GEL examples in the default set; help text mentions HS1/GEL.
+- **Docs:** `docs/m11/overview.md` — Examples section and status updated; **README.md** adds a “GEL (HS1) examples” block with run commands.
+
+#### Packaging / CI (PR94)
+- **Packaging:** `MANIFEST.in` allow‑lists `examples/gel/*.yaml` into sdists; `pyproject.toml` adds `data-files` entry (`share/examples/clematis/gel`) so wheels ship the examples; registers `pytest` mark `identity`.
+- **CI:** `.github/workflows/ci.yml` runs the GEL example smoke (offline) and verifies examples are present in both sdist and wheel (robust path patterns).
+
+#### Docs (PR95 — M11-05: CLI inspector note)
+- **Docs:** `docs/m11/overview.md` — “Inspecting GEL state (CLI)” shows `clematis cli inspect-snapshot` usage and `jq` one‑liners for `state.graph.{meta,nodes,edges}`.
+
+#### Milestone (PR96 — M11-06: Close)
+- **Footer:** `docs/m11/overview.md` adds a milestone note: **v3 HS1 (GEL substrate) complete; nudge planner deferred to v4**.
+
+#### Invariants
+- Defaults keep `graph.enabled=false`; disabled‑path identity stays **byte‑identical**; **no GEL files** when disabled.
+- Hybrid reranker remains OFF by default (shadow‑only hook present).
+- CI green across suites; no runtime behavior changes outside explicitly enabled examples.
+
 ## [0.9.0a1] - 2025-10-03
 
 ### Added (PR77 — M10-01: Reflection gate & budgets; defaults OFF)
