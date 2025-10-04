@@ -4,7 +4,7 @@ Clematis is a deterministic, turn‑based scaffold for agential AI. It models ag
 
 > **Status:** **v0.9.0a1** (2025‑10‑03) — **M9 complete** ✅. Deterministic parallelism shipped behind flags; default path remains byte‑identical.
 >
-> **M10 — Reflection Sessions (in progress):** Config surface **PR77** (gate OFF by default), deterministic writer + budgets **PR80–PR83**, fixtures‑only LLM backend **PR84**, planner flag wiring **PR85**, and telemetry/trace **PR86** are landed. Next up: microbench & smoke (**PR87–PR88**) and docs (**PR89**). See **[docs/m10/reflection.md](docs/m10/reflection.md)**. For M9 details, see **[docs/m9/overview.md](docs/m9/overview.md)**, **[docs/m9/parallel_helper.md](docs/m9/parallel_helper.md)**, **[docs/refactors/PR76](docs/refactors/PR76)**, and **[docs/m9/migration.md](docs/m9/migration.md)**.
+> **M10 — Reflection Sessions (in progress):** Config surface **PR77** (gate OFF by default), deterministic writer + budgets **PR80–PR83**, fixtures‑only LLM backend **PR84**, planner flag wiring **PR85**, telemetry/trace **PR86**, **microbench & examples **PR87**, and **optional CI smoke **PR88** are landed. Docs are being polished in **PR89**. See **[docs/m10/reflection.md](docs/m10/reflection.md)**. For M9 details, see **[docs/m9/overview.md](docs/m9/overview.md)**, **[docs/m9/parallel_helper.md](docs/m9/parallel_helper.md)**, **[docs/refactors/PR76](docs/refactors/PR76)**, and **[docs/m9/migration.md](docs/m9/migration.md)**.
 
 ---
 
@@ -71,7 +71,7 @@ t3:
   llm:
     fixtures:
       enabled: true
-      path: tests/fixtures/llm/reflection.json   # must be a non-empty string
+      path: tests/fixtures/reflection_llm.jsonl  # must be a non-empty string
 scheduler:
   budgets:
     time_ms_reflection: 6000
@@ -95,6 +95,18 @@ scheduler:
 - *“Nothing happens”*: ensure `t3.allow_reflection: true` **and** planner `reflection: true`. Dry‑run modes skip reflection.
 - *LLM backend rejected*: set `t3.llm.fixtures.enabled: true` and provide a non‑empty `path`. The validator rejects empty or missing paths.
 - *Missing fixture at runtime*: seed a fixture for the canonical prompt JSON (see `FixtureLLMAdapter` docs).
+
+**Microbench & optional CI smoke**
+
+Local, deterministic microbench (prints one stable JSON line):
+```bash
+python -m clematis.scripts.bench_reflection -c examples/reflection/enabled.yaml
+python -m clematis.scripts.bench_reflection -c examples/reflection/llm_fixture.yaml
+```
+
+Optional CI workflow: `.github/workflows/reflection_smoke.yml`.
+- Trigger manually via **Actions → Reflection Smoke (optional)** with `run=true`.
+- To auto‑run on pushes temporarily, set `RUN_REFLECTION_SMOKE: "true"` in that workflow’s top‑level `env:` and revert before merging.
 
 ### M9: deterministic parallelism (flag‑gated)
 The PR63 surface adds a validated config for deterministic parallelism. Defaults keep behavior identical to previous milestones. As of PR66, T1 can fan‑out **per active graph** via the deterministic runner, with stable merge ordering; as of PR67, minimal observability metrics are available when enabled. As of **PR68**, T2 can fan‑out across **in‑memory** shards with a deterministic, tier‑ordered merge (score‑desc, id‑asc; de‑dupe by id); as of **PR69**, T2 can also fan‑out across **LanceDB** partitions behind the same gate; OFF path remains byte‑identical. As of **PR70**, an **agent‑level parallel driver** allows multiple agents’ turns to compute concurrently while preserving deterministic logs; it is gated separately via `perf.parallel.agents`.

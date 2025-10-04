@@ -1,0 +1,148 @@
+name: Reflection Smoke (optional)
+
+on:
+  workflow_dispatch:
+    inputs:
+      run:
+        description: "Run reflection smoke now"
+        required: false
+        default: "false"
+  push:
+    paths:
+      - "clematis/scripts/bench_reflection.py"
+      - "examples/reflection/**"
+      - "tests/test_bench_reflection.py"
+      - "tests/fixtures/reflection_llm.jsonl"
+      - "clematis/engine/stages/t3/reflect.py"
+      - "clematis/engine/util/io_logging.py"
+      - ".github/workflows/reflection_smoke.yml"
+
+permissions:
+  contents: read
+
+env:
+  TZ: "UTC"
+  PYTHONHASHSEED: "0"
+  CI: "true"                   # force CI-style normalization for deterministic timing
+  CLEMATIS_NETWORK_BAN: "1"    # defensive; microbench doesn't network anyway
+  RUN_REFLECTION_SMOKE: "false"   # optional toggle; set to 'true' to auto-run on pushes
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    outputs:
+      enabled: ${{ steps.decide.outputs.enabled }}
+    steps:
+      - id: decide
+        name: Decide whether to run smoke
+        env:
+          RUN_SMOKE: ${{ env.RUN_REFLECTION_SMOKE }}                  # workflow-level env toggle (optional)
+          DISPATCH: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.run == 'true' }}
+        run: |
+          enabled="false"
+          if [ "${DISPATCH}" = "true" ]; then
+            enabled="true"
+          fi
+          if [ "${RUN_SMOKE}" = "true" ]; then
+            enabled="true"
+          fi
+          echo "enabled=${enabled}" >> "$GITHUB_OUTPUT"
+          echo "Smoke enabled? ${enabled}"
+
+  smoke:
+    needs: gate
+    if: ${{ needs.gate.outputs.enabled == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    concurrency:
+      group: reflection-smoke-${{ github.ref }}
+      cancel-in-progress: true
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install deps (editable)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+          pip install pytest pyyaml
+
+      - name: Microbench — rule-based
+        run: |
+          python -m clematis.scripts.bench_reflection -c examples/reflection/enabled.yaml | tee bench_rule.json
+          python - << 'PY'
+          import json
+          d=json.load(open("bench_rule.json"))
+          assert d["backend"]=="rulebased"
+          assert d["ms"]==0.0
+          assert isinstance(d["summary_len"],int)
+          assert "fixture_key" not in d
+          print("rule-based bench OK")
+          PY
+          {
+            echo '### Rule-based bench' >> $GITHUB_STEP_SUMMARY
+            echo '' >> $GITHUB_STEP_SUMMARY
+            echo '```json' >> $GITHUB_STEP_SUMMARY
+            cat bench_rule.json >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            echo '' >> $GITHUB_STEP_SUMMARY
+          }
+
+      - name: Microbench — LLM fixtures
+        if: ${{ hashFiles('tests/fixtures/reflection_llm.jsonl') != '' }}
+        run: |
+          python -m clematis.scripts.bench_reflection -c examples/reflection/llm_fixture.yaml | tee bench_llm.json
+          python - << 'PY'
+          import json
+          d=json.load(open("bench_llm.json"))
+          assert d["backend"]=="llm"
+          assert d["ms"]==0.0
+          assert isinstance(d.get("fixture_key",""),str) and len(d["fixture_key"])>0
+          print("llm-fixtures bench OK")
+          PY
+          {
+            echo '### LLM fixtures bench' >> $GITHUB_STEP_SUMMARY
+            echo '' >> $GITHUB_STEP_SUMMARY
+            echo '```json' >> $GITHUB_STEP_SUMMARY
+            cat bench_llm.json >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            echo '' >> $GITHUB_STEP_SUMMARY
+          }
+
+      - name: "Microbench — LLM fixtures (skipped: no fixtures file)"
+        if: ${{ hashFiles('tests/fixtures/reflection_llm.jsonl') == '' }}
+        run: |
+          echo "No fixtures file at tests/fixtures/reflection_llm.jsonl; skipping LLM fixtures bench."
+          {
+            echo '### LLM fixtures bench' >> $GITHUB_STEP_SUMMARY
+            echo '' >> $GITHUB_STEP_SUMMARY
+            echo '> Skipped — no fixtures file at `tests/fixtures/reflection_llm.jsonl`.' >> $GITHUB_STEP_SUMMARY
+            echo '' >> $GITHUB_STEP_SUMMARY
+          }
+
+      - name: Tests — microbench only
+        run: |
+          pytest -q tests/test_bench_reflection.py
+          {
+            echo '### Microbench tests' >> $GITHUB_STEP_SUMMARY
+            echo '' >> $GITHUB_STEP_SUMMARY
+            echo 'All microbench tests passed ✅' >> $GITHUB_STEP_SUMMARY
+            echo '' >> $GITHUB_STEP_SUMMARY
+          }
+
+      - name: Upload bench artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reflection-bench-${{ github.run_id }}
+          path: |
+            bench_rule.json
+            bench_llm.json
+          retention-days: 7

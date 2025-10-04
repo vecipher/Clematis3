@@ -5,6 +5,10 @@ venv/
 env/
 .clean/
 .env/
+.env
+.env.*
+.envrc
+.direnv/
 .python-version
 
 # Python cache/compiled
@@ -19,7 +23,6 @@ dist/
 pip-wheel-metadata/
 .eggs/
 *.egg-info/
-clematis.egg-info/
 
 # Test/coverage
 .pytest_cache/
@@ -29,6 +32,7 @@ htmlcov/
 .tox/
 .nox/
 .hypothesis/
+pytestdebug.log
 
 # Linters / type checkers
 .mypy_cache/
@@ -44,5 +48,29 @@ htmlcov/
 # OS files
 .DS_Store
 
-# build artifacts
-clematis.egg-info/
+# Docs builds
+docs/_build/
+site/
+
+# Caches & scratch
+.cache/
+.ipynb_checkpoints/
+
+# Logs & artifacts (non-identity; keep tests' goldens intact)
+logs/
+**/logs/
+run_logs/
+artifacts/
+bench_rule.json
+bench_llm.json
+# Reflection telemetry JSONL under logs dirs only:
+logs/**/*.jsonl
+**/logs/**/*.jsonl
+
+# Root-level run logs (avoid committing local runs)
+/t1.jsonl
+/t2.jsonl
+/t4.jsonl
+/apply.jsonl
+/turn.jsonl
+/t3_reflection.jsonl
