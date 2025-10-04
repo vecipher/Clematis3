@@ -41,9 +41,9 @@ def test_write_is_deterministic_and_capped():
     idx = _DetIndex()
     state = _State(idx)
     entries = [
-        {"text": "alpha", "tags": ["reflection"], "kind": "summary"},
-        {"text": "beta",  "tags": ["reflection"], "kind": "summary"},
-        {"text": "gamma", "tags": ["reflection"], "kind": "summary"},
+        {"text": "alpha", "tags": ["reflection"], "kind": "summary", "vec_full": [0.1] * 32},
+        {"text": "beta",  "tags": ["reflection"], "kind": "summary", "vec_full": [0.2] * 32},
+        {"text": "gamma", "tags": ["reflection"], "kind": "summary", "vec_full": [0.3] * 32},
     ]
     res = _Result(entries)
 
@@ -62,7 +62,7 @@ def test_write_is_deterministic_and_capped():
         assert row["ts"] == "1970-01-01T00:00:12.345Z"
         assert row["tags"] == ["reflection"]
         assert row["kind"] == "summary"
-        assert "vec_full" not in row  # embed path is controlled by reflect(); write path doesn't compute it
+        assert "vec_full" in row and isinstance(row["vec_full"], list) and len(row["vec_full"]) == 32
 
 def test_write_fails_soft_when_index_missing():
     ctx = _Ctx()
