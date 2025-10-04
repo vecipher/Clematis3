@@ -24,6 +24,8 @@ def test_reflect_deterministic_basic():
     assert out1.summary == out2.summary
     assert out1.memory_entries == out2.memory_entries
     assert out1.metrics == out2.metrics
+    entry = out1.memory_entries[0]
+    assert "vec_full" in entry and isinstance(entry["vec_full"], list) and len(entry["vec_full"]) == 32
 
 def test_reflect_respects_token_cap_and_topk():
     b = ReflectionBundle(

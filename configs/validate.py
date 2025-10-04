@@ -117,8 +117,8 @@ DEFAULTS: Dict[str, Any] = {
             "temp": 0.2,
             "timeout_ms": 10000,
             "fixtures": {
-                "enabled": True,
-                "path": "fixtures/llm/qwen_small.jsonl",
+                "enabled": False,
+                "path": None,
             },
         },
     },
@@ -899,15 +899,17 @@ def _validate_config_normalize_impl(cfg: Dict[str, Any]) -> Dict[str, Any]:
     t3["max_ops_per_turn"] = _coerce_int(t3.get("max_ops_per_turn", 8))
     if not (1 <= t3["max_ops_per_turn"] <= 16):
         _err(errors, "t3.max_ops_per_turn", "must be in [1, 16]")
-    t3_backend = str(t3.get("backend", "rulebased"))
+    t3_backend = str(t3.get("backend", "rulebased")).lower()
     if t3_backend not in {"rulebased", "llm"}:
         _err(errors, "t3.backend", f"must be one of {{rulebased,llm}}, got: {t3_backend!r}")
+        t3_backend = "rulebased"
+    t3["backend"] = t3_backend
     t3["allow_reflection"] = _coerce_bool(t3.get("allow_reflection", False))
 
     # t3.reflection normalization (PR77)
     rfl = _ensure_subdict(t3, "reflection")
     # backend choice
-    r_backend = str(rfl.get("backend", "rulebased"))
+    r_backend = str(rfl.get("backend", "rulebased")).lower()
     if r_backend not in {"rulebased", "llm"}:
         _err(errors, "t3.reflection.backend", "must be one of {rulebased,llm}")
         r_backend = "rulebased"
@@ -957,14 +959,47 @@ def _validate_config_normalize_impl(cfg: Dict[str, Any]) -> Dict[str, Any]:
         _err(errors, "t3.llm.timeout_ms", "must be >= 1")
 
     fixtures = _ensure_subdict(llm, "fixtures")
-    fixtures["enabled"] = _coerce_bool(fixtures.get("enabled", True))
-    fpath = fixtures.get("path", "fixtures/llm/qwen_small.jsonl")
-    if not isinstance(fpath, str) or not fpath.strip():
-        _err(errors, "t3.llm.fixtures.path", "must be a non-empty string")
+    fixtures_enabled = _coerce_bool(fixtures.get("enabled", False))
+    fixtures["enabled"] = fixtures_enabled
+
+    raw_path = fixtures.get("path", None)
+    if isinstance(raw_path, str):
+        raw_path = raw_path.strip()
+
+    if fixtures_enabled:
+        if not isinstance(raw_path, str) or not raw_path:
+            _err(
+                errors,
+                "t3.llm.fixtures.path",
+                "must be a non-empty string when fixtures.enabled=true",
+            )
+        else:
+            fixtures["path"] = raw_path
     else:
-        fixtures["path"] = fpath
+        if raw_path is None:
+            fixtures["path"] = None
+        elif isinstance(raw_path, str) and raw_path:
+            fixtures["path"] = raw_path
+        else:
+            fixtures["path"] = None
+
     llm["fixtures"] = fixtures
     t3["llm"] = llm
+
+    fixtures_path = fixtures.get("path")
+    if t3["allow_reflection"] and r_backend == "llm":
+        if not fixtures_enabled:
+            _err(
+                errors,
+                "t3.llm.fixtures.enabled",
+                "must be true when t3.reflection.backend=llm and allow_reflection=true",
+            )
+        elif not isinstance(fixtures_path, str) or not fixtures_path.strip():
+            _err(
+                errors,
+                "t3.llm.fixtures.path",
+                "must be a non-empty string when fixtures.enabled=true",
+            )
 
     # ---- T4 ----
     t4 = _ensure_subdict(merged, "t4")

@@ -302,8 +302,25 @@ def _run_reflection_if_enabled(ctx, state, plan, utter, t2_obj):
             reflect_fn = getattr(refl_module, "reflect", reflect_fn)
         except Exception:
             pass
-    result = reflect_fn(bundle, cfg, embedder=None)
-    elapsed_ms = round((time.perf_counter() - t0) * 1000.0, 3)
+
+    error_exc = None
+    try:
+        result = reflect_fn(bundle, cfg, embedder=None)
+    except Exception as exc:
+        error_exc = exc
+        elapsed_ms = round((time.perf_counter() - t0) * 1000.0, 3)
+        refl_cfg = (t3cfg.get("reflection") or {})
+        backend_name = str(refl_cfg.get("backend", "rulebased"))
+        result = ReflectionResult(
+            summary="",
+            memory_entries=[],
+            metrics={
+                "backend": backend_name,
+                "reason": f"reflect_error:{type(exc).__name__}",
+            },
+        )
+    else:
+        elapsed_ms = round((time.perf_counter() - t0) * 1000.0, 3)
     metrics_ms = 0.0 if str(_os.environ.get("CI", "")).lower() == "true" else elapsed_ms
     # Attach timing into metrics (will be logged by later PRs)
     try:
@@ -316,27 +333,28 @@ def _run_reflection_if_enabled(ctx, state, plan, utter, t2_obj):
 
     # Honor wall budget: if exceeded, mark timeout and drop entries (fail-soft).
     budgets = ((cfg.get("scheduler") or {}).get("budgets") or {}) if isinstance(cfg, dict) else {}
-    wall_ms = budgets.get("time_ms_reflection")
-    try:
-        wall_ms_val = int(wall_ms) if wall_ms is not None else None
-    except Exception:
-        wall_ms_val = None
-    if wall_ms_val is not None and elapsed_ms > wall_ms_val:
+    if error_exc is None:
+        wall_ms = budgets.get("time_ms_reflection")
         try:
-            # Rebuild a shallow result with empty writes and a reason
-            result = ReflectionResult(
-                summary=result.summary,
-                memory_entries=[],
-                metrics={**(result.metrics or {}), "reason": "reflection_timeout"},
-            )
+            wall_ms_val = int(wall_ms) if wall_ms is not None else None
         except Exception:
-            # If dataclass import shape changes, fall back to mutating
+            wall_ms_val = None
+        if wall_ms_val is not None and elapsed_ms > wall_ms_val:
             try:
-                result.memory_entries = []
-                if isinstance(result.metrics, dict):
-                    result.metrics["reason"] = "reflection_timeout"
+                # Rebuild a shallow result with empty writes and a reason
+                result = ReflectionResult(
+                    summary=result.summary,
+                    memory_entries=[],
+                    metrics={**(result.metrics or {}), "reason": "reflection_timeout"},
+                )
             except Exception:
-                pass
+                # If dataclass import shape changes, fall back to mutating
+                try:
+                    result.memory_entries = []
+                    if isinstance(result.metrics, dict):
+                        result.metrics["reason"] = "reflection_timeout"
+                except Exception:
+                    pass
 
     # Stash for downstream (PR86 logging / PR80 writes)
     try:
