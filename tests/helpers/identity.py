@@ -1,6 +1,7 @@
 # tests/helpers/identity.py
 from __future__ import annotations
 import json
+import copy
 from typing import Any, Iterable
 import os
 
@@ -76,7 +77,38 @@ __all__ = [
     "collect_snapshots_from_apply",
     "hash_snapshots",
     "purge_dir",
+    "_strip_perf_and_quality",
+    "_strip_perf_and_quality_and_graph",
 ]
+
+# ---------------------------------------------------------------------------
+# PR72 helpers: routing, IO, hashing, and snapshot collection
+# ---------------------------------------------------------------------------
+
+def _strip_perf_and_quality(cfg: dict) -> dict:
+    """
+    Return a shallowly cleaned copy of cfg with:
+      - top-level 'perf' subtree removed (disabled-path knobs)
+      - 't2.quality' subtree removed if present
+    Deterministic and side-effect free (input not mutated).
+    """
+    x = copy.deepcopy(cfg)
+    # Drop perf.*
+    x.pop("perf", None)
+    # Drop t2.quality.*
+    t2 = x.get("t2")
+    if isinstance(t2, dict):
+        t2.pop("quality", None)
+    return x
+
+def _strip_perf_and_quality_and_graph(cfg: dict) -> dict:
+    """
+    Same as _strip_perf_and_quality but also removes the top-level 'graph' subtree.
+    Used for disabled-path identity tests where 'graph.enabled=false' must be inert.
+    """
+    x = _strip_perf_and_quality(cfg)
+    x.pop("graph", None)
+    return x
 
 
 def route_logs(monkeypatch, path: str | Path) -> str:
