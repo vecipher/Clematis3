@@ -40,6 +40,13 @@ jobs:
       - name: Install cibuildwheel
         run: python -m pip install --upgrade pip cibuildwheel==2.21.* build
 
+      - name: Windows PATH sanity (remove stray 'python')
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if (Test-Path "$pwd/python") { Write-Host "Removing: $pwd/python"; Remove-Item -Force -Recurse "$pwd/python" }
+          if (Test-Path "$pwd/python.exe") { Write-Host "Removing: $pwd/python.exe"; Remove-Item -Force "$pwd/python.exe" }
+
       # Linux: drop build-id for smaller/cleaner wheels; only applies on ELF targets
       - name: Set Linux RUSTFLAGS
         if: runner.os == 'Linux'
@@ -57,7 +64,45 @@ jobs:
           CIBW_TEST_COMMAND: "python -c \"import clematis.native.t1 as t; assert True\""
           # Ensure reproducible timestamps in wheels where possible
           CIBW_ENVIRONMENT: "SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1"
+          CIBW_BEFORE_BUILD_LINUX: |
+            curl https://sh.rustup.rs -sSf | sh -s -- -y --profile minimal
+            . "$HOME/.cargo/env"
+            rustup default stable
+            rustc -V
+            cargo -V
+          CIBW_ENVIRONMENT_LINUX: >
+            PATH="$HOME/.cargo/bin:$PATH" PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1 RUSTFLAGS="-C link-arg=-Wl,--build-id=none"
+
+          CIBW_BEFORE_BUILD_MACOS: |
+            rustc -V || (curl https://sh.rustup.rs -sSf | sh -s -- -y --profile minimal)
+            . "$HOME/.cargo/env"
+            rustup default stable
+            rustc -V
+            cargo -V
+          CIBW_ENVIRONMENT_MACOS: >
+            PATH="$HOME/.cargo/bin:$PATH" PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1 SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH
+
+          CIBW_BEFORE_BUILD_WINDOWS: |
+            rustup toolchain install stable --profile minimal
+            rustup default stable
+            rustc -V
+            cargo -V
+          CIBW_ENVIRONMENT_WINDOWS: >
+            PATH="C:\Users\runneradmin\.cargo\bin;%PATH%" PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1
         run: python -m cibuildwheel --output-dir wheelhouse
+
+      - name: Assert wheel contains native module
+        shell: bash
+        run: |
+          WHL=$(ls wheelhouse/*.whl | head -n1)
+          python - <<'PY'
+          import glob, zipfile
+          whl = glob.glob('wheelhouse/*.whl')[0]
+          with zipfile.ZipFile(whl) as z:
+              names = z.namelist()
+          assert any(('/_t1_rs.' in n) or n.endswith('_t1_rs.so') or n.endswith('_t1_rs.pyd') for n in names), f"no native _t1_rs in {whl}"
+          print('OK:', whl)
+          PY
 
       - name: Upload wheel artifacts
         uses: actions/upload-artifact@v4
