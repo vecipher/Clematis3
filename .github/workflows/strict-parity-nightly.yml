@@ -7,6 +7,10 @@ on:
     - cron: "0 20 * * *"   # daily at 20:00 UTC
   workflow_dispatch: {}
 
+concurrency:
+  group: strict-parity-nightly-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   strict-parity:
     runs-on: ubuntu-22.04
@@ -17,6 +21,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: 'pip'
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -58,3 +63,12 @@ jobs:
           pytest --maxfail=1 -q $GITHUB_WORKSPACE/tests/perf/test_bench_t1_smoke.py -m slow
           # diagnostics & parity-focused tests
           pytest --maxfail=1 -q $GITHUB_WORKSPACE/tests/native
+
+      - name: Upload native diagnostics (optional)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: t1-native-diagnostics
+          path: /tmp/logs/t1_native_diag.jsonl
+          if-no-files-found: ignore
+          retention-days: 7

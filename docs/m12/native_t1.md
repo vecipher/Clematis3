@@ -276,7 +276,10 @@ jobs:
   - `pyo3_runtime_exc` (ERROR) — exception surfaced out of the Rust/PyO3 layer.
 
 **Where to see them**
-- Stage metrics carry these under `metrics["native_t1"]`. They also bubble up into the top-level turn log under `t1.native_t1` (see `logs/turn.jsonl`). Example:
+- Stage metrics carry these under `metrics["native_t1"]`. They are also written to a dedicated non-identity stream `t1_native_diag.jsonl` (JSONL, one record per turn). Example line:
+
+```json
+{"turn":"42","agent":"alice","native_t1":{"used_native":1,"fallback_import_failed":0,"fallback_gated_caps":0,"fallback_gated_dedupe":0,"fallback_runtime_exc":0}}
 
 ```json
 {

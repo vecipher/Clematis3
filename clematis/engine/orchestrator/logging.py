@@ -23,6 +23,7 @@ __all__ = [
     "_append_jsonl",
     "append_jsonl",
     "log_t3_reflection",
+    "log_t1_native_diag",
 ]
 
 
@@ -114,6 +115,31 @@ def log_t3_reflection(
         payload["fixture_key"] = str(extra["fixture_key"])
     try:
         append_jsonl("t3_reflection.jsonl", payload)
+    except Exception:
+        # Never crash the turn on logging issues
+        return
+
+
+# Helper for native T1 diagnostics logging (non-identity stream)
+def log_t1_native_diag(
+    ctx,
+    agent: str,
+    native_t1: Dict[str, Any],
+) -> None:
+    """
+    Emit a single diagnostics record to the staged 't1_native_diag.jsonl' stream.
+    Fail-soft: any error during logging is swallowed.
+    Only call this if `native_t1` is truthy (non-empty dict).
+    """
+    if not native_t1:
+        return
+    payload: Dict[str, Any] = {
+        "turn": str(getattr(ctx, "turn_id", "-")),
+        "agent": str(agent),
+        "native_t1": dict(native_t1),
+    }
+    try:
+        append_jsonl("t1_native_diag.jsonl", payload)
     except Exception:
         # Never crash the turn on logging issues
         return
