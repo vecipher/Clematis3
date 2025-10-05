@@ -64,7 +64,7 @@ cli-extras = [
 cli-demo = ["numpy>=1.24", "pyyaml>=6.0"]
 
 [build-system]
-requires = ["setuptools>=77", "wheel"]
+requires = ["setuptools>=77", "wheel", "setuptools-rust>=1.9.0", "numpy>=1.26,<2"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
@@ -78,6 +78,16 @@ include-package-data = true
 zip-safe = false
 
 
+[tool.setuptools-rust]
+
+[[tool.setuptools-rust.ext-modules]]
+# Python module path you will import: clematis.native._t1_rs
+target = "clematis.native._t1_rs"
+# Path to the Cargo manifest for this extension
+path = "clematis/native/Cargo.toml"
+# Binding; value per docs is capitalized
+binding = "PyO3"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = [
@@ -88,7 +98,10 @@ markers = [
 ]
 
 [tool.setuptools.package-data]
-clematis = ["fixtures/**/*", "examples/**/*", "VERSION"]
+clematis = [
+  "fixtures/**/*", "examples/**/*", "VERSION",
+  "native/Cargo.toml", "native/src/**/*"
+]
 
 [tool.setuptools.data-files]
 "share/man/man1" = ["man/*.1"]

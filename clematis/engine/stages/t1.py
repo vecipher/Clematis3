@@ -131,6 +131,11 @@ def _compute_decay(distance: int, cfg_t1: dict) -> float:
     return max(rate**distance, floor)
 
 
+def _canon_nodes_vals(d_nodes: np.ndarray, d_vals: np.ndarray):
+    """Sort by node id and enforce ABI dtypes for stable comparisons."""
+    o = np.argsort(d_nodes, kind="stable")
+    return d_nodes[o].astype(np.int32, copy=False), d_vals[o].astype(np.float32, copy=False)
+
 # === PR98: Native parity harness scaffolding (no behavior change by default) ===
 from typing import Sequence, Optional
 
@@ -175,11 +180,11 @@ def _t1_one_graph_python_inner(
 
     # Params
     decay_p = params.get("decay", {}) if isinstance(params, dict) else {}
-    rate = float(decay_p.get("rate", 0.6))
-    floor = float(decay_p.get("floor", 0.05))
+    rate = np.float32(decay_p.get("rate", 0.6))
+    floor = np.float32(decay_p.get("floor", 0.05))
     radius_cap = int(params.get("radius_cap", 4))
     iter_cap_layers = int(params.get("iter_cap_layers", 50))
-    node_budget = float(params.get("node_budget", 1.5))
+    node_budget = np.float32(params.get("node_budget", 1.5))
 
     n_nodes = int(key_rank.max()) + 1 if key_rank.size > 0 else 0
     # If key_rank is empty, infer from CSR
@@ -190,16 +195,20 @@ def _t1_one_graph_python_inner(
     acc = np.zeros(n_nodes, dtype=np.float32)
     dist = np.full(n_nodes, -1, dtype=np.int32)
 
-    # Priority queue as a Python heap of tuples: (-|w|, node, w)
+    # Priority queue uses a min-heap with composite key mirroring Rust:
+    # key = (-priority_f32, key_rank, node)
     import heapq as _heapq
-    pq: List[Tuple[float, int, float]] = []
+    def _pq_key(priority_f32, kr, node):
+        return (-float(np.float32(priority_f32)), int(kr), int(node))
+    pq: List[Tuple[Tuple[float, int, int], int, float]] = []
 
     local_max_delta = 0.0
     for s, sw in zip(seeds.tolist(), seed_weights.tolist()):
-        acc[s] += float(sw)
+        sw_f32 = float(np.float32(sw))
+        acc[s] += sw_f32
         dist[s] = 0
-        _heapq.heappush(pq, (-abs(sw), int(s), float(sw)))
-        local_max_delta = max(local_max_delta, abs(float(sw)))
+        _heapq.heappush(pq, (_pq_key(sw_f32, key_rank[s], s), int(s), sw_f32))
+        local_max_delta = max(local_max_delta, abs(sw_f32))
 
     pops = 0
     propagations = 0
@@ -212,7 +221,7 @@ def _t1_one_graph_python_inner(
         return max(rate ** d, floor)
 
     while pq:
-        _negw, u, w = _heapq.heappop(pq)
+        _, u, w = _heapq.heappop(pq)
         pops += 1
         layer = int(dist[u]) if dist[u] >= 0 else 0
         if layer > 0 and layer > layers_processed:
@@ -241,17 +250,19 @@ def _t1_one_graph_python_inner(
                 layer_cap_hits_local += 1
                 continue
 
-            contrib = float(w) * float(weights[e_idx]) * float(rel_mult[e_idx]) * _decay(d)
-            if abs(contrib) < EPS:
+            contrib_f32 = float(
+                np.float32(w) * np.float32(weights[e_idx]) * np.float32(rel_mult[e_idx]) * np.float32(_decay(d))
+            )
+            if abs(contrib_f32) < EPS:
                 continue
 
-            acc[v] += contrib
+            acc[v] += contrib_f32
             propagations += 1
-            local_max_delta = max(local_max_delta, abs(contrib))
+            local_max_delta = max(local_max_delta, abs(contrib_f32))
             if dist[v] < 0 or d < dist[v]:
                 dist[v] = d
-            if abs(acc[v]) < node_budget:
-                _heapq.heappush(pq, (-abs(contrib), v, contrib))
+            if abs(acc[v]) < float(node_budget):
+                _heapq.heappush(pq, (_pq_key(contrib_f32, key_rank[v], v), v, contrib_f32))
             else:
                 node_budget_hits_local += 1
 
@@ -289,7 +300,7 @@ def _t1_one_graph_native(
     params: Dict[str, Any],
     seed_weights: Optional[np.ndarray] = None,
 ) -> Tuple[np.ndarray, np.ndarray, Dict[str, Any]]:
-    """Calls the 'native' (currently Python) kernel with Rust-compatible signature."""
+    """Calls the native kernel (Python stub or Rust ext) with Rust-compatible signature."""
     from clematis.native import t1 as native_t1  # lazy import to avoid cycles
     if seed_weights is None:
         seed_weights = np.ones_like(seeds, dtype=np.float32)
@@ -320,11 +331,19 @@ def _t1_one_graph_native(
 
 
 def _native_t1_allowed(cfg) -> bool:
-    # Mirrors PR97 validation: backend ∈ {"rust","python"}
+    """PR99 gate: allow native only if backend is valid **and** perf caps/dedupe are OFF.
+
+    We disallow the native path when perf.t1.caps.* or perf.t1.dedupe_window are enabled,
+    because PR99 implements only perf-OFF semantics in the kernel.
+    """
     try:
-        block = cfg["perf"]["native"]["t1"]
-        backend = block.get("backend", "rust")
-        return backend in {"rust", "python"}
+        block = (cfg.get("perf") or {}).get("native", {}).get("t1", {})
+        backend_ok = block.get("backend", "rust") in {"rust", "python"}
+        perf_t1 = (cfg.get("perf") or {}).get("t1", {})
+        caps = perf_t1.get("caps", {}) or {}
+        dedupe_window = int(perf_t1.get("dedupe_window", 0) or 0)
+        caps_on = any(bool(v) for v in caps.values())
+        return bool(backend_ok and not caps_on and dedupe_window == 0)
     except Exception:
         return False
 
@@ -379,10 +398,10 @@ def _t1_one_graph_dispatch(
                     seed_weights=seed_weights,
                     rel_code=rel_code,
                 )
-                if not (np.array_equal(n_nodes, p_nodes) and np.allclose(n_vals, p_vals, rtol=0, atol=0)):
+                n_nodes_c, n_vals_c = _canon_nodes_vals(n_nodes, n_vals)
+                p_nodes_c, p_vals_c = _canon_nodes_vals(p_nodes, p_vals)
+                if not (np.array_equal(n_nodes_c, p_nodes_c) and np.array_equal(n_vals_c, p_vals_c) and n_met == p_met):
                     raise AssertionError("strict_parity: native != python")
-                if set(n_met.keys()) != set(p_met.keys()):
-                    raise AssertionError("strict_parity: metrics keys differ")
                 return p_nodes, p_vals, p_met
             return n_nodes, n_vals, n_met
 

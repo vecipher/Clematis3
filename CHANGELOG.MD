@@ -10,7 +10,7 @@ All notable changes to this project will be documented in this file.
 
 
 ## [Unreleased]
-**Summary:** PR98 lands the Python FFI surface and strict‑parity harness (defaults OFF; identity‑safe).
+**Summary:** PR98 + PR99 land the Python FFI surface, strict‑parity harness, and the first Rust kernel (perf‑OFF semantics; optional; identity‑safe by default).
 
 
 ### Added (PR98 — M12-02: Python FFI surface & strict-parity harness; identity-safe)
@@ -49,7 +49,50 @@ All notable changes to this project will be documented in this file.
   - Keep `_t1_one_graph_python_inner(...)` a verbatim move of the legacy inner loop to ensure a trustworthy baseline for PR99.
 
 #### Roadmap
-- **PR99:** Rust kernel (perf‑OFF semantics) + parity tests.
+- **PR99:** (shipped in Unreleased) Rust kernel (perf‑OFF semantics) + parity tests.
+
+### Added (PR99 — M12-03: Rust kernel (perf‑OFF semantics); optional, identity‑safe)
+- **Native extension:** `clematis/native/src/lib.rs` via PyO3 exposes `t1_propagate_one_graph(...)` and returns `(d_nodes:int32, d_vals:float32, metrics:dict)`; outputs only non‑zeros. Heap ordering is deterministic: `(priority: f32, key_rank: i64, node: i64)`.
+- **Packaging:** `pyproject.toml` integrates setuptools‑rust and builds extension module `clematis.native._t1_rs`. Wheels include the compiled `.so` when built on a platform toolchain.
+- **Python bridge:** `clematis/native/t1.py` now:
+  - `available()` returns `True` iff `from clematis.native import _t1_rs` succeeds.
+  - `propagate_one_graph_rs(...)` delegates to `_t1_rs.t1_propagate_one_graph(...)` (same positional arg order as PR98 stub), returning canonical dtypes.
+- **Engine gate:** `clematis/engine/stages/t1.py` flips `_native_t1_allowed(cfg)` to **disallow** the native path when any T1 compaction/caps/dedupe knobs are set (`perf.t1.caps.*` or `perf.t1.dedupe_window`). With `strict_parity=true` the stage computes both paths and asserts equality; otherwise it uses the native result.
+- **Tests:**
+  - `tests/native/test_import_extension_optional.py` — project remains usable when the extension is missing.
+  - `tests/native/test_t1_parity_small.py` / `..._random.py` — exact parity on hand‑built and randomized tiny graphs.
+  - `tests/native/test_t1_fallback_when_perf_caps_on.py` — enabling any cap/dedupe forces fallback to Python.
+  - Hygiene: `tests/native/test_t1_parity_random.py` now uses proper Hypothesis `@given(...)` instead of `.example()` loops (less flake, faster).
+- **How to verify (local):**
+  ```
+  # 1) Install Rust toolchain (one time)
+  curl https://sh.rustup.rs -sSf | sh
+  rustup target add aarch64-apple-darwin  # on Apple Silicon
+
+  # 2) Build a wheel with the extension
+  export PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1   # Python 3.13 workaround for PyO3<0.22
+  python -m pip install -U pip build wheel setuptools-rust
+  rm -rf build dist *.egg-info
+  python -m build -w
+
+  # 3) Install the wheel into a clean venv and verify
+  python -m pip uninstall -y clematis || true
+  python -m pip install dist/clematis-0.9.0a2-*.whl
+  python - <<'PY'
+  import clematis.native.t1 as t; print("native available:", t.available())
+  PY
+
+  # 4) Run the native tests
+  pytest -q tests/native
+  ```
+- **Troubleshooting:**
+  - `ModuleNotFoundError: clematis.native._t1_rs` after install usually means you're importing from the **source tree** (editable import shadows the installed wheel). Ensure the current working directory is **not** the repo root when testing the installed wheel, or run `python -c 'import sys;print(sys.path[0])'` to confirm.
+  - `error: can't find Rust compiler` → install with `rustup` and ensure `cargo` is on `PATH`.
+  - `the configured Python interpreter version (3.13) is newer than PyO3's maximum supported` → set `PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1` or upgrade PyO3 in a follow‑up.
+- **Invariants:**
+  - Native path is **OFF by default** and additionally gated by `_native_t1_allowed(cfg)`.
+  - Disabled‑path identity remains **byte‑identical** to `0.9.0a2`.
+
 - **PR100:** Wheels/CI matrix; installed-wheel tests.
 - **PR101–102:** Bench doc + diagnostics/hardening; optional nightly strict-parity job.
 - **PR103:** Version bump (0.9.0a3) + release.

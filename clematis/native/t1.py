@@ -3,14 +3,18 @@ from typing import Any, Tuple, Sequence, Dict
 import numpy as np
 import inspect
 
+try:
+    from . import _t1_rs as _rs  # PyO3 extension (PR99)
+    _HAVE_RS = True
+except Exception:
+    _HAVE_RS = False
+
 __all__ = ["available", "propagate_one_graph_rs"]
 
 
 def available() -> bool:
-    """PR98: keep inert by default. The native kernel is not importable yet.
-    Tests may monkeypatch this to True. A future PR will probe the compiled ext.
-    """
-    return False
+    """PR99: native available iff the compiled extension imports successfully."""
+    return bool(_HAVE_RS)
 
 
 # ---- dtype helpers ---------------------------------------------------------
@@ -44,16 +48,45 @@ def propagate_one_graph_rs(
     iter_cap_layers: int,
     node_budget: float,
 ) -> Tuple[np.ndarray, np.ndarray, Dict[str, Any]]:
-    """Python stub for the future Rust kernel.
+    """Python stub for the coming Rust kernel.
 
     Returns:
       d_nodes: int32 [K]    -- node ids with non-zero deltas
       d_vals:  float32 [K]  -- corresponding delta values
       metrics: dict         -- deterministic counters/timings
 
-    The call shape matches the planned Rust FFI. Internally we call the
-    factored Python inner loop (PR98) to establish a strict-parity harness.
+    The call shape matches the planned Rust FFI, ltr will internally call
+    refactored Python inner loop (PR98) to establish strict-parity harness.
     """
+    # pref Rust kernel if the extension is present (PR99)
+    if _HAVE_RS:
+        indptr = _as_np_int32(indptr)
+        indices = _as_np_int32(indices)
+        weights = _as_np_float32(weights)
+        rel_code = _as_np_int32(rel_code)
+        rel_mult = _as_np_float32(rel_mult)
+        seed_nodes = _as_np_int32(seed_nodes)
+        seed_weights = _as_np_float32(seed_weights)
+        key_rank = _as_np_int32(key_rank)
+
+        d_nodes, d_vals, metrics = _rs.t1_propagate_one_graph(
+            indptr,
+            indices,
+            weights,
+            rel_code,
+            rel_mult,
+            seed_nodes,
+            seed_weights,
+            key_rank,
+            float(rate),
+            float(floor),
+            int(radius_cap),
+            int(iter_cap_layers),
+            float(node_budget),
+        )
+        # Enforce ABI dtypes
+        return _as_np_int32(d_nodes), _as_np_float32(d_vals), metrics
+
     # Lazy import to avoid import cycles if the engine isn't fully loaded yet.
     try:
         from clematis.engine.stages.t1 import _t1_one_graph_python_inner  # type: ignore
@@ -63,17 +96,17 @@ def propagate_one_graph_rs(
             "Please move the legacy inner loop into that symbol before using this stub."
         ) from e
 
-    # Normalize inputs to canonical dtypes expected by the kernel.
+    # inputs normalization to canon "dtypes" as expected by this fuckass kernel.
     indptr = _as_np_int32(indptr)
     indices = _as_np_int32(indices)
     weights = _as_np_float32(weights)
-    rel_code = _as_np_int32(rel_code)   # accepted for forward-compatibility
+    rel_code = _as_np_int32(rel_code)   # accepted for forward-compat
     rel_mult = _as_np_float32(rel_mult)
     seed_nodes = _as_np_int32(seed_nodes)
     seed_weights = _as_np_float32(seed_weights)
     key_rank = _as_np_int32(key_rank)
 
-    # Pack parameters into the structure the inner loop expects.
+    # parameters packing into the structure the inner loop want
     params: Dict[str, Any] = {
         "decay": {"mode": "exp_floor", "rate": float(rate), "floor": float(floor)},
         "radius_cap": int(radius_cap),
@@ -81,7 +114,7 @@ def propagate_one_graph_rs(
         "node_budget": float(node_budget),
     }
 
-    # Build kwargs for the inner function, adding optional keys only if supported.
+    # kwargs for the inner function, adding optional keys only if supported.
     inner_sig = inspect.signature(_t1_one_graph_python_inner)
     kw: Dict[str, Any] = {
         "indptr": indptr,
@@ -99,7 +132,7 @@ def propagate_one_graph_rs(
 
     d_nodes, d_vals, metrics = _t1_one_graph_python_inner(**kw)
 
-    # Enforce output dtypes for parity and ABI stability.
+    # output encorments of dtypes for parity and ABI stability
     d_nodes = _as_np_int32(d_nodes)
     d_vals = _as_np_float32(d_vals)
     if not isinstance(metrics, dict):

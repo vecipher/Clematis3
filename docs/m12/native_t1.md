@@ -1,7 +1,6 @@
 # M12 — Native Kernel Acceleration (T1)
 
-**Status**: PR98 — Python FFI surface & strict‑parity harness (defaults OFF; identity‑safe). Still inert by default (
-`available() -> False`). The compiled native kernel lands in PR99; this page documents the target design and how to use it once available.
+**Status**: PR99 — Rust kernel (perf‑OFF semantics) shipped; PR98 Python FFI & strict‑parity harness included. Default behavior unchanged unless enabled. `available()` returns **True** when the compiled extension (`clematis.native._t1_rs`) is importable; otherwise we fall back to Python.
 
 ---
 
@@ -11,7 +10,7 @@ An optional, strictly-parity **native inner loop** for the T1 propagation stage.
 ### Goals
 - **Determinism first**: byte-identical disabled path; native path returns exactly what the Python loop would (same order, same tie‑breaks).
 - **Opt‑in**: behind `perf.native.t1.enabled` and additional safety gates.
-- **Cross‑platform**: prebuilt wheels for Linux/macOS/Windows (Py 3.11–3.13) once shipped.
+- **Cross‑platform**: prebuilt wheels planned for PR100+ (Linux/macOS/Windows; Py 3.11–3.13).
 - **Frictionless fallback**: if any gate fails, we silently use the Python path and optionally log a gated metric.
 
 ### Non-goals (M12)
@@ -53,8 +52,8 @@ All of the following must hold:
    - No `perf.t1.dedupe_window`.
 4. Optional: `backend: rust` (default) or `python` (forces legacy path even if enabled).
 
-> **Tip (PR98):**
-> `available()` deliberately returns **False** until PR99 ships the compiled extension. Enabling `perf.native.t1` in PR98 therefore does not activate the native path outside of tests; use strict‑parity tests with a monkeypatched `available()` to validate the harness.
+> **Note (PR99):**
+> `available()` now reflects whether the compiled extension can be imported. If it’s missing, the engine silently uses the Python path—even when `perf.native.t1.enabled=true`.
 
 If any of these fail, the engine uses the Python loop. A gated counter may be incremented for observability in later PRs (not in PR97).
 
@@ -83,10 +82,10 @@ This is the stable interface between Python and the native kernel.
   - `node_budget_hits: int`
   - `_max_delta_local: float`
 
-**Deterministic ordering**: the kernel uses a heap ordered by `(priority=-abs(w), key_rank[u], node_id)` to replicate Python’s processing order.
+**Deterministic ordering**: processing is ordered by a heap key equivalent to `(priority desc by |Δ|, key_rank asc, node_id asc)`; this mirrors the Python reference.
 
-### PR98 parity harness (dispatcher)
-The engine exposes a test‑visible dispatcher that selects the native path when eligible:
+### Parity harness & dispatcher (PR98 + PR99)
+The engine exposes a dispatcher that selects the native path when eligible and supports strict‑parity checks:
 
 ```python
 _t1_one_graph_dispatch(cfg, indptr, indices, weights, rel_code, rel_mult, key_rank, seeds, params)
@@ -139,38 +138,55 @@ If the extension is unavailable or a gate is not met, the run still completes vi
 ---
 
 ## Building from source (developers)
-> Not required when installing official wheels; this is for contributors.
+> Not required when installing official wheels (planned for PR100+); this is for contributors.
 
-1. Install toolchain:
+1. Install toolchains:
    ```bash
-   python -m pip install -U pip build setuptools setuptools-rust
-   # Rust toolchain (rustup) is required once the kernel lands
+   xcode-select --install               # macOS SDK/linker (macOS only)
+   curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+   source "$HOME/.cargo/env"
+   rustup default stable
    ```
-2. Build artifacts:
+2. (Python 3.13 only) enable ABI3 forward‑compat for PyO3 ≤ 0.21:
    ```bash
-   python -m build   # produces sdist and wheel under dist/
+   export PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1
    ```
-3. Test installed wheel:
+3. Build the wheel with the extension:
    ```bash
-   python -m pip install dist/*.whl
-   pytest -q tests/native tests/config
+   python -m pip install -U pip build wheel setuptools-rust
+   rm -rf build dist *.egg-info
+   python -m build -w
+   ```
+4. Install & verify:
+   ```bash
+   python -m pip uninstall -y clematis || true
+   python -m pip install dist/clematis-*.whl
+   python - <<'PY'
+   import clematis.native.t1 as t
+   print('native available:', t.available())
+   PY
    ```
 
 ---
 
 ## Troubleshooting (once enabled)
-- **Native path not active (PR98)** — expected: `available()` returns False until PR99 ships the compiled extension. The engine will fall back to the Python loop even if `perf.native.t1.enabled=true`.
-- **Strict‑parity assertion error** — capture logs and open an issue; include config & a minimal repro. In PR98 this means the Python stub and Python inner disagree (should not happen).
-- **Extension import fails** — ensure you installed a wheel that matches your Python/OS/arch, or build from source with Rust.
-- **Parity assertion error (strict mode)** — capture logs and open an issue; include the config and a minimal repro.
+- **`ModuleNotFoundError: clematis.native._t1_rs`** — You’re likely importing from the source tree which shadows the installed package. Run Python from outside the repo, or remove the repo path from `sys.path`. Ensure you installed a platform wheel.
+- **`error: can't find Rust compiler`** — Install Rust via `rustup` and ensure `cargo` is on `PATH`.
+- **`the configured Python interpreter version (3.13) is newer than PyO3's maximum supported`** — set `PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1` in the build environment (or upgrade PyO3 in a follow‑up).
+- **Strict‑parity assertion** — capture config + minimal repro and file an issue. The native and Python paths are expected to be bit‑identical under perf‑OFF semantics.
+
+---
+
+### Repo hygiene
+- Do **not** commit compiled artifacts (e.g., `clematis/native/_t1_rs*.so`). Add them to `.gitignore`. CI builds wheels when needed.
 
 ---
 
 ## Roadmap & scope notes
-- **PR97**: Config surface + stubs.
-- **PR98**: (shipped) Python FFI & strict‑parity harness (still Python only; default OFF; identity‑safe).
-- **PR99**: Rust kernel (perf‑OFF semantics), parity tests.
-- **PR100+**: Wheels/CI, docs, hardening.
+- **PR97**: Config surface + stubs. ✅
+- **PR98**: Python FFI & strict‑parity harness. ✅
+- **PR99**: Rust kernel (perf‑OFF semantics), parity tests. ✅
+- **PR100+**: Wheels/CI matrix, prebuilt artifacts, docs polish, hardening.
 - **Post‑M12**: perf‑ON semantics in kernel (dedupe & caps), GEL micro‑kernels.
 
 ---
