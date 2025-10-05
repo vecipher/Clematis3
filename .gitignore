@@ -74,3 +74,21 @@ logs/**/*.jsonl
 /apply.jsonl
 /turn.jsonl
 /t3_reflection.jsonl
+
+# Native extension (Rust / PyO3)
+# Keep local compiled artifacts out of the repo even if built in-tree
+clematis/native/_t1_rs*.so
+clematis/native/_t1_rs*.pyd
+clematis/native/target/
+
+# Wheels (local build outputs)
+wheelhouse/
+*.whl
+
+# Native binaries (cross-platform)
+*.pyd
+*.dll
+*.dylib
+
+# Benchmarks (pytest-benchmark)
+.benchmarks/

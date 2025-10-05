@@ -7,6 +7,11 @@ include clematis/VERSION
 # Package sources and data (only real file types present)
 recursive-include clematis *.py *.json *.jsonl
 
+# Rust native extension sources (required to build from sdist)
+include clematis/native/Cargo.toml
+include clematis/native/Cargo.lock
+recursive-include clematis/native/src *.rs
+
 # Packaged examples for post-install defaults
 recursive-include clematis/examples *
 # Dotfiles are not guaranteed by generic globs; include explicitly

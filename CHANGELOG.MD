@@ -7,7 +7,203 @@ All notable changes to this project will be documented in this file.
 
 
 
+
+
+
 ## [Unreleased]
+**Summary:** PR98–PR102 land the Python FFI surface, strict‑parity harness, Rust kernel, **abi3 wheels + CI matrix**, advisory **bench + docs**, and **hardening/diagnostics** (counters, once‑only logs, strict‑parity nightly). Defaults remain identity‑safe unless explicitly enabled.
+
+
+### Breaking changes
+None.
+
+-### Upgrade notes
+- **Native T1 diagnostics:** Counters moved to `t1_native_diag.jsonl` (non-identity). `turn.jsonl` schema unchanged.
+- **pytest discovery scope:** `pytest.ini` now sets `testpaths = tests`. If you normally run `pytest` from a parent directory (e.g., your Desktop or a monorepo root), only this repo’s `tests/` will be collected. Run from the project root or pass an explicit path (e.g., `pytest tests/`).
+- **abi3 wheels/local build:** Wheels use abi3 (cp311). When building locally on Python 3.13, set `PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1` (or upgrade PyO3) before building to avoid version probes.
+- **Nightly strict parity:** New nightly job (`strict-parity-nightly.yml`) is advisory (non‑required). It compares native vs Python; failures won’t block PRs but should be triaged on `main`.
+
+
+### Added (PR98 — M12-02: Python FFI surface & strict-parity harness; identity-safe)
+- **Native stub (FFI shape):** `clematis/native/t1.py`
+  - Implements `propagate_one_graph_rs(...)` (Python) with canonical dtypes (`int32`/`float32`) and forward-compatible `rel_code`.
+  - Packs decay/limits from positional args: `{rate, floor, radius_cap, iter_cap_layers, node_budget}`; lazy-imports `_t1_one_graph_python_inner(...)`.
+  - `available() -> False` by default; tests may monkeypatch to `True`.
+- **Engine wiring (gated, lazy):** `clematis/engine/stages/t1.py`
+  - Factors legacy inner loop into `_t1_one_graph_python_inner(...)` (no behavior change).
+  - Adds `_t1_one_graph_native(...)` (calls the Python stub), `_native_t1_allowed(cfg)`, and `_t1_one_graph_dispatch(...)`.
+  - Dispatcher logic:
+    ```
+    if cfg.perf.native.t1.enabled and native.available() and _native_t1_allowed(cfg):
+        if strict_parity: compute both & assert exact equality
+        else:             return native result
+    else:
+        return python result
+    ```
+  - All imports of `clematis.native` are **lazy**; default path untouched.
+- **Tests:** (pure Python)
+  - `tests/native/test_contract_shapes.py` — exercises the FFI call shape; asserts dtypes/shapes; metrics dict present.
+  - `tests/native/test_strict_parity_stub.py` — monkeypatches `available()->True`; strict-parity compares stub vs python inner; must match exactly.
+- **Invariants**
+  - Native **OFF by default**; disabled-path identity stays byte-identical to `0.9.0a2`.
+  - No Rust code yet; no wheels/CI matrix changes.
+  - Any attempt to import the native kernel when unavailable remains inert (stub).
+- **How to verify (quick):**
+  ```
+  pytest -q tests/native/test_contract_shapes.py
+  pytest -q tests/native/test_strict_parity_stub.py
+  pytest -q              # full sweep; identity unchanged
+  rg "^from clematis\\.native" -n clematis/engine/stages/t1.py || true  # only lazy imports inside functions
+  ```
+- **Risks / notes**
+  - Parity mode computes both paths; failures raise `AssertionError` with short messages.
+  - Keep `_t1_one_graph_python_inner(...)` a verbatim move of the legacy inner loop to ensure a trustworthy baseline for PR99.
+
+#### Roadmap
+- **PR99:** (shipped in Unreleased) Rust kernel (perf‑OFF semantics) + parity tests.
+
+### Added (PR99 — M12-03: Rust kernel (perf‑OFF semantics); optional, identity‑safe)
+- **Native extension:** `clematis/native/src/lib.rs` via PyO3 exposes `t1_propagate_one_graph(...)` and returns `(d_nodes:int32, d_vals:float32, metrics:dict)`; outputs only non‑zeros. Heap ordering is deterministic: `(priority: f32, key_rank: i64, node: i64)`.
+- **Packaging:** `pyproject.toml` integrates setuptools‑rust and builds extension module `clematis.native._t1_rs`. Wheels include the compiled `.so` when built on a platform toolchain.
+- **Python bridge:** `clematis/native/t1.py` now:
+  - `available()` returns `True` iff `from clematis.native import _t1_rs` succeeds.
+  - `propagate_one_graph_rs(...)` delegates to `_t1_rs.t1_propagate_one_graph(...)` (same positional arg order as PR98 stub), returning canonical dtypes.
+- **Engine gate:** `clematis/engine/stages/t1.py` flips `_native_t1_allowed(cfg)` to **disallow** the native path when any T1 compaction/caps/dedupe knobs are set (`perf.t1.caps.*` or `perf.t1.dedupe_window`). With `strict_parity=true` the stage computes both paths and asserts equality; otherwise it uses the native result.
+- **Tests:**
+  - `tests/native/test_import_extension_optional.py` — project remains usable when the extension is missing.
+  - `tests/native/test_t1_parity_small.py` / `..._random.py` — exact parity on hand‑built and randomized tiny graphs.
+  - `tests/native/test_t1_fallback_when_perf_caps_on.py` — enabling any cap/dedupe forces fallback to Python.
+  - Hygiene: `tests/native/test_t1_parity_random.py` now uses proper Hypothesis `@given(...)` instead of `.example()` loops (less flake, faster).
+- **How to verify (local):**
+  ```
+  # 1) Install Rust toolchain (one time)
+  curl https://sh.rustup.rs -sSf | sh
+  rustup target add aarch64-apple-darwin  # on Apple Silicon
+
+  # 2) Build a wheel with the extension
+  export PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1   # Python 3.13 workaround for PyO3<0.22
+  python -m pip install -U pip build wheel setuptools-rust
+  rm -rf build dist *.egg-info
+  python -m build -w
+
+  # 3) Install the wheel into a clean venv and verify
+  python -m pip uninstall -y clematis || true
+  python -m pip install dist/clematis-0.9.0a2-*.whl
+  python - <<'PY'
+  import clematis.native.t1 as t; print("native available:", t.available())
+  PY
+
+  # 4) Run the native tests
+  pytest -q tests/native
+  ```
+- **Troubleshooting:**
+  - `ModuleNotFoundError: clematis.native._t1_rs` after install usually means you're importing from the **source tree** (editable import shadows the installed wheel). Ensure the current working directory is **not** the repo root when testing the installed wheel, or run `python -c 'import sys;print(sys.path[0])'` to confirm.
+  - `error: can't find Rust compiler` → install with `rustup` and ensure `cargo` is on `PATH`.
+  - `the configured Python interpreter version (3.13) is newer than PyO3's maximum supported` → set `PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1` or upgrade PyO3 in a follow‑up.
+- **Invariants:**
+  - Native path is **OFF by default** and additionally gated by `_native_t1_allowed(cfg)`.
+  - Disabled‑path identity remains **byte‑identical** to `0.9.0a2`.
+
+
+### Added (PR100 — M12-04: Wheels & CI Matrix; abi3 cp311)
+- **Goal:** Produce prebuilt wheels for Linux (manylinux x86_64), macOS (x86_64 on macOS‑13; arm64 on macOS‑14), and Windows (AMD64) using **abi3 (cp311)** so one wheel per OS/arch covers Py3.11–3.13. Test the **installed** wheels.
+
+- **Cargo (abi3):** `clematis/native/Cargo.toml` sets PyO3 features to `{"extension-module", "abi3-py311"}`.
+- **Pyproject (setuptools-rust):** `[[tool.setuptools-rust.ext-modules]]` configured with `target = "clematis.native._t1_rs"`, `path = "clematis/native/Cargo.toml"`, `binding = "PyO3"`, and `optional = true`.
+- **Workflow:** new `.github/workflows/wheels.yml` using **cibuildwheel**.
+  - **Build job:** matrix over `{ubuntu-22.04, macos-13, macos-14, windows-2022}`; builds **cp311-abi3** wheels with `CIBW_ARCHS_MACOS=native` (runner-native arch), sets `PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1`, and on Linux sets `RUSTFLAGS="-C link-arg=-Wl,--build-id=none"`. sdist is built **only on Linux**.
+  - **Test job:** installs the produced wheel on Python **3.11 / 3.12 / 3.13** and runs a focused subset: `tests/native`, `tests/config`, `tests/helpers`. Tests are executed from the `tests/` directory to avoid importing the repo tree.
+
+- **Packaging test:** `tests/packaging/test_wheel_has_native.py` — asserts the compiled module exists and that `from clematis.native import t1; t1.available() is True`; also checks the bridge exposes `propagate_one_graph_rs`.
+
+- **.gitignore hygiene:** ignore local wheel outputs and native binaries: `wheelhouse/`, `*.whl`, `*.pyd`, `*.dll`, `*.dylib`, plus `.benchmarks/`.
+
+- **Invariants:** native path remains **OFF by default** and additionally gated by `_native_t1_allowed(cfg)`; disabled path stays byte‑identical to `0.9.0a2`.
+
+- **How to verify (local smoke):**
+  ```bash
+  export PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1
+  python -m pip install -U build setuptools-rust
+  python -m build --wheel -o wheelhouse
+  WHL=$(ls wheelhouse/*.whl | head -n1)
+  python -m pip install --force-reinstall "$WHL"
+  # verify from outside the repo to avoid source shadowing
+  TMP=$(mktemp -d)
+  python - <<'PY'
+  import os, sys, importlib.util
+  os.chdir("$TMP"); sys.path = [p for p in sys.path if p and p != os.getcwd()]
+  from clematis.native import t1
+  print("native available:", t1.available())
+  print("module:", importlib.util.find_spec("clematis.native._t1_rs").origin)
+  PY
+  pytest -q tests/native tests/config tests/helpers
+  ```
+
+- **CI acceptance:**
+  - Each OS/arch produces **one** `cp311-abi3` wheel; Linux also uploads the sdist.
+  - Installing those wheels on **3.11 / 3.12 / 3.13** passes the focused test subset and `t1.available() == True`.
+- **PR101–102:** Bench doc + diagnostics/hardening; optional nightly strict-parity job.
+- **PR103:** Version bump (0.9.0a3) + release.
+
+
+### Added (PR101 — M12-05: Bench & Docs; advisory)
+- **Goal:** bounded perf smoke and complete operator docs (no change to defaults).
+- **Bench:** `tests/perf/test_bench_t1_smoke.py`
+  - Builds a deterministic synthetic graph (~50k edges) with a fixed seed.
+  - Measures Python vs native (when enabled/allowed) and asserts native ≥ **1.8×** speedup on Linux.
+  - Markers: `@pytest.mark.slow`; runs only when `PERF_SMOKE=1` and on Linux in CI.
+- **Docs:** `docs/m12/native_t1.md` updated — scope, enablement, parity, fallback conditions, build‑from‑source, bench notes.
+- **README:** status/badge updated for M12 Native T1.
+- **CI:** `perf-smoke-linux` (advisory, non‑required)
+  - `ubuntu-22.04`, Python 3.12, native enabled.
+  - Triggers on push to default branch and when PRs are labelled `perf-smoke`.
+  - Does **not** gate merges.
+- **Invariants:** identity path unchanged when native is disabled; bench is observational only.
+
+### Changed (PR102 — M12-06: Hardening & Diagnostics; finalized)
+- **Diagnostics sink (Option C):**
+  - Counters now emit to a dedicated **non-identity** stream `t1_native_diag.jsonl` via the helper `engine/orchestrator/logging.log_t1_native_diag(...)`.
+  - `turn.jsonl` schema is **unchanged**; no `native_t1` appears there anymore.
+  - Staging: `engine/util/io_logging.py` adds `STAGE_ORD["t1_native_diag.jsonl"] = 10`; the stream is **excluded** from identity normalization.
+- **Engine (T1 dispatcher):** `clematis/engine/stages/t1.py`
+  - Once-only logging helper and metrics counter helper.
+  - Fallback counters under `metrics["native_t1"]`:
+    - `used_native`, `fallback_import_failed`,
+    - `fallback_gated_caps`, `fallback_gated_dedupe`, `fallback_gated_other`,
+    - `fallback_runtime_exc`, `strict_parity_mismatch`, `strict_parity_native_exc`.
+  - Gated-off behavior (caps/dedupe) logs once and never calls native.
+  - **Strict parity mode** (`perf.native.t1.strict_parity=true` or `CLEMATIS_STRICT_PARITY=1`): compute both, compare (`atol=1e-6`, `rtol=1e-5`), raise with concise diff on mismatch.
+  - Runtime exceptions from native (MemoryError/TypeError/ValueError/OverflowError) cause a **soft fallback** (unless strict parity, which re-raises).
+- **Native bridge:** `clematis/native/t1.py`
+  - Wraps the PyO3 call in try/except; logs once (`pyo3_runtime_exc`) then re-raises for the dispatcher to handle.
+- **Orchestrator logging:** `clematis/engine/orchestrator/logging.py` & `core.py`
+  - New `log_t1_native_diag(ctx, agent, native_t1)` helper; `core.py` refactored to call it after `t1.jsonl` write when `metrics["native_t1"]` is truthy.
+  - Fail-soft semantics (logging never crashes the turn). `turn` is serialized as a string for consistency.
+- **Tests:**
+  - `tests/native/test_diagnostics.py` — import-failure fallback & logging (once-only), gated-off counters, runtime-exception fallback, strict parity mismatch raising, and once-only log semantics via `caplog`.
+  - `tests/native/test_diag_stream_jsonl.py` — unit coverage for `log_t1_native_diag(...)`: emits exactly one record when diagnostics exist; no record when empty/None.
+- **CI:** `.github/workflows/strict-parity-nightly.yml`
+  - Nightly (20:00 UTC) and manual dispatch.
+  - Installs the wheel, validates `_t1_rs` import from `/tmp` (no source shadowing), runs perf smoke and diagnostics under `CLEMATIS_NATIVE_T1=1`, `CLEMATIS_STRICT_PARITY=1`, `PERF_SMOKE=1`.
+  - Optional artifact upload of `logs/t1_native_diag.jsonl` recommended (non-required).
+- **Repo hygiene:** `pytest.ini`
+  - `testpaths = tests` to constrain discovery; corrected `filterwarnings` placement; markers documented.
+- **Invariants:** defaults remain identity-safe; diagnostics are observational; parity mode affects tests/CI behavior only; **identity tests stay green** because `turn.jsonl` is untouched.
+
+
+### Added (PR97 — M12-01: Native T1 scaffold; config + stubs; identity-safe)
+- **Config:** Validator now accepts `perf.native.t1` with keys `{enabled, backend, strict_parity}`. Unknown‑key detection added for `perf.native` and `perf.native.t1`. `backend` is normalized to `{"rust","python"}` (defaults to `rust` when the block is present). The `native` subtree only appears in the normalized config **when provided**; defaults remain unchanged.
+- **Scaffolds:** `clematis/native/__init__.py` (docstring‑only) and `clematis/native/t1.py` (PR97 stub). `available() -> False`; `propagate_one_graph_rs(...)` raises a clear stub error. **No runtime wiring** yet — the engine never calls the stub in PR97.
+- **Docs:** `docs/m12/native_t1.md` — scope, invariants, gates, API/contract, parity modes, build/troubleshooting. Marked **PR97 scaffold**; enablement occurs in later PRs.
+
+#### Invariants
+- Native is **OFF by default**; disabled‑path identity stays **byte‑identical** to `0.9.0a2`.
+- No imports or branches were added to T1; behavior and logs remain unchanged.
+
+- **PR98:** (shipped) Python FFI & strict‑parity harness — see Unreleased PR98 above.
+- **PR99:** Rust kernel (perf‑OFF semantics) + parity tests.
+- **PR100+**: Wheels/CI matrix, diagnostics/hardening, release.
+
 
 ### Added (PR80 — M10-04: Reflection write path; deterministic)
 - **Writer module:** `clematis/engine/orchestrator/reflection.py` with `write_reflection_entries(ctx, state, cfg_root, result) -> WriteReport`.

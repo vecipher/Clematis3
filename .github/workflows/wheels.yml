@@ -1,0 +1,185 @@
+name: Wheels
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*', '0.*', '1.*' ]
+  pull_request:
+
+jobs:
+  build-wheels:
+    name: Build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, macos-13, macos-14, windows-2022]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compute SOURCE_DATE_EPOCH
+        shell: bash
+        run: echo "SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)" >> $GITHUB_ENV
+
+      - name: Setup Python (for sdist)
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # Avoid PATH poisoning on Windows if a repo file/folder is named 'python'
+      - name: Windows PATH sanity (remove stray 'python')
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if (Test-Path "$pwd/python") { Write-Host "Removing: $pwd/python"; Remove-Item -Force -Recurse "$pwd/python" }
+          if (Test-Path "$pwd/python.exe") { Write-Host "Removing: $pwd/python.exe"; Remove-Item -Force "$pwd/python.exe" }
+
+      - name: Build wheels via cibuildwheel
+        uses: pypa/cibuildwheel@v2.21.3
+        env:
+          # Build for 3.11/3.12/3.13 so tests can install a matching wheel
+          CIBW_BUILD: "cp311-* cp312-* cp313-*"
+          CIBW_SKIP: "pp* *musllinux*"
+          CIBW_ARCHS_LINUX: "x86_64"
+          CIBW_ARCHS_MACOS: "native"
+          CIBW_ARCHS_WINDOWS: "AMD64"
+
+          # --- Linux: install Rust inside manylinux container ---
+          CIBW_BEFORE_BUILD_LINUX: |
+            curl https://sh.rustup.rs -sSf | sh -s -- -y --profile minimal
+            . "$HOME/.cargo/env"
+            rustup default stable
+            rustc -V
+            cargo -V
+          CIBW_ENVIRONMENT_LINUX: >
+            PATH="$HOME/.cargo/bin:$PATH" PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1 RUSTFLAGS="-C link-arg=-Wl,--build-id=none"
+
+          # --- macOS: install Rust and set deployment target for delocate ---
+          CIBW_BEFORE_BUILD_MACOS: |
+            rustc -V || (curl https://sh.rustup.rs -sSf | sh -s -- -y --profile minimal)
+            . "$HOME/.cargo/env"
+            rustup default stable
+            rustc -V
+            cargo -V
+          CIBW_ENVIRONMENT_MACOS: >
+            PATH="$HOME/.cargo/bin:$PATH" PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1 SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH MACOSX_DEPLOYMENT_TARGET=10.12
+
+          # --- Windows: add cargo to PATH *inside* build, don't clobber env PATH ---
+          CIBW_BEFORE_BUILD_WINDOWS: |
+            set PATH=C:\Users\runneradmin\.cargo\bin;%PATH%
+            rustup toolchain install stable --profile minimal
+            rustup default stable
+            rustc -V
+            cargo -V
+          CIBW_ENVIRONMENT_WINDOWS: >
+            PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1
+
+      - name: Assert each built wheel has the native module
+        shell: bash
+        run: |
+          python - <<'PY'
+          import glob, zipfile, sys
+          wheels = sorted(glob.glob('wheelhouse/*.whl'))
+          assert wheels, "no wheels found in wheelhouse/"
+          ok = True
+          for whl in wheels:
+            with zipfile.ZipFile(whl) as z:
+              names = z.namelist()
+            if not any(n.endswith('_t1_rs.so') or n.endswith('_t1_rs.pyd') or '_t1_rs.' in n for n in names):
+              print("MISSING _t1_rs in", whl)
+              ok = False
+            else:
+              print("OK:", whl)
+          if not ok:
+            sys.exit(1)
+          PY
+
+      - name: Upload wheels
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.os }}
+          path: wheelhouse/*.whl
+
+      - name: Build sdist (Linux only)
+        if: matrix.os == 'ubuntu-22.04'
+        run: |
+          python -m pip install build
+          python -m build --sdist -o dist
+
+      - name: Upload sdist (Linux only)
+        if: matrix.os == 'ubuntu-22.04'
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdist
+          path: dist/*.tar.gz
+
+  test-wheels:
+    name: Test (${{ matrix.os }}, py${{ matrix.py }})
+    needs: build-wheels
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, macos-13, macos-14, windows-2022]
+        py: ["3.11", "3.12", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.py }}
+
+      - name: Download wheels
+        uses: actions/download-artifact@v4
+        with:
+          name: wheels-${{ matrix.os }}
+          path: wheelhouse
+
+      - name: Avoid source shadowing
+        shell: bash
+        run: |
+          if [ -d clematis ]; then mv clematis clematis_src; fi
+
+      - name: Install test deps
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pytest hypothesis
+
+      - name: Install our wheel (pick the right one automatically)
+        shell: bash
+        run: |
+          # Pin to the project version so pip picks our local wheels over PyPI; still uses index for deps
+          VER=$(python - <<'PY'
+          import glob, re
+          files = sorted(glob.glob('wheelhouse/clematis-*.whl'))
+          import sys
+          assert files, "no clematis wheels in wheelhouse/"
+          m = re.search(r'clematis-([0-9][^-]*)-', files[0])
+          print(m.group(1))
+          PY
+          )
+          python -m pip install --find-links wheelhouse "clematis==$VER"
+
+      - name: Sanity import (native present)
+        shell: bash
+        run: |
+          python - <<'PY'
+          import importlib
+          from clematis.native import t1
+          assert t1.available(), "native _t1_rs should be available in wheel install"
+          m = importlib.import_module("clematis.native._t1_rs")
+          print("OK:", m.__file__)
+          PY
+
+      - name: Run focused tests
+        shell: bash
+        env:
+          CI: "true"
+          CLEMATIS_NETWORK_BAN: "1"
+        run: |
+          cd tests
+          pytest -q native config helpers packaging/test_wheel_has_native.py

@@ -6,7 +6,8 @@ Clematis is a deterministic, turn‑based scaffold for agential AI. It models ag
 >
 > **M10 — Reflection Sessions (complete):** Finalized across **PR77** and **PR80–PR90** (config, writer/budgets/tests, fixtures‑only LLM backend, planner flag, telemetry/trace, microbench, optional CI smoke, docs, goldens/identity maintenance). See **[docs/m10/reflection.md](docs/m10/reflection.md)**.
 >
-> **M11 — Field‑Control GEL (HS1) (complete):** Substrate landed across **PR91–PR96** (docs, identity tests, runtime smoke, examples, CLI inspector, milestone close). Default **OFF**; no ranking changes by default; identity preserved. See **[docs/m11/overview.md](docs/m11/overview.md)**. _Nudge planner is deferred to v4._
+
+> **M12 — Native T1 (in progress):** PR97–PR100 shipped (config+stubs, FFI parity, Rust kernel perf‑OFF, wheels/CI). **PR101 (bench & docs)** is advisory and Linux‑only. **PR102 (hardening & diagnostics)** adds counters + once‑only logs and a nightly strict‑parity sweep; enable via `CLEMATIS_NATIVE_T1=1` and opt‑in strict parity with `CLEMATIS_STRICT_PARITY=1`. Wheels are **abi3 (cp311)**; `t1.available()` is **True** when importing the installed wheel (avoid source shadowing). See **[docs/m12/native_t1.md](docs/m12/native_t1.md)**.
 
 ---
 
@@ -252,6 +253,8 @@ See **docs/m9/overview.md** for determinism rules, identity guarantees, and trou
 - `tests/` — deterministic tests, golden comparisons, CLI checks.
 
 ## Environment flags
+- `CLEMATIS_NATIVE_T1=1` — force‑enable the native T1 path (overrides config).
+- `CLEMATIS_STRICT_PARITY=1` — compute native & python and fail on mismatch (CI/advisory).
 - `CLEMATIS_NETWORK_BAN=1` — enforce no network (recommended in CI).
 - `CLEMATIS_DEBUG=1` — enable a single stderr breadcrumb for wrapper delegation.
   Exit codes and stdout remain identical.
@@ -259,7 +262,12 @@ See **docs/m9/overview.md** for determinism rules, identity guarantees, and trou
   If both are set, `CLEMATIS_LOG_DIR` wins; otherwise we fall back to `<repo>/.logs`.
   The directory is created on demand so wrappers/scripts can log immediately.
 
+
 When `CI=true`, log writes route through `clematis/engine/orchestrator/logging.append_jsonl`, which applies `clematis/engine/util/io_logging.normalize_for_identity`. Identity logs keep their existing rules (e.g., drop `now`, clamp times) to ensure byte identity. For the reflection stream `t3_reflection.jsonl`, only the `ms` field is normalized to `0.0`; this stream is **not** part of the identity set.
+
+### CI workflows (advisory)
+- **Perf smoke (Linux)** — `.github/workflows/perf-smoke.yml`: builds & installs the wheel, asserts `_t1_rs` import + `t1.available()` and runs the bounded perf smoke. Trigger on push to default branches or label PRs `perf-smoke`. Non‑required.
+- **Strict parity nightly** — `.github/workflows/strict-parity-nightly.yml`: daily at 20:00 UTC (or manual). Runs perf smoke and diagnostics under `CLEMATIS_NATIVE_T1=1`, `CLEMATIS_STRICT_PARITY=1`, `PERF_SMOKE=1`. Non‑required.
 
 ## Milestones snapshot
 - **M1–M4:** core stages + apply/persist + logs.

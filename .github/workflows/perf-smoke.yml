@@ -1,0 +1,77 @@
+name: perf-smoke-linux
+
+on:
+  push:
+    branches: [ main, master, trunk, develop ]
+  pull_request:
+    types: [ opened, synchronize, labeled, reopened ]
+
+concurrency:
+  group: perf-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  perf-smoke:
+    # Only run for pushes, or when PR is labeled `perf-smoke`
+    if: github.event_name == 'push' || contains(join(fromJson(toJson(github.event.pull_request.labels)).*.name, ','), 'perf-smoke')
+    runs-on: ubuntu-22.04
+    env:
+      CLEMATIS_LOG_DIR: /tmp/logs
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: 'pip'
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install build/test deps
+        run: |
+          python -m pip install --upgrade pip wheel setuptools
+          python -m pip install pytest pytest-timeout
+
+      - name: Build wheel (abi3-capable)
+        env:
+          CARGO_TERM_COLOR: always
+        run: |
+          python -m pip wheel . -w wheelhouse --no-deps
+
+      - name: Install wheel (allow deps from PyPI)
+        run: |
+          python -m pip install --find-links=wheelhouse clematis
+
+      - name: Sanity check native import (ensure wheel, no shadowing)
+        working-directory: /tmp
+        env:
+          PYTHONNOUSERSITE: "1"
+        run: |
+          python - <<'PY'
+          import importlib.util
+          spec = importlib.util.find_spec('clematis.native._t1_rs')
+          print('ext spec:', spec)
+          import clematis.native.t1 as n
+          print('available():', n.available())
+          assert n.available(), 'native module should be available from installed wheel'
+          PY
+
+      - name: Run perf smoke (outside checkout to avoid shadowing)
+        working-directory: /tmp
+        env:
+          CI: "true"
+          CLEMATIS_NETWORK_BAN: "1"
+          PERF_SMOKE: "1"
+          CLEMATIS_NATIVE_T1: "1"
+        run: |
+          pytest --maxfail=1 -q $GITHUB_WORKSPACE/tests/perf/test_bench_t1_smoke.py -m slow
+
+      - name: Upload native diagnostics (optional)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: t1-native-diagnostics
+          path: /tmp/logs/t1_native_diag.jsonl
+          if-no-files-found: ignore
+          retention-days: 7

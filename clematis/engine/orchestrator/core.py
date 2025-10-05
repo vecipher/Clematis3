@@ -14,7 +14,7 @@ def _iso_from_ms(ms: int) -> str:
 
 from types import SimpleNamespace
 
-from .logging import _append_jsonl, _get_logging_callable, log_t3_reflection
+from .logging import _append_jsonl, _get_logging_callable, log_t3_reflection, log_t1_native_diag
 from .types import TurnCtx, TurnResult
 from ..stages.t1 import t1_propagate as _t1_propagate
 from ..stages.t2 import t2_semantic as _t2_semantic
@@ -161,10 +161,6 @@ def agent_ready(ctx, state, agent_id: str) -> tuple[bool, str]:
     Override or monkeypatch in tests to block specific agents deterministically.
     """
     return True, "DEFAULT_TRUE"
-
-
-# --- Config accessor for harmonized config usage ---
-
 
 # --- Config accessor for harmonized config usage ---
 def _to_plain(obj):
@@ -529,7 +525,14 @@ class Orchestrator:
                 **({"now": now} if now else {}),
             },
         )
-        # --- M5 liminilas check after T1 ---
+        # --- PR102: native diagnostics stream (non-identity) ---
+        try:
+            native_diag = (t1.metrics or {}).get("native_t1")
+        except Exception:
+            native_diag = None
+        if native_diag:
+            log_t1_native_diag(ctx, agent_id, native_diag)
+        # --- M5 bounds check after T1 ---
         if slice_ctx is not None:
             consumed = {
                 "ms": int(round((time.perf_counter() - total_t0) * 1000.0)),
@@ -1112,11 +1115,11 @@ class Orchestrator:
                                 "apply": 0.0,
                                 "total": total_ms_now,
                             },
-                            "t1": {
-                                "pops": t1.metrics.get("pops"),
-                                "iters": t1.metrics.get("iters"),
-                                "graphs_touched": t1.metrics.get("graphs_touched"),
-                            },
+                        "t1": {
+                            "pops": t1.metrics.get("pops"),
+                            "iters": t1.metrics.get("iters"),
+                            "graphs_touched": t1.metrics.get("graphs_touched"),
+                        },
                             "t2": {
                                 "k_returned": t2.metrics.get("k_returned"),
                                 "k_used": t2.metrics.get("k_used"),
@@ -1224,7 +1227,7 @@ class Orchestrator:
                             },
                         )
                 except Exception:
-                    # Never let optional ggelly features break the turn
+                    # Never let optional GEL features break the turn
                     pass
             # --- Apply & persist ---
             t0 = time.perf_counter()
@@ -1293,11 +1296,11 @@ class Orchestrator:
                                 "apply": apply_ms,
                                 "total": total_ms_now,
                             },
-                            "t1": {
-                                "pops": t1.metrics.get("pops"),
-                                "iters": t1.metrics.get("iters"),
-                                "graphs_touched": t1.metrics.get("graphs_touched"),
-                            },
+                        "t1": {
+                            "pops": t1.metrics.get("pops"),
+                            "iters": t1.metrics.get("iters"),
+                            "graphs_touched": t1.metrics.get("graphs_touched"),
+                        },
                             "t2": {
                                 "k_returned": t2.metrics.get("k_returned"),
                                 "k_used": t2.metrics.get("k_used"),
