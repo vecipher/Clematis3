@@ -43,6 +43,7 @@ jobs:
           CIBW_SKIP: "pp* *musllinux*"
           CIBW_ARCHS_LINUX: "x86_64"
           CIBW_ARCHS_MACOS: "native"
+          CIBW_ARCHS_WINDOWS: "AMD64"
 
           # --- Linux: install Rust inside manylinux container ---
           CIBW_BEFORE_BUILD_LINUX: |

@@ -9,7 +9,11 @@ license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "vecipher" }]
 
-dependencies = ["pyyaml>=6.0.1","numpy>=1.26,<2"]
+dependencies = [
+  "pyyaml>=6.0.1",
+  "numpy>=1.26,<2; python_version<'3.13'",
+  "numpy>=2; python_version>='3.13'",
+]
 
 classifiers = [
   "Programming Language :: Python :: 3 :: Only",
@@ -36,35 +40,36 @@ dev = [
   "mypy>=1.11,<2",
   "types-PyYAML>=6.0.12.20240808,<7",
   "pre-commit>=3.8,<4",
-  "numpy>=1.26,<2",
+  "numpy>=1.26,<2; python_version<'3.13'",
+  "numpy>=2; python_version>='3.13'",
   "shtab==1.7.1",
-  "pyyaml>=6.0"
+  "pyyaml>=6.0",
 ]
 test = [
   "pytest>=8,<9",
   "hypothesis>=6,<7",
-  "numpy>=1.26,<2",
+  "numpy>=1.26,<2; python_version<'3.13'",
+  "numpy>=2; python_version>='3.13'",
   "shtab==1.7.1",
 ]
-lancedb = [
-  "lancedb>=0.14,<1",
-  "pyarrow>=15",
-]
-zstd = [
-  "zstandard>=0.22,<0.23",
-]
 bench = [
-  "numpy>=1.26,<2",
+  "numpy>=1.26,<2; python_version<'3.13'",
+  "numpy>=2; python_version>='3.13'",
 ]
 cli-extras = [
-  "numpy>=1.26,<2",
+  "numpy>=1.26,<2; python_version<'3.13'",
+  "numpy>=2; python_version>='3.13'",
   "lancedb>=0.14,<1",
   "pyarrow>=15",
 ]
-cli-demo = ["numpy>=1.24", "pyyaml>=6.0"]
+cli-demo = [
+  "numpy>=1.24; python_version<'3.13'",
+  "numpy>=2; python_version>='3.13'",
+  "pyyaml>=6.0",
+]
 
 [build-system]
-requires = ["setuptools>=77", "wheel", "setuptools-rust>=1.9.0", "numpy>=1.26,<2"]
+requires = ["setuptools>=77", "wheel", "setuptools-rust>=1.9.0"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
