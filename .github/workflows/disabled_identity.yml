@@ -107,8 +107,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # Ensure identity uses the default .logs
+          # Ensure identity uses the default .logs and start clean
           unset CLEMATIS_LOG_DIR || true
+          rm -rf .logs
+          mkdir -p .logs
           # Produce the actual logs in ./.logs via the golden path test
           pytest -q -m "not manual" tests/test_golden_path.py::test_golden_path
 
@@ -120,11 +122,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # Ensure identity uses the default .logs and starts clean
+          # Use the shared Python guard which normalizes and compares against the golden set
           unset CLEMATIS_LOG_DIR || true
-          rm -rf .logs
-          mkdir -p .logs
-          # Use the shared Python guard which generates logs, normalizes, and compares
           python3 scripts/ci_compare_golden.py
 
       - name: Upload artifacts on failure
