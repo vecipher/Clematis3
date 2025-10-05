@@ -1,5 +1,3 @@
-
-
 name: Tests
 
 on:
@@ -56,12 +54,18 @@ jobs:
           python -m build -w
 
       - name: Install wheel (use installed pkg, not source tree)
+        working-directory: /tmp
         run: |
           set -euo pipefail
-          python -m pip install --force-reinstall dist/*.whl
+          # Install the wheel built in the workspace
+          python -m pip install --force-reinstall "$GITHUB_WORKSPACE"/dist/*.whl
+          # Sanity: import from the installed wheel (not workspace)
           python - <<'PY'
-          import importlib, clematis
+          import os, importlib, clematis
+          ws = os.environ.get("GITHUB_WORKSPACE", "")
           print("clematis:", getattr(clematis, "__version__", "n/a"), "@", clematis.__file__)
+          if ws and ws in clematis.__file__:
+              raise SystemExit("ERROR: imported clematis from workspace, not wheel")
           rs = importlib.import_module("clematis.native._t1_rs")
           print("_t1_rs:", rs.__file__, "caps/gel:", hasattr(rs, "propagate_one_graph_rs"), hasattr(rs, "gel_tick_decay"))
           PY
@@ -74,7 +78,9 @@ jobs:
           PYTHONHASHSEED: "0"
         run: |
           set -euo pipefail
-          pytest -q -m "not manual" "$GITHUB_WORKSPACE/tests"
+          unset PYTHONPATH || true
+          rm -rf tests && cp -a "$GITHUB_WORKSPACE/tests" .
+          pytest -q -m "not manual" tests
 
       - name: Caps parity (native path)
         working-directory: /tmp
@@ -83,8 +89,9 @@ jobs:
           CI: "true"
         run: |
           set -euo pipefail
-          pytest -q "$GITHUB_WORKSPACE/tests/native/test_parity_perf_on.py"
-          pytest -q "$GITHUB_WORKSPACE/tests/native/test_caps_counters.py"
+          unset PYTHONPATH || true
+          pytest -q tests/native/test_parity_perf_on.py
+          pytest -q tests/native/test_caps_counters.py
 
       - name: Strict parity over caps (advisory)
         continue-on-error: true
@@ -95,7 +102,8 @@ jobs:
           CI: "true"
         run: |
           set -euo pipefail
-          pytest -q "$GITHUB_WORKSPACE/tests/native/test_parity_perf_on.py"
+          unset PYTHONPATH || true
+          pytest -q tests/native/test_parity_perf_on.py
 
       - name: Upload logs on failure
         if: failure()
@@ -105,7 +113,7 @@ jobs:
           path: |
             logs/quality/**
             .pytest_cache/**
-          if-no-files-found: ignore
+            /tmp/.pytest_cache/**
 
   extras:
     runs-on: ubuntu-latest

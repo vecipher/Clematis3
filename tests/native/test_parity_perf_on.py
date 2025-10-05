@@ -65,6 +65,7 @@ def _cfg_native_disabled(queue_cap: int, dedupe_window: int, visited_cap: int) -
     return c
 
 
+@pytest.mark.parametrize("guard_on", [True, False])
 @pytest.mark.parametrize(
     "queue_cap, dedupe_window, visited_cap",
     [
@@ -78,10 +79,18 @@ def _cfg_native_disabled(queue_cap: int, dedupe_window: int, visited_cap: int) -
 @pytest.mark.filterwarnings("ignore::UserWarning")
 @pytest.mark.filterwarnings("ignore::RuntimeWarning")
 @pytest.mark.timeout(30)
-def test_native_equals_python_under_caps(queue_cap, dedupe_window, visited_cap, monkeypatch):
+def test_native_equals_python_under_caps(guard_on, queue_cap, dedupe_window, visited_cap, monkeypatch):
     # Ensure strict parity is off for this test, we compare results explicitly
     monkeypatch.delenv("CLEMATIS_STRICT_PARITY", raising=False)
     monkeypatch.setenv("CLEMATIS_NATIVE_T1", "1")  # allow native fast-path if cfg enables it
+
+    if guard_on:
+        # Force guard ON explicitly and ensure pytest auto-flag remains
+        monkeypatch.setenv("CLEMATIS_PARITY_GUARD", "1")
+    else:
+        # Disable guard explicitly: remove pytest auto flag and guard var
+        monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+        monkeypatch.setenv("CLEMATIS_PARITY_GUARD", "0")
 
     # Build deterministic graph (~30k edges)
     n = 1000
@@ -103,7 +112,8 @@ def test_native_equals_python_under_caps(queue_cap, dedupe_window, visited_cap, 
     params = _params_with_caps(queue_cap, dedupe_window, visited_cap)
 
     # 1) Python reference
-    t0 = time.perf_counter(); print("[parity_caps] python inner start…", flush=True)
+    t0 = time.perf_counter()
+    print("[parity_caps] python inner start…", flush=True)
     p_nodes, p_vals, p_met = t1._t1_one_graph_python_inner(
         indptr=indptr,
         indices=indices,
@@ -118,7 +128,8 @@ def test_native_equals_python_under_caps(queue_cap, dedupe_window, visited_cap, 
     print(f"[parity_caps] python inner done in {time.perf_counter()-t0:.3f}s", flush=True)
 
     # 2) Native call via dispatcher (cfg enables native & forwards caps)
-    t1_ = time.perf_counter(); print("[parity_caps] dispatcher start…", flush=True)
+    t1_ = time.perf_counter()
+    print("[parity_caps] dispatcher start…", flush=True)
     cfg_native = _cfg_native_enabled(queue_cap, dedupe_window, visited_cap)
     n_nodes, n_vals, n_met = t1._t1_one_graph_dispatch(
         cfg=cfg_native,
@@ -155,8 +166,13 @@ def test_native_equals_python_under_caps(queue_cap, dedupe_window, visited_cap, 
 
     nt = (n_met.get("native_t1", {}) or {})
     if have_native:
+        # When guard is ON and parity is reached, there must be no fallback
+        if guard_on:
+            assert nt.get("parity_guard_fallback", 0) == 0
+        # In both modes, native path must have been used at least once
         assert nt.get("used_native", 0) >= 1
     else:
+        # If extension is unavailable, dispatcher should record import fallback
         assert nt.get("fallback_import_failed", 0) >= 1
 
 
@@ -182,7 +198,8 @@ def test_dispatch_disabled_matches_python(queue_cap, dedupe_window, visited_cap,
     params = _params_with_caps(queue_cap, dedupe_window, visited_cap)
 
     # Python baseline
-    t0 = time.perf_counter(); print("[disabled_native] python inner start…", flush=True)
+    t0 = time.perf_counter()
+    print("[disabled_native] python inner start…", flush=True)
     p_nodes, p_vals, p_met = t1._t1_one_graph_python_inner(
         indptr=indptr,
         indices=indices,
@@ -197,7 +214,8 @@ def test_dispatch_disabled_matches_python(queue_cap, dedupe_window, visited_cap,
     print(f"[disabled_native] python inner done in {time.perf_counter()-t0:.3f}s", flush=True)
 
     # Dispatcher with native disabled in cfg
-    t1_ = time.perf_counter(); print("[disabled_native] dispatcher start…", flush=True)
+    t1_ = time.perf_counter()
+    print("[disabled_native] dispatcher start…", flush=True)
     cfg_py = _cfg_native_disabled(queue_cap, dedupe_window, visited_cap)
     d_nodes, d_vals, d_met = t1._t1_one_graph_dispatch(
         cfg=cfg_py,

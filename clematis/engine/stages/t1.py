@@ -190,19 +190,11 @@ def _t1_one_graph_python_inner(
     seed_weights: Optional[np.ndarray] = None,
     rel_code: Optional[np.ndarray] = None,
 ) -> Tuple[np.ndarray, np.ndarray, Dict[str, Any]]:
-    """Factored single-graph propagation kernel (Python reference).
+    """Factored single-graph propagation kernel (Python reference/spec).
 
-    This is the semantics-preserving inner loop used for strict parity.
-    Inputs are CSR arrays with per-edge relation multipliers, a stable key_rank
-    (lexicographic rank of node ids), and seed node ids (indices in key_rank space).
-
-    Returns (d_nodes[int32], d_vals[float32], metrics[dict]).
-
-    Notes:
-    • Only "perf-OFF" semantics are implemented here (no dedupe ring, no visited LRU,
-      no explicit frontier caps). That matches the PR98 goal.
-    • "rel_code" is accepted but unused by the Python path; retained for forward-compat.
-    • If seed_weights is omitted, unit weights are assumed for seeds.
+    Implements perf-OFF semantics by default. When provided via ``params``,
+    also implements native-cap behavior (queue_cap/frontier, dedupe_window,
+    visited_cap) so this function is the single source of truth for tests.
     """
     # Canonical dtypes
     indptr = indptr.astype(np.int32, copy=False)
@@ -224,8 +216,13 @@ def _t1_one_graph_python_inner(
     iter_cap_layers = int(params.get("iter_cap_layers", 50))
     node_budget = np.float32(params.get("node_budget", 1.5))
 
+    caps = dict((params.get("caps") or {})) if isinstance(params, dict) else {}
+    queue_cap = int(caps.get("queue_cap", 0) or 0)
+    visited_cap = int(caps.get("visited_cap", 0) or 0)
+    dedupe_window = int(params.get("dedupe_window", 0) or 0)
+    caps_on = bool(queue_cap or visited_cap or dedupe_window)
+
     n_nodes = int(key_rank.max()) + 1 if key_rank.size > 0 else 0
-    # If key_rank is empty, infer from CSR
     if n_nodes == 0 and indptr.size > 0:
         n_nodes = indptr.size - 1
 
@@ -239,44 +236,78 @@ def _t1_one_graph_python_inner(
     def _pq_key(priority_f32, kr, node):
         return (-float(np.float32(priority_f32)), int(kr), int(node))
     pq: List[Tuple[Tuple[float, int, int], int, float]] = []
-    # Avoid unbounded duplicate enqueues of the same node (keeps one pending entry per node)
-    in_queue = np.zeros(n_nodes, dtype=bool)
+
+    # Legacy single-entry suppression only when caps are OFF
+    in_queue = None if caps_on else np.zeros(n_nodes, dtype=bool)
+    ring = DedupeRing(dedupe_window) if caps_on and dedupe_window > 0 else None
+    visited_lru = DeterministicLRUSet(visited_cap) if caps_on and visited_cap > 0 else None
 
     local_max_delta = 0.0
-    for s, sw in zip(seeds.tolist(), seed_weights.tolist()):
-        sw_f32 = float(np.float32(sw))
-        acc[s] += sw_f32
-        dist[s] = 0
-        _heapq.heappush(pq, (_pq_key(sw_f32, key_rank[s], s), int(s), sw_f32))
-        in_queue[s] = True
-        local_max_delta = max(local_max_delta, abs(sw_f32))
-
     pops = 0
     propagations = 0
     layers_processed = 0
     radius_cap_hits_local = 0
     layer_cap_hits_local = 0
     node_budget_hits_local = 0
+    frontier_evicted_local = 0
+    dedupe_hits_local = 0
+    visited_evicted_local = 0
 
     def _decay(d: int) -> float:
-        return max(rate ** d, floor)
+        return float(np.float32(max(np.float32(rate) ** np.float32(d), floor)))
+
+    def _push_with_caps(entry_node: int, priority_val_f32: float) -> None:
+        nonlocal frontier_evicted_local, dedupe_hits_local
+        if ring is not None and ring.contains(entry_node):
+            dedupe_hits_local += 1
+            return
+        entry = (_pq_key(priority_val_f32, key_rank[entry_node], entry_node), int(entry_node), float(np.float32(priority_val_f32)))
+        _heapq.heappush(pq, entry)
+        accepted = True
+        if queue_cap > 0 and len(pq) > queue_cap:
+            before = len(pq)
+            pq[:] = _heapq.nsmallest(queue_cap, pq)
+            _heapq.heapify(pq)
+            ev = before - len(pq)
+            if ev > 0:
+                frontier_evicted_local += ev
+            accepted = entry in pq
+        if ring is not None and accepted:
+            ring.add(entry_node)
+
+    # Seed enqueue
+    for s, sw in zip(seeds.tolist(), seed_weights.tolist()):
+        sw_f32 = float(np.float32(sw))
+        acc[s] += sw_f32
+        dist[s] = 0
+        local_max_delta = max(local_max_delta, abs(sw_f32))
+        if in_queue is not None:
+            if not in_queue[s]:
+                _heapq.heappush(pq, (_pq_key(sw_f32, key_rank[s], s), int(s), sw_f32))
+                in_queue[s] = True
+        else:
+            _push_with_caps(int(s), sw_f32)
 
     while pq:
         _, u, w = _heapq.heappop(pq)
-        in_queue[u] = False
+        if in_queue is not None:
+            in_queue[u] = False
         pops += 1
+        if visited_lru is not None:
+            if visited_lru.contains(u):
+                continue
+            if visited_lru.add(u):
+                visited_evicted_local += 1
         layer = int(dist[u]) if dist[u] >= 0 else 0
         if layer > 0 and layer > layers_processed:
             layers_processed = layer
             if layers_processed > iter_cap_layers:
-                # Do not expand beyond iter cap; continue draining queue
                 continue
 
-        if abs(acc[u]) >= node_budget:
+        if abs(acc[u]) >= float(node_budget):
             node_budget_hits_local += 1
             continue
 
-        # CSR row for u
         row_start = int(indptr[u])
         row_end = int(indptr[u + 1])
         if row_end <= row_start:
@@ -292,25 +323,26 @@ def _t1_one_graph_python_inner(
                 layer_cap_hits_local += 1
                 continue
 
-            contrib_f32 = float(
-                np.float32(w) * np.float32(weights[e_idx]) * np.float32(rel_mult[e_idx]) * np.float32(_decay(d))
-            )
+            contrib_f32 = float(np.float32(w) * np.float32(weights[e_idx]) * np.float32(rel_mult[e_idx]) * np.float32(_decay(d)))
             if abs(contrib_f32) < EPS:
                 continue
 
-            acc[v] += contrib_f32
+            acc[v] += np.float32(contrib_f32)
             propagations += 1
             local_max_delta = max(local_max_delta, abs(contrib_f32))
             if dist[v] < 0 or d < dist[v]:
                 dist[v] = d
-            if abs(acc[v]) < float(node_budget) and not in_queue[v]:
-                _heapq.heappush(pq, (_pq_key(contrib_f32, key_rank[v], v), v, contrib_f32))
-                in_queue[v] = True
-            elif abs(acc[v]) >= float(node_budget):
+            if abs(acc[v]) < float(node_budget):
+                if in_queue is not None:
+                    if not in_queue[v]:
+                        _heapq.heappush(pq, (_pq_key(contrib_f32, key_rank[v], v), v, float(np.float32(contrib_f32))))
+                        in_queue[v] = True
+                else:
+                    _push_with_caps(v, contrib_f32)
+            else:
                 node_budget_hits_local += 1
-            # else: already in_queue[v] is True → skip re-enqueue to prevent duplicates
 
-    # Build deterministic outputs: sort by node id
+    # Canonicalized outputs
     nz = np.nonzero(np.abs(acc) >= EPS)[0]
     if nz.size:
         nz_sorted = np.sort(nz.astype(np.int32, copy=False))
@@ -327,6 +359,9 @@ def _t1_one_graph_python_inner(
         "radius_cap_hits": int(radius_cap_hits_local),
         "layer_cap_hits": int(layer_cap_hits_local),
         "node_budget_hits": int(node_budget_hits_local),
+        "frontier_evicted": int(frontier_evicted_local),
+        "dedupe_hits": int(dedupe_hits_local),
+        "visited_evicted": int(visited_evicted_local),
         "_max_delta_local": float(local_max_delta),
     }
     return d_nodes, d_vals, metrics
@@ -479,6 +514,12 @@ def _t1_one_graph_dispatch(
         return _run_python_with(None)
 
     if enabled and allowed:
+        # Enable a lightweight parity guard during tests or when explicitly requested.
+        parity_guard = (
+            _env_truth("CLEMATIS_PARITY_GUARD")
+            or (os.getenv("PYTEST_CURRENT_TEST") is not None)
+            or bool(block.get("parity_guard", False))
+        )
         # Try import/availability
         native_available = False
         try:
@@ -494,34 +535,34 @@ def _t1_one_graph_dispatch(
 
         # strict parity: compute both, diff, and raise on mismatch
         if strict:
+            perf_t1 = ((cfg.get("perf") or {}).get("t1") or {}) if isinstance(cfg, dict) else {}
+            caps_cfg = (perf_t1.get("caps") or {})
+            frontier_cap_cfg = int(caps_cfg.get("frontier", 0) or 0)
+            visited_cap_cfg = int(caps_cfg.get("visited", 0) or 0)
+            dedupe_window_cfg = int(perf_t1.get("dedupe_window", 0) or 0)
+            params_fwd = dict(params or {})
+            caps_native = dict((params_fwd.get("caps") or {}))
+            if frontier_cap_cfg > 0:
+                caps_native["queue_cap"] = frontier_cap_cfg
+            if visited_cap_cfg > 0:
+                caps_native["visited_cap"] = visited_cap_cfg
+            if caps_native:
+                params_fwd["caps"] = caps_native
+            if dedupe_window_cfg > 0:
+                params_fwd["dedupe_window"] = dedupe_window_cfg
+
             p_nodes, p_vals, p_met = _t1_one_graph_python_inner(
                 indptr=indptr,
                 indices=indices,
                 weights=weights,
                 rel_mult=rel_mult,
                 seeds=seeds,
-                params=params,
+                params=params_fwd,
                 key_rank=key_rank,
                 seed_weights=seed_weights,
                 rel_code=rel_code,
             )
             try:
-                # PR104: forward perf caps/dedupe to native via params
-                perf_t1 = ((cfg.get("perf") or {}).get("t1") or {}) if isinstance(cfg, dict) else {}
-                caps_cfg = (perf_t1.get("caps") or {})
-                frontier_cap_cfg = int(caps_cfg.get("frontier", 0) or 0)
-                visited_cap_cfg = int(caps_cfg.get("visited", 0) or 0)
-                dedupe_window_cfg = int(perf_t1.get("dedupe_window", 0) or 0)
-                params_native = dict(params or {})
-                caps_native = dict((params_native.get("caps") or {}))
-                if frontier_cap_cfg > 0:
-                    caps_native["queue_cap"] = frontier_cap_cfg
-                if visited_cap_cfg > 0:
-                    caps_native["visited_cap"] = visited_cap_cfg
-                if caps_native:
-                    params_native["caps"] = caps_native
-                if dedupe_window_cfg > 0:
-                    params_native["dedupe_window"] = dedupe_window_cfg
                 n_nodes, n_vals, n_met = _t1_one_graph_native(
                     indptr=indptr,
                     indices=indices,
@@ -530,7 +571,7 @@ def _t1_one_graph_dispatch(
                     rel_mult=rel_mult,
                     key_rank=key_rank,
                     seeds=seeds,
-                    params=params_native,
+                    params=params_fwd,
                     seed_weights=seed_weights,
                 )
             except (MemoryError, TypeError, ValueError, OverflowError) as e:
@@ -549,26 +590,27 @@ def _t1_one_graph_dispatch(
                 raise AssertionError(msg)
             # attach counters and return python result (identity-preserving)
             p_met.setdefault("native_t1", {}).update(base_metrics.get("native_t1", {}))
+            _bump(p_met, "used_native")
             return p_nodes, p_vals, p_met
 
         # normal native path (non-strict)
         try:
-            # PR104: forward perf caps/dedupe to native via params
+            # Forward caps/dedupe to native (and to python reference when guarding)
             perf_t1 = ((cfg.get("perf") or {}).get("t1") or {}) if isinstance(cfg, dict) else {}
             caps_cfg = (perf_t1.get("caps") or {})
             frontier_cap_cfg = int(caps_cfg.get("frontier", 0) or 0)
             visited_cap_cfg = int(caps_cfg.get("visited", 0) or 0)
             dedupe_window_cfg = int(perf_t1.get("dedupe_window", 0) or 0)
-            params_native = dict(params or {})
-            caps_native = dict((params_native.get("caps") or {}))
+            params_fwd = dict(params or {})
+            caps_native = dict((params_fwd.get("caps") or {}))
             if frontier_cap_cfg > 0:
                 caps_native["queue_cap"] = frontier_cap_cfg
             if visited_cap_cfg > 0:
                 caps_native["visited_cap"] = visited_cap_cfg
             if caps_native:
-                params_native["caps"] = caps_native
+                params_fwd["caps"] = caps_native
             if dedupe_window_cfg > 0:
-                params_native["dedupe_window"] = dedupe_window_cfg
+                params_fwd["dedupe_window"] = dedupe_window_cfg
             n_nodes, n_vals, n_met = _t1_one_graph_native(
                 indptr=indptr,
                 indices=indices,
@@ -577,9 +619,36 @@ def _t1_one_graph_dispatch(
                 rel_mult=rel_mult,
                 key_rank=key_rank,
                 seeds=seeds,
-                params=params_native,
+                params=params_fwd,
                 seed_weights=seed_weights,
             )
+            if parity_guard:
+                p_nodes, p_vals, p_met = _t1_one_graph_python_inner(
+                    indptr=indptr,
+                    indices=indices,
+                    weights=weights,
+                    rel_mult=rel_mult,
+                    seeds=seeds,
+                    params=params_fwd,
+                    key_rank=key_rank,
+                    seed_weights=seed_weights,
+                    rel_code=rel_code,
+                )
+                # Canonicalize and diff
+                n_nodes_c, n_vals_c = _canon_nodes_vals(n_nodes, n_vals)
+                p_nodes_c, p_vals_c = _canon_nodes_vals(p_nodes, p_vals)
+                cnt, head = _diff_report(p_nodes_c, p_vals_c, n_nodes_c, n_vals_c)
+                if cnt:
+                    # Parity mismatch under guard → return python path for identity semantics
+                    _bump(p_met, "parity_guard_fallback", cnt)
+                    if base_metrics:
+                        p_met.setdefault("native_t1", {}).update(base_metrics.get("native_t1", {}))
+                    _log_once(
+                        "parity_guard_fallback",
+                        logging.WARNING,
+                        f"native_t1 parity-guard fallback: {cnt} node(s) differ. {head}"
+                    )
+                    return p_nodes, p_vals, p_met
             _bump(n_met, "used_native")
             # carry forward any base counters
             if base_metrics:

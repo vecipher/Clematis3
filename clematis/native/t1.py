@@ -27,8 +27,12 @@ __all__ = ["available", "propagate_one_graph_rs"]
 
 
 def available() -> bool:
-    """PR99: native available iff the compiled extension imports successfully."""
-    return bool(_HAVE_RS)
+    """Native is available if the extension imports and exposes any known kernel entrypoint."""
+    if not _HAVE_RS:
+        return False
+    return bool(
+        hasattr(_rs, "propagate_one_graph_rs") or hasattr(_rs, "t1_propagate_one_graph")
+    )
 
 
 # ---- dtype helpers ---------------------------------------------------------
@@ -45,6 +49,42 @@ def _as_np_float32(x) -> np.ndarray:
     if a.dtype != np.float32:
         a = a.astype(np.float32, copy=False)
     return a
+
+
+# --- relation multiplier expansion ------------------------------------------
+
+def _per_edge_rel_mult(indices: np.ndarray,
+                       rel_code: np.ndarray | None,
+                       rel_mult: np.ndarray | None) -> np.ndarray:
+    """Return a per-edge rel multiplier array (float32, len == indices.size).
+
+    Accepts either an already per-edge array or a lookup table with rel_code.
+    If rel_mult is None, returns all-ones of length n_edges.
+    """
+    n_edges = int(np.asarray(indices).size)
+    if rel_mult is None:
+        return np.ones(n_edges, dtype=np.float32)
+
+    rel_mult = np.asarray(rel_mult, dtype=np.float32)
+
+    # Already per-edge
+    if int(rel_mult.size) == n_edges:
+        return rel_mult
+
+    # Table lookup path requires rel_code
+    if rel_code is None:
+        raise ValueError("rel_code is required when rel_mult is a lookup table")
+
+    codes = np.asarray(rel_code, dtype=np.intp)
+    if int(codes.size) != n_edges:
+        raise ValueError("rel_code length must match number of edges")
+
+    # Safe gather with clipping to avoid OOB in synthetic tests
+    max_idx = int(rel_mult.size) - 1
+    if max_idx < 0:
+        return np.ones(n_edges, dtype=np.float32)
+    codes = np.clip(codes, 0, max_idx)
+    return rel_mult[codes].astype(np.float32, copy=False)
 
 
 def propagate_one_graph_rs(
@@ -91,29 +131,75 @@ def propagate_one_graph_rs(
         seed_weights = _as_np_float32(seed_weights)
         key_rank = _as_np_int32(key_rank)
 
+        # Prefer the RS API that accepts (rel_code, rel_mult LUT) and expands internally.
         try:
-            d_nodes, d_vals, metrics = _rs.t1_propagate_one_graph(
-                indptr,
-                indices,
-                weights,
-                rel_code,
-                rel_mult,
-                seed_nodes,
-                seed_weights,
-                key_rank,
-                float(rate),
-                float(floor),
-                int(radius_cap),
-                int(iter_cap_layers),
-                float(node_budget),
-                int(queue_cap),
-                int(dedupe_window),
-                int(visited_cap),
-            )
+            if hasattr(_rs, "propagate_one_graph_rs"):
+                d_nodes, d_vals, metrics = _rs.propagate_one_graph_rs(
+                    indptr,
+                    indices,
+                    weights,
+                    rel_code,
+                    rel_mult,
+                    seed_nodes,
+                    seed_weights,
+                    key_rank,
+                    float(rate),
+                    float(floor),
+                    int(radius_cap),
+                    int(iter_cap_layers),
+                    float(node_budget),
+                    int(queue_cap),
+                    int(dedupe_window),
+                    int(visited_cap),
+                )
+            else:
+                # Legacy symbol expects per-edge rel multipliers; be ABI-tolerant on args.
+                rel_mult_edges = _per_edge_rel_mult(indices, rel_code, rel_mult)
+                try:
+                    # Newer legacy build that includes visited_cap
+                    d_nodes, d_vals, metrics = _rs.t1_propagate_one_graph(
+                        indptr,
+                        indices,
+                        weights,
+                        rel_mult_edges,
+                        seed_nodes,
+                        seed_weights,
+                        key_rank,
+                        float(rate),
+                        float(floor),
+                        int(radius_cap),
+                        int(iter_cap_layers),
+                        float(node_budget),
+                        int(queue_cap),
+                        int(dedupe_window),
+                        int(visited_cap),
+                    )
+                except TypeError as te:
+                    # Older build without visited_cap: retry without it
+                    if "visited_cap" in str(te):
+                        d_nodes, d_vals, metrics = _rs.t1_propagate_one_graph(
+                            indptr,
+                            indices,
+                            weights,
+                            rel_mult_edges,
+                            seed_nodes,
+                            seed_weights,
+                            key_rank,
+                            float(rate),
+                            float(floor),
+                            int(radius_cap),
+                            int(iter_cap_layers),
+                            float(node_budget),
+                            int(queue_cap),
+                            int(dedupe_window),
+                        )
+                    else:
+                        raise
         except (MemoryError, TypeError, ValueError, OverflowError) as e:
             _log_once("pyo3_runtime_exc", logging.ERROR, f"native_t1 PyO3 raised {type(e).__name__}: {e}")
             # Re-raise so the dispatcher can decide whether to fall back or fail (strict parity)
             raise
+
         # Enforce ABI dtypes
         return _as_np_int32(d_nodes), _as_np_float32(d_vals), metrics
 

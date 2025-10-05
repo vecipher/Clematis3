@@ -1,3 +1,24 @@
+"""Phase 4 — Deterministic LRU spec (canonical for native mirror).
+
+This module defines two utilities used by Stage T1 and caches.
+
+DeterministicLRUSet (visited bounding):
+  • Capacity-bounded membership set; FIFO on first successful insertion.
+  • contains(x) is read-only and does NOT refresh recency.
+  • add(x) inserts when absent and returns True iff an eviction happened.
+  • When cap == 0, structure is disabled (contains→False; add→False).
+  • Eviction removes the oldest inserted element; no randomness or time.
+
+DeterministicLRU[K, V] (map cache):
+  • Deterministic LRU map with explicit recency updates.
+  • Recency changes only when flags allow: update_on_get / update_on_put.
+  • contains() never refreshes; only get/put may call _touch when enabled.
+  • pop_lru() removes the oldest entry deterministically.
+  • When cap == 0, behaves as an always-miss cache.
+
+This file is the authoritative spec for the Rust reimplementation used by the
+native T1 kernel (visited LRU). Semantics here must match the native code.
+"""
 from __future__ import annotations
 
 from collections import deque
@@ -22,16 +43,19 @@ V = TypeVar("V")
 
 class DeterministicLRUSet:
     """
-    Deterministic, capacity-bounded set behaving like an LRU on *insert order only*.
+    Deterministic, capacity-bounded set with FIFO-on-first-insert semantics.
 
-    Intended for PR31 'visited' bounding:
-      - No time or randomness; order is by first successful insertion (FIFO).
-      - `contains()` is O(1).
-      - `add(x)` returns True iff an eviction occurred (y was removed).
-      - When cap == 0, structure is disabled: contains() is False; add() returns False.
+    Intended for Stage T1 "visited" bounding:
+      • Order is by *first successful insertion* only (no clocks, no randomness).
+      • contains(x) is O(1) and NEVER refreshes recency.
+      • add(x) inserts x iff absent; returns True iff an eviction occurred.
+      • When cap == 0, structure is disabled: contains()→False; add()→False.
 
-    Note: This is intentionally *not* a full LRU (no recency updates on re-contains), to
-    preserve simple, reproducible behavior for one-shot visits.
+    Notes:
+      • This is intentionally *not* a full LRU; re-contains have no effect.
+      • Eviction policy is deterministic FIFO (oldest-in first-out).
+      • No logging/side-effects; behavior is fully reproducible.
+      • Complexity: contains/add/size O(1) average.
     """
 
     def __init__(self, cap: int):
@@ -41,15 +65,13 @@ class DeterministicLRUSet:
         self._set: Dict[str, None] = {}
 
     def contains(self, x: str) -> bool:
+        """Return membership without refreshing recency (read-only check)."""
         return self.enabled and (x in self._set)
 
     __contains__ = contains
 
     def add(self, x: str) -> bool:
-        """
-        Insert x if not present.
-        Returns True iff an eviction occurred.
-        """
+        """Insert x if absent. Returns True iff an eviction occurred. Does NOT refresh on contains."""
         if not self.enabled:
             return False
         if x in self._set:
@@ -65,12 +87,14 @@ class DeterministicLRUSet:
         return evicted
 
     def size(self) -> int:
+        """Current number of distinct members (≤ cap)."""
         return len(self._set)
 
     def __len__(self) -> int:
         return len(self._set)
 
     def clear(self) -> None:
+        """Remove all entries; resets order and membership."""
         self._q.clear()
         self._set.clear()
 
@@ -79,12 +103,14 @@ class DeterministicLRU(Generic[K, V]):
     """
     Deterministic LRU map with fixed capacity and explicit, reproducible recency updates.
 
-    - No clocks or randomness; recency changes only on deterministic events (get/touch/put).
-    - `update_on_get` / `update_on_put` decide whether those events move items to MRU.
-    - When `cap == 0`, the structure is disabled and acts as an always-miss cache.
+    Semantics:
+      • No clocks or randomness; order changes only on configured events (get/put).
+      • contains() / __contains__ NEVER refresh recency.
+      • update_on_get / update_on_put control whether those operations call _touch.
+      • pop_lru() removes and returns the least-recently-used item.
+      • When cap == 0, the structure is disabled and acts as an always-miss cache.
 
-    Complexity: O(1) for contains/get/put average, O(cap) worst-case for deque removals
-    when updating recency (acceptable for small perf caps).
+    Complexity: contains/get/put ~O(1) average; deque removals O(cap) worst-case when touching.
     """
 
     def __init__(
@@ -104,6 +130,7 @@ class DeterministicLRU(Generic[K, V]):
         self._map: Dict[K, V] = {}
 
     def __contains__(self, key: K) -> bool:
+        """Read-only membership; does not refresh recency."""
         return self.enabled and (key in self._map)
 
     def contains(self, key: K) -> bool:
@@ -113,12 +140,14 @@ class DeterministicLRU(Generic[K, V]):
         return len(self._map) if self.enabled else 0
 
     def clear(self) -> None:
+        """Remove all entries; resets order and contents."""
         self._q.clear()
         self._map.clear()
 
     # -- Core operations ----------------------------------------------------
 
     def get(self, key: K, default: Optional[V] = None) -> Optional[V]:
+        """Return value for key or default. May refresh recency if update_on_get is True."""
         if not self.enabled:
             return default
         if key not in self._map:
@@ -129,10 +158,7 @@ class DeterministicLRU(Generic[K, V]):
         return val
 
     def put(self, key: K, value: V) -> Optional[Tuple[K, V]]:
-        """
-        Insert or update `key`. Returns (evicted_key, evicted_value) if an eviction occurs,
-        otherwise None. Eviction order is strictly LRU with no time dependence.
-        """
+        """Insert/update key. Returns (evicted_k, evicted_v) if an eviction occurs; None otherwise. Recency may update if configured."""
         if not self.enabled:
             return None
         if key in self._map:
@@ -146,9 +172,7 @@ class DeterministicLRU(Generic[K, V]):
         return self._evict_if_needed()
 
     def pop_lru(self) -> Optional[Tuple[K, V]]:
-        """
-        Remove and return the least-recently-used item. Returns None if empty/disabled.
-        """
+        """Remove and return the least-recently-used item, or None if empty/disabled."""
         if not self.enabled or not self._q:
             return None
         k = self._q.popleft()
@@ -163,6 +187,7 @@ class DeterministicLRU(Generic[K, V]):
         return (k, v)
 
     def items(self) -> Iterator[Tuple[K, V]]:
+        """Deterministic iteration from LRU→MRU."""
         if not self.enabled:
             return iter(())
         # Deterministic LRU→MRU iteration
@@ -171,9 +196,7 @@ class DeterministicLRU(Generic[K, V]):
     # -- Internal helpers ---------------------------------------------------
 
     def _touch(self, key: K) -> None:
-        """
-        Move `key` to MRU end deterministically.
-        """
+        """Move key to MRU end deterministically (internal)."""
         try:
             self._q.remove(key)
         except ValueError:
@@ -182,6 +205,7 @@ class DeterministicLRU(Generic[K, V]):
         self._q.append(key)
 
     def _evict_if_needed(self) -> Optional[Tuple[K, V]]:
+        """Evict in LRU order until size ≤ cap. Returns last eviction (k,v) or None."""
         evicted: Optional[Tuple[K, V]] = None
         while len(self._map) > self.cap:
             k = self._q.popleft()

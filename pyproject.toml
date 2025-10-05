@@ -20,6 +20,7 @@ classifiers = [
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
+  "Programming Language :: Rust",
   "Operating System :: OS Independent",
 ]
 
@@ -91,7 +92,7 @@ zip-safe = false
 target = "clematis.native._t1_rs"
 # Path to the Cargo manifest for this extension
 path = "clematis/native/Cargo.toml"
-# Binding; value per docs is capitalized
+# Binding; value per docs is lowercase
 binding = "PyO3"
 # Specify Python limited API for binary compatibility
 py-limited-api = "cp311"
