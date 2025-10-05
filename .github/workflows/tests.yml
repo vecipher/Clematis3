@@ -39,29 +39,63 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
 
-      - name: Install dependencies
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install test tooling & build deps
         run: |
-          python -m pip install -U pip
-          if [ -f requirements-dev.txt ]; then python -m pip install -r requirements-dev.txt; fi
-          if [ -f requirements.txt ]; then python -m pip install -r requirements.txt; fi
-          # Ensure test extras (shtab for completions goldens) are available; fall back gracefully
-          python -m pip install -e ".[dev,test]" || \
-          python -m pip install -e ".[test]" || \
-          python -m pip install -e .
-          # Ensure pytest is present even if not listed
+          python -m pip install -U pip build setuptools-rust wheel
+          python -m pip install -U pytest pytest-timeout hypothesis pyyaml
+          # if extras files exist, install them (non-fatal if missing)
+          if [ -f requirements-dev.txt ]; then python -m pip install -r requirements-dev.txt || true; fi
+          if [ -f requirements.txt ]; then python -m pip install -r requirements.txt || true; fi
+
+      - name: Build wheel
+        run: |
+          set -euo pipefail
+          rm -rf build dist *.egg-info
+          python -m build -w
+
+      - name: Install wheel (use installed pkg, not source tree)
+        run: |
+          set -euo pipefail
+          python -m pip install --force-reinstall dist/*.whl
           python - <<'PY'
-          import pkgutil, subprocess, sys
-          missing = [p for p in ("pytest",) if not pkgutil.find_loader(p)]
-          if missing:
-              subprocess.check_call([sys.executable, "-m", "pip", "install", *missing])
+          import importlib, clematis
+          print("clematis:", getattr(clematis, "__version__", "n/a"), "@", clematis.__file__)
+          rs = importlib.import_module("clematis.native._t1_rs")
+          print("_t1_rs:", rs.__file__, "caps/gel:", hasattr(rs, "propagate_one_graph_rs"), hasattr(rs, "gel_tick_decay"))
           PY
 
-      - name: Run tests (offline)
+      - name: Run tests (offline, wheel import)
+        working-directory: /tmp
         env:
           CLEMATIS_NETWORK_BAN: "1"
           CI: "true"
+          PYTHONHASHSEED: "0"
         run: |
-          pytest -q -m "not manual"
+          set -euo pipefail
+          pytest -q -m "not manual" "$GITHUB_WORKSPACE/tests"
+
+      - name: Caps parity (native path)
+        working-directory: /tmp
+        env:
+          CLEMATIS_NATIVE_T1: "1"
+          CI: "true"
+        run: |
+          set -euo pipefail
+          pytest -q "$GITHUB_WORKSPACE/tests/native/test_parity_perf_on.py"
+          pytest -q "$GITHUB_WORKSPACE/tests/native/test_caps_counters.py"
+
+      - name: Strict parity over caps (advisory)
+        continue-on-error: true
+        working-directory: /tmp
+        env:
+          CLEMATIS_NATIVE_T1: "1"
+          CLEMATIS_STRICT_PARITY: "1"
+          CI: "true"
+        run: |
+          set -euo pipefail
+          pytest -q "$GITHUB_WORKSPACE/tests/native/test_parity_perf_on.py"
 
       - name: Upload logs on failure
         if: failure()
@@ -113,11 +147,14 @@ jobs:
           python-version: "3.12"
           cache: pip
 
+      - uses: dtolnay/rust-toolchain@stable
+
       - name: Build & install wheel
         run: |
-          python -m pip install -U build
+          python -m pip install -U pip build setuptools-rust
+          rm -rf build dist *.egg-info
           python -m build --wheel
-          python -m pip install dist/*.whl
+          python -m pip install --force-reinstall dist/*.whl
 
       - name: Import check
         run: python -c "from clematis.optional import zstd_support, lancedb_support; print('ok')"

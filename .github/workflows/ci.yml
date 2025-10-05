@@ -59,85 +59,84 @@ jobs:
           cache-dependency-path: |
             pyproject.toml
 
+      - uses: dtolnay/rust-toolchain@stable
+
       - name: Upgrade pip
         run: python -m pip install --upgrade pip
 
-      - name: Install deps (dev+test extras) + YAML
+      - name: Install test tooling & build deps
         run: |
-          python -m pip install -U pip
-          pip install -e .[dev,test]
-          # Ensure PyYAML is present (not included in extras)
-          pip install pyyaml
+          python -m pip install -U pip build setuptools-rust wheel
+          python -m pip install -U pytest pytest-timeout hypothesis pyyaml
 
-      - name: Sanity imports
-        continue-on-error: true
+      - name: Build wheel
+        run: |
+          set -euo pipefail
+          rm -rf build dist *.egg-info
+          python -m build -w
+
+      - name: Install wheel (use installed pkg, not source tree)
+        run: |
+          set -euo pipefail
+          python -m pip install --force-reinstall dist/*.whl
+          python - <<'PY'
+          import importlib, clematis
+          print("clematis:", getattr(clematis, "__version__", "n/a"), "@", clematis.__file__)
+          rs = importlib.import_module("clematis.native._t1_rs")
+          print("_t1_rs:", rs.__file__, "caps/gel:", hasattr(rs, "propagate_one_graph_rs"), hasattr(rs, "gel_tick_decay"))
+          PY
+
+      - name: Sanity imports (wheel path)
+        working-directory: /tmp
         run: |
           set -euxo pipefail
           python - <<'PY'
-          import sys, os, traceback, importlib.util, site, pkgutil
+          import sys, importlib
           print("python:", sys.version)
-          print("sys.executable:", sys.executable)
-          print("sys.path[0:5]:", sys.path[:5])
-
-          def show(msg, fn):
-              print(f"\n--- {msg} ---")
-              try:
-                  fn()
-                  print(f"--- {msg}: OK ---")
-              except Exception as e:
-                  print(f"*** {msg}: FAILED: {e}")
-                  traceback.print_exc()
-
-          def show_spec(name):
-              spec = importlib.util.find_spec(name)
-              print(f"find_spec({name!r}) ->", spec)
-
-          show("pip list head", lambda: os.system("python -m pip list | head -n 50"))
-          show("where site-packages", lambda: print(site.getsitepackages(), site.getusersitepackages()))
-
-          show_spec("yaml")
-          show("import yaml", lambda: __import__("yaml"))
-          try:
-              import yaml
-              print("yaml version:", getattr(yaml, "__version__", "unknown"))
-          except Exception:
-              pass
-
-          show_spec("clematis")
-          show("import clematis", lambda: __import__("clematis"))
-          try:
-              import clematis
-              print("clematis.__file__:", getattr(clematis, "__file__", None))
-              root = os.path.dirname(getattr(clematis, "__file__", "") or "")
-              print("ls clematis root:", os.listdir(root) if root and os.path.isdir(root) else "N/A")
-          except Exception:
-              pass
-
-          show_spec("clematis.engine.stages.t4")
-          def import_t4():
-              import clematis.engine.stages.t4 as t4
-              print("t4.__file__:", getattr(t4, "__file__", None))
-              print("has t4_filter?", hasattr(t4, "t4_filter"))
-          show("import clematis.engine.stages.t4", import_t4)
+          rs = importlib.import_module("clematis.native._t1_rs")
+          print("_t1_rs ok:", hasattr(rs, "propagate_one_graph_rs"), hasattr(rs, "gel_tick_decay"))
           PY
 
-      - name: Run tests (offline)
+      - name: Run tests (offline, wheel import)
+        working-directory: /tmp
         env:
           CLEMATIS_NETWORK_BAN: "1"
           CI: "true"
           PYTHONHASHSEED: "0"
         run: |
           set -euo pipefail
-          pytest -q -m "not manual"
+          pytest -q -m "not manual" "$GITHUB_WORKSPACE/tests"
+
+      - name: Caps parity (native path)
+        working-directory: /tmp
+        env:
+          CLEMATIS_NATIVE_T1: "1"
+          CI: "true"
+        run: |
+          set -euo pipefail
+          pytest -q "$GITHUB_WORKSPACE/tests/native/test_parity_perf_on.py"
+          pytest -q "$GITHUB_WORKSPACE/tests/native/test_caps_counters.py"
+
+      - name: Strict parity over caps (advisory)
+        continue-on-error: true
+        working-directory: /tmp
+        env:
+          CLEMATIS_NATIVE_T1: "1"
+          CLEMATIS_STRICT_PARITY: "1"
+          CI: "true"
+        run: |
+          set -euo pipefail
+          pytest -q "$GITHUB_WORKSPACE/tests/native/test_parity_perf_on.py"
 
       - name: Examples smoke (GEL)
+        working-directory: /tmp
         env:
           CLEMATIS_NETWORK_BAN: "1"
           CI: "true"
         run: |
           set -euo pipefail
-          python scripts/examples_smoke.py --examples examples/gel/disabled.yaml
-          python scripts/examples_smoke.py --examples examples/gel/enabled.yaml
+          python "$GITHUB_WORKSPACE/scripts/examples_smoke.py" --examples "$GITHUB_WORKSPACE/examples/gel/disabled.yaml"
+          python "$GITHUB_WORKSPACE/scripts/examples_smoke.py" --examples "$GITHUB_WORKSPACE/examples/gel/enabled.yaml"
 
   reproducible_build:
     name: Reproducible build (wheel + sdist)
