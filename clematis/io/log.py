@@ -15,8 +15,12 @@ def _append_jsonl_unbuffered(filename: str, record: dict) -> None:
     name = os.path.basename(filename)
     record = normalize_for_identity(name, record)
 
-    with open(path, "a", encoding="utf-8") as f:
-        f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    # Write deterministically across OS:
+    # - Binary append avoids platform newline translation (e.g., CRLF on Windows).
+    # - We always terminate records with a single LF to stabilize identity.
+    line = (json.dumps(record, ensure_ascii=False) + "\n").encode("utf-8")
+    with open(path, "ab") as f:
+        f.write(line)
 
 
 def append_jsonl(filename: str, record: dict, *, feature_guard: bool | None = None) -> None:

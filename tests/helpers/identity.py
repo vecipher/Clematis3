@@ -1,6 +1,7 @@
 from __future__ import annotations
 import json
 import copy
+import re
 from typing import Any, Iterable
 import os
 
@@ -19,6 +20,12 @@ _DROP_KEYS = {
 _DROP_SUFFIXES = ("_ms",)       # e.g., duration_ms, total_ms
 _DROP_PREFIXES = ("ms_",)       # e.g., ms_deliberate, ms_rag
 
+_PATH_KEY_NAMES = {
+    "path", "file", "filepath", "snapshot", "snapshot_path", "artifact",
+    "dir", "directory", "logs_dir", "log_file"
+}
+_PATH_KEY_SUFFIXES = ("_path", "_file", "_dir", "_directory")
+
 
 def _normalize(obj: Any) -> Any:
     if isinstance(obj, dict):
@@ -30,11 +37,41 @@ def _normalize(obj: Any) -> Any:
                 continue
             if any(k.endswith(suf) for suf in _DROP_SUFFIXES):
                 continue
-            out[k] = _normalize(v)
+            if isinstance(v, str) and _is_path_key(k):
+                out[k] = _normalize_path_string(v)
+            else:
+                out[k] = _normalize(v)
         return out
     if isinstance(obj, list):
         return [_normalize(x) for x in obj]
     return obj
+
+
+def _is_path_key(key: str) -> bool:
+    lk = key.lower()
+    if lk in _PATH_KEY_NAMES:
+        return True
+    return any(lk.endswith(s) for s in _PATH_KEY_SUFFIXES)
+
+
+def _normalize_path_string(s: str) -> str:
+    """Normalize path-like strings for cross-OS identity:
+    - Convert backslashes to forward slashes
+    - Preserve UNC '//' start
+    - Collapse repeated slashes (except leading UNC)
+    """
+    if not s:
+        return s
+    # Convert separators
+    unc = s.startswith("\\\\") or s.startswith("//")
+    s2 = s.replace("\\", "/")
+    # Collapse redundant slashes (keep leading '//' if UNC)
+    if unc:
+        s2 = "//" + s2.lstrip("/")
+    while "//" in s2.lstrip("/"):
+        head = "//" if unc else "/"
+        s2 = head + s2.lstrip("/").replace("//", "/")
+    return s2
 
 
 def normalize_json_line(line: str) -> str:
@@ -81,11 +118,13 @@ def normalize_log_bytes_for_identity(file_map: dict[str, bytes]) -> dict[str, by
     for rel, blob in file_map.items():
         if rel.endswith(".jsonl"):
             try:
-                text = blob.decode("utf-8")
+                text = blob.decode("utf-8", errors="strict")
             except Exception:
                 # If decoding fails, pass through unchanged
                 out[rel] = blob
                 continue
+            # Normalize newline styles first (CRLF/CR -> LF) for stable joins
+            text = text.replace("\r\n", "\n").replace("\r", "\n")
             lines = text.splitlines()
             norm_lines = normalize_json_lines(lines)
             trailing = "\n" if text.endswith("\n") else ""
