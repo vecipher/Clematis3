@@ -77,8 +77,6 @@ namespaces = false
 include-package-data = true
 zip-safe = false
 
-[tool.setuptools.bdist_wheel]
-py-limited-api = "cp311"
 
 
 [tool.setuptools-rust]
@@ -90,6 +88,8 @@ target = "clematis.native._t1_rs"
 path = "clematis/native/Cargo.toml"
 # Binding; value per docs is capitalized
 binding = "PyO3"
+# Specify Python limited API for binary compatibility
+py-limited-api = "cp311"
 # Make the native extension optional so Python-only CI can install without Rust
 optional = true
 
