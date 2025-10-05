@@ -99,6 +99,19 @@ jobs:
           set -euxo pipefail
           pytest -q -m "not manual" tests/test_config_perf_quality.py::test_cli_validator_smoke
 
+      - name: Generate actual logs (golden producer)
+        env:
+          CLEMATIS_NETWORK_BAN: "1"
+          CI: "true"
+          IDENTITY_TESTS: "1"
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Ensure identity uses the default .logs
+          unset CLEMATIS_LOG_DIR || true
+          # Produce the actual logs in ./.logs via the golden path test
+          pytest -q -m "not manual" tests/test_golden_path.py::test_golden_path
+
       - name: Run golden disabled identity guard
         env:
           CLEMATIS_NETWORK_BAN: "1"
