@@ -87,6 +87,8 @@ target = "clematis.native._t1_rs"
 path = "clematis/native/Cargo.toml"
 # Binding; value per docs is capitalized
 binding = "PyO3"
+# Make the native extension optional so Python-only CI can install without Rust
+optional = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
