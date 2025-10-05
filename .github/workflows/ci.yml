@@ -29,7 +29,7 @@ jobs:
           echo "PYTHONIOENCODING=UTF-8" >> "$GITHUB_ENV"
           echo "PYTHONHASHSEED=0" >> "$GITHUB_ENV"
           echo "TZ=UTC" >> "$GITHUB_ENV"
-          echo "SOURCE_DATE_EPOCH=0" >> "$GITHUB_ENV"
+          echo "SOURCE_DATE_EPOCH=315532800" >> "$GITHUB_ENV"
           echo "PIP_DISABLE_PIP_VERSION_CHECK=1" >> "$GITHUB_ENV"
 
       - name: Upgrade pip
