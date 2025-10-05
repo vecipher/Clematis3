@@ -15,11 +15,6 @@ jobs:
       matrix:
         os: [ubuntu-22.04, macos-13, macos-14, windows-2022]
 
-    env:
-      # Make builds reproducible-ish
-      PYO3_USE_ABI3_FORWARD_COMPATIBILITY: "1"   # harmless when building against 3.11
-      CARGO_TERM_COLOR: always
-
     steps:
       - uses: actions/checkout@v4
 
@@ -27,18 +22,10 @@ jobs:
         shell: bash
         run: echo "SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)" >> $GITHUB_ENV
 
-      - name: Setup Python (3.11 for abi3 build)
+      - name: Setup Python (for sdist)
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: ""
-
-      - name: Install cibuildwheel
-        run: python -m pip install --upgrade pip cibuildwheel==2.21.* build
 
       - name: Windows PATH sanity (remove stray 'python')
         if: runner.os == 'Windows'
@@ -47,23 +34,15 @@ jobs:
           if (Test-Path "$pwd/python") { Write-Host "Removing: $pwd/python"; Remove-Item -Force -Recurse "$pwd/python" }
           if (Test-Path "$pwd/python.exe") { Write-Host "Removing: $pwd/python.exe"; Remove-Item -Force "$pwd/python.exe" }
 
-      # Linux: drop build-id for smaller/cleaner wheels; only applies on ELF targets
-      - name: Set Linux RUSTFLAGS
-        if: runner.os == 'Linux'
-        run: echo "RUSTFLAGS=-C link-arg=-Wl,--build-id=none" >> $GITHUB_ENV
-
-      # Build abi3 wheels; cibuildwheel will produce one cp311-abi3 wheel per platform
       - name: Build wheels via cibuildwheel
+        uses: pypa/cibuildwheel@v2.21.3
         env:
           CIBW_BUILD: "cp311-*"
           CIBW_SKIP: "pp* *musllinux*"
           CIBW_ARCHS_LINUX: "x86_64"
           CIBW_ARCHS_MACOS: "native"
-          CIBW_ARCHS_WINDOWS: "AMD64"
-          # Test command at build time kept minimal; full tests run in next job
-          CIBW_TEST_COMMAND: "python -c \"import clematis.native.t1 as t; assert True\""
-          # Ensure reproducible timestamps in wheels where possible
-          CIBW_ENVIRONMENT: "SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1"
+
+          # Linux: install Rust inside manylinux and expose cargo on PATH
           CIBW_BEFORE_BUILD_LINUX: |
             curl https://sh.rustup.rs -sSf | sh -s -- -y --profile minimal
             . "$HOME/.cargo/env"
@@ -73,6 +52,7 @@ jobs:
           CIBW_ENVIRONMENT_LINUX: >
             PATH="$HOME/.cargo/bin:$PATH" PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1 RUSTFLAGS="-C link-arg=-Wl,--build-id=none"
 
+          # macOS: ensure cargo exists and set deployment target for delocate
           CIBW_BEFORE_BUILD_MACOS: |
             rustc -V || (curl https://sh.rustup.rs -sSf | sh -s -- -y --profile minimal)
             . "$HOME/.cargo/env"
@@ -80,16 +60,17 @@ jobs:
             rustc -V
             cargo -V
           CIBW_ENVIRONMENT_MACOS: >
-            PATH="$HOME/.cargo/bin:$PATH" PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1 SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH
+            PATH="$HOME/.cargo/bin:$PATH" PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1 SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH MACOSX_DEPLOYMENT_TARGET=10.12
 
+          # Windows: prepend cargo to PATH *inside* the build, don't clobber PATH in env
           CIBW_BEFORE_BUILD_WINDOWS: |
+            set PATH=C:\Users\runneradmin\.cargo\bin;%PATH%
             rustup toolchain install stable --profile minimal
             rustup default stable
             rustc -V
             cargo -V
           CIBW_ENVIRONMENT_WINDOWS: >
-            PATH="C:\Users\runneradmin\.cargo\bin;%PATH%" PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1
-        run: python -m cibuildwheel --output-dir wheelhouse
+            PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1
 
       - name: Assert wheel contains native module
         shell: bash
@@ -100,20 +81,23 @@ jobs:
           whl = glob.glob('wheelhouse/*.whl')[0]
           with zipfile.ZipFile(whl) as z:
               names = z.namelist()
-          assert any(('/_t1_rs.' in n) or n.endswith('_t1_rs.so') or n.endswith('_t1_rs.pyd') for n in names), f"no native _t1_rs in {whl}"
+          assert any(n.endswith('_t1_rs.so') or n.endswith('_t1_rs.pyd') or '_t1_rs.' in n for n in names), f"no native _t1_rs in {whl}"
           print('OK:', whl)
           PY
 
-      - name: Upload wheel artifacts
+      - name: Upload wheels
         uses: actions/upload-artifact@v4
         with:
           name: wheels-${{ matrix.os }}
           path: wheelhouse/*.whl
 
-      - name: Build sdist
+      - name: Build sdist (Linux only)
         if: matrix.os == 'ubuntu-22.04'
-        run: python -m build --sdist -o dist
-      - name: Upload sdist
+        run: |
+          python -m pip install build
+          python -m build --sdist -o dist
+
+      - name: Upload sdist (Linux only)
         if: matrix.os == 'ubuntu-22.04'
         uses: actions/upload-artifact@v4
         with:
@@ -144,12 +128,16 @@ jobs:
           name: wheels-${{ matrix.os }}
           path: wheelhouse
 
+      - name: Avoid source shadowing
+        shell: bash
+        run: |
+          if [ -d clematis ]; then mv clematis clematis_src; fi
+
       - name: Install wheel
         shell: bash
         run: |
           python -m pip install --upgrade pip
           python -m pip install wheelhouse/*.whl
-          # prove the native module is present and loadable from the installed wheel
           python - <<'PY'
           import importlib
           from clematis.native import t1
@@ -158,7 +146,7 @@ jobs:
           print("OK:", m.__file__)
           PY
 
-      - name: Run focused test subset
+      - name: Run focused tests
         shell: bash
         env:
           CI: "true"
@@ -166,4 +154,4 @@ jobs:
         run: |
           python -m pip install -r tests/requirements.txt || true
           cd tests
-          pytest -q native config helpers
+          pytest -q native config helpers packaging/test_wheel_has_native.py
