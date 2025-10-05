@@ -18,7 +18,24 @@ except Exception:
 # PR18: schema tag & inspector helpers
 # -------------------------
 
+
 SCHEMA_VERSION = "v1"  # snapshots written going forward should include this
+
+
+# --- Schema version enforcement (PR109 freeze) ---
+class SnapshotSchemaError(ValueError):
+    """Raised when a snapshot payload is missing or has an unexpected schema version."""
+
+
+def validate_snapshot_schema(payload: Dict[str, Any], *, expected: str = SCHEMA_VERSION) -> None:
+    """Strict validation: require `schema_version` key and exact match.
+    This validates the JSON payload (not the PR34 header).
+    """
+    sv = (payload or {}).get("schema_version")
+    if sv is None:
+        raise SnapshotSchemaError("snapshot: missing 'schema_version' in payload")
+    if sv != expected:
+        raise SnapshotSchemaError(f"snapshot: expected schema_version='{expected}', got '{sv}'")
 
 
 def _safe_read_json(path: str) -> Optional[Dict[str, Any]]:
@@ -896,6 +913,14 @@ def write_snapshot_auto(
     """
     os.makedirs(dir_path, exist_ok=True)
     codec = "zstd" if str(compression).lower() == "zstd" else "none"
+    # Enforce schema_version on payload (PR109 freeze)
+    payload = dict(payload)  # copy to avoid mutating caller
+    existing_sv = payload.get("schema_version")
+    if existing_sv is None:
+        payload["schema_version"] = SCHEMA_VERSION
+    elif existing_sv != SCHEMA_VERSION:
+        raise SnapshotSchemaError(f"snapshot: expected schema_version='{SCHEMA_VERSION}', got '{existing_sv}'")
+
     body_json = _canonical_json(payload)
 
     # Try delta when requested and possible
