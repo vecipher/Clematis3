@@ -11,17 +11,64 @@ All notable changes to this project will be documented in this file.
 
 
 ## [Unreleased]
-**Summary:** PR98–PR102 land the Python FFI surface, strict‑parity harness, Rust kernel, **abi3 wheels + CI matrix**, advisory **bench + docs**, and **hardening/diagnostics** (counters, once‑only logs, strict‑parity nightly). Defaults remain identity‑safe unless explicitly enabled.
+**Summary:** PR98–PR105 land the Python FFI surface, strict‑parity harness, Rust kernel, **abi3 wheels + CI matrix**, advisory **bench + docs**, **hardening/diagnostics** (counters, once‑only logs, strict‑parity nightly), **perf‑ON caps parity for T1**, and an optional **GEL tick micro‑kernel**. Defaults remain identity‑safe unless explicitly enabled.
 
 
 ### Breaking changes
 None.
 
--### Upgrade notes
+### Upgrade notes
 - **Native T1 diagnostics:** Counters moved to `t1_native_diag.jsonl` (non-identity). `turn.jsonl` schema unchanged.
 - **pytest discovery scope:** `pytest.ini` now sets `testpaths = tests`. If you normally run `pytest` from a parent directory (e.g., your Desktop or a monorepo root), only this repo’s `tests/` will be collected. Run from the project root or pass an explicit path (e.g., `pytest tests/`).
 - **abi3 wheels/local build:** Wheels use abi3 (cp311). When building locally on Python 3.13, set `PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1` (or upgrade PyO3) before building to avoid version probes.
 - **Nightly strict parity:** New nightly job (`strict-parity-nightly.yml`) is advisory (non‑required). It compares native vs Python; failures won’t block PRs but should be triaged on `main`.
+- **T1 caps parity enablement:** To exercise the native path with perf caps/dedupe ON, set `perf.native.t1.enabled=true` (or `CLEMATIS_NATIVE_T1=1`). Strict parity can be toggled via `perf.native.t1.strict_parity` or `CLEMATIS_STRICT_PARITY=1`.
+- **GEL native flag:** New gate `perf.native.gel.enabled` controls the optional GEL tick native path. When disabled (default), behavior/logs are unchanged.
+
+### Added (PR104 — M12-07: T1 caps parity in Rust; opt‑in, identity‑safe)
+- **Kernel/FFI:** Rust T1 now accepts **perf‑ON knobs** with deterministic semantics:
+  - `caps.frontier` → `caps.queue_cap` (bounded priority queue),
+  - `caps.visited` → `caps.visited_cap` (deterministic FIFO‑on‑first‑visit),
+  - `dedupe_window` (short‑horizon ring; stable tie‑breaks).
+  FFI accepts these via `params={"caps":{"queue_cap","visited_cap"}, "dedupe_window"}`; Python bridge forwards from config.
+- **Engine gate:** Native path is **allowed** when caps/dedupe are ON (previously gated‑off). Soft fallback behavior and once‑only logs/counters from PR102 are preserved.
+- **Determinism:** Return order canonicalized (by node id) to avoid drift across platforms.
+- **Metrics:** `metrics["native_t1"].used_native` increments on native execution; existing fallback counters remain (`fallback_gated_*`, `fallback_import_failed`, `fallback_runtime_exc`, etc.).
+- **Tests:** `tests/native/test_parity_perf_on.py` (caps matrix parity, strict‑parity mode) and `tests/native/test_t1_fallback_when_perf_caps_on.py` (gates/fallback invariants) cover the path.
+- **Invariants:** Defaults unchanged; with native disabled the identity path stays byte‑stable. No schema change.
+
+### Added (PR105 — M12-08: GEL tick micro‑kernel; optional, identity‑safe)
+- **PyO3 export:** `gel_tick_decay(weights: float32[N], rate: f32, floor: f32) -> (weights_out: float32[N], counters: dict)` in `clematis/native/src/lib.rs`.
+- **Python bridge:** `clematis/native/gel.py` exposes `tick_decay(...)` with a safe import fallback and returns counters `{edges_processed, decay_applied}`.
+- **Engine dispatcher:** `clematis/engine/gel.py::gel_tick(...)` (if present) uses native when `perf.native.gel.enabled=true` and the extension is available; on runtime errors it **falls back** to Python and records counters under `metrics["native_gel"]` (`used_native`, `fallback_import_failed`, `fallback_runtime_exc`).
+- **Tests:** `tests/native/test_gel_tick_parity.py` (parity vs Python reference across sizes/rates) and `tests/native/test_gel_tick_fallback.py` (import/runtime fallbacks; dispatcher counters).
+- **Invariants:** Off by default; identity logs and schemas unchanged.
+
+
+### CI (PR104/PR105 — advisory updates)
+- Nightly strict‑parity job expands to include a **small caps matrix** for T1; remains **advisory**.
+- Optional GEL parity test added to the nightly advisory job; artifacts include diagnostics as before.
+
+
+### Release plan (Unreleased → tags)
+- **v0.9.0a4** — PR104: T1 caps parity in Rust (frontier/visited caps, dedupe window) — opt‑in; identity‑safe.
+- **v0.9.0a5** — PR105: Optional GEL tick micro‑kernel (decay); off by default; identity‑safe.
+
+### Sanity commands (local)
+```bash
+# PR104 — caps parity on T1
+export CLEMATIS_NATIVE_T1=1
+pytest -q tests/native/test_parity_perf_on.py
+CLEMATIS_STRICT_PARITY=1 pytest -q tests/native/test_parity_perf_on.py
+
+# PR105 — GEL tick parity
+export PERF_NATIVE_GEL_ENABLED=1
+pytest -q tests/native/test_gel_tick_parity.py
+
+# Dispatcher/diagnostics checks
+pytest -q tests/native/test_diagnostics.py -k env_override
+pytest -q tests/native/test_t1_fallback_when_perf_caps_on.py
+```
 
 
 ### Added (PR98 — M12-02: Python FFI surface & strict-parity harness; identity-safe)

@@ -239,6 +239,8 @@ def _t1_one_graph_python_inner(
     def _pq_key(priority_f32, kr, node):
         return (-float(np.float32(priority_f32)), int(kr), int(node))
     pq: List[Tuple[Tuple[float, int, int], int, float]] = []
+    # Avoid unbounded duplicate enqueues of the same node (keeps one pending entry per node)
+    in_queue = np.zeros(n_nodes, dtype=bool)
 
     local_max_delta = 0.0
     for s, sw in zip(seeds.tolist(), seed_weights.tolist()):
@@ -246,6 +248,7 @@ def _t1_one_graph_python_inner(
         acc[s] += sw_f32
         dist[s] = 0
         _heapq.heappush(pq, (_pq_key(sw_f32, key_rank[s], s), int(s), sw_f32))
+        in_queue[s] = True
         local_max_delta = max(local_max_delta, abs(sw_f32))
 
     pops = 0
@@ -260,6 +263,7 @@ def _t1_one_graph_python_inner(
 
     while pq:
         _, u, w = _heapq.heappop(pq)
+        in_queue[u] = False
         pops += 1
         layer = int(dist[u]) if dist[u] >= 0 else 0
         if layer > 0 and layer > layers_processed:
@@ -299,10 +303,12 @@ def _t1_one_graph_python_inner(
             local_max_delta = max(local_max_delta, abs(contrib_f32))
             if dist[v] < 0 or d < dist[v]:
                 dist[v] = d
-            if abs(acc[v]) < float(node_budget):
+            if abs(acc[v]) < float(node_budget) and not in_queue[v]:
                 _heapq.heappush(pq, (_pq_key(contrib_f32, key_rank[v], v), v, contrib_f32))
-            else:
+                in_queue[v] = True
+            elif abs(acc[v]) >= float(node_budget):
                 node_budget_hits_local += 1
+            # else: already in_queue[v] is True → skip re-enqueue to prevent duplicates
 
     # Build deterministic outputs: sort by node id
     nz = np.nonzero(np.abs(acc) >= EPS)[0]
@@ -351,6 +357,12 @@ def _t1_one_graph_native(
     iter_cap_layers = int(params.get("iter_cap_layers", 50))
     node_budget = float(params.get("node_budget", 1.5))
 
+    # PR104: extract perf-ON caps from params (forwarded by dispatcher)
+    _caps = params.get("caps", {}) if isinstance(params, dict) else {}
+    queue_cap = int((_caps.get("queue_cap", 0) or 0))
+    visited_cap = int((_caps.get("visited_cap", 0) or 0))
+    dedupe_window = int(params.get("dedupe_window", 0) or 0)
+
     return native_t1.propagate_one_graph_rs(
         indptr=indptr,
         indices=indices,
@@ -365,23 +377,31 @@ def _t1_one_graph_native(
         radius_cap=radius_cap,
         iter_cap_layers=iter_cap_layers,
         node_budget=node_budget,
+        queue_cap=queue_cap,
+        dedupe_window=dedupe_window,
+        visited_cap=visited_cap,
     )
 
 
 def _native_t1_allowed(cfg) -> bool:
-    """PR99 gate: allow native only if backend is valid **and** perf caps/dedupe are OFF.
+    """PR104 gate: allow native when backend is valid; gate off if unknown caps are present.
 
-    We disallow the native path when perf.t1.caps.* or perf.t1.dedupe_window are enabled,
-    because PR99 implements only perf-OFF semantics in the kernel.
+    Native kernel supports frontier/visited caps and dedupe_window. If cfg declares
+    other truthy caps, keep the PR102 gating behavior (treat as not allowed) so we
+    increment fallback_gated_* counters and stay on Python.
     """
     try:
         block = (cfg.get("perf") or {}).get("native", {}).get("t1", {})
         backend_ok = block.get("backend", "rust") in {"rust", "python"}
-        perf_t1 = (cfg.get("perf") or {}).get("t1", {})
-        caps = perf_t1.get("caps", {}) or {}
-        dedupe_window = int(perf_t1.get("dedupe_window", 0) or 0)
-        caps_on = any(bool(v) for v in caps.values())
-        return bool(backend_ok and not caps_on and dedupe_window == 0)
+        if not backend_ok:
+            return False
+        perf_t1 = ((cfg.get("perf") or {}).get("t1") or {}) if isinstance(cfg, dict) else {}
+        caps = (perf_t1.get("caps") or {})
+        # Native-supported caps
+        supported = {"frontier", "visited"}
+        unknown_true = any((k not in supported) and bool(v) for k, v in caps.items())
+        # dedupe_window is supported; do not gate on it
+        return not unknown_true
     except Exception:
         return False
 
@@ -486,6 +506,22 @@ def _t1_one_graph_dispatch(
                 rel_code=rel_code,
             )
             try:
+                # PR104: forward perf caps/dedupe to native via params
+                perf_t1 = ((cfg.get("perf") or {}).get("t1") or {}) if isinstance(cfg, dict) else {}
+                caps_cfg = (perf_t1.get("caps") or {})
+                frontier_cap_cfg = int(caps_cfg.get("frontier", 0) or 0)
+                visited_cap_cfg = int(caps_cfg.get("visited", 0) or 0)
+                dedupe_window_cfg = int(perf_t1.get("dedupe_window", 0) or 0)
+                params_native = dict(params or {})
+                caps_native = dict((params_native.get("caps") or {}))
+                if frontier_cap_cfg > 0:
+                    caps_native["queue_cap"] = frontier_cap_cfg
+                if visited_cap_cfg > 0:
+                    caps_native["visited_cap"] = visited_cap_cfg
+                if caps_native:
+                    params_native["caps"] = caps_native
+                if dedupe_window_cfg > 0:
+                    params_native["dedupe_window"] = dedupe_window_cfg
                 n_nodes, n_vals, n_met = _t1_one_graph_native(
                     indptr=indptr,
                     indices=indices,
@@ -494,7 +530,7 @@ def _t1_one_graph_dispatch(
                     rel_mult=rel_mult,
                     key_rank=key_rank,
                     seeds=seeds,
-                    params=params,
+                    params=params_native,
                     seed_weights=seed_weights,
                 )
             except (MemoryError, TypeError, ValueError, OverflowError) as e:
@@ -517,6 +553,22 @@ def _t1_one_graph_dispatch(
 
         # normal native path (non-strict)
         try:
+            # PR104: forward perf caps/dedupe to native via params
+            perf_t1 = ((cfg.get("perf") or {}).get("t1") or {}) if isinstance(cfg, dict) else {}
+            caps_cfg = (perf_t1.get("caps") or {})
+            frontier_cap_cfg = int(caps_cfg.get("frontier", 0) or 0)
+            visited_cap_cfg = int(caps_cfg.get("visited", 0) or 0)
+            dedupe_window_cfg = int(perf_t1.get("dedupe_window", 0) or 0)
+            params_native = dict(params or {})
+            caps_native = dict((params_native.get("caps") or {}))
+            if frontier_cap_cfg > 0:
+                caps_native["queue_cap"] = frontier_cap_cfg
+            if visited_cap_cfg > 0:
+                caps_native["visited_cap"] = visited_cap_cfg
+            if caps_native:
+                params_native["caps"] = caps_native
+            if dedupe_window_cfg > 0:
+                params_native["dedupe_window"] = dedupe_window_cfg
             n_nodes, n_vals, n_met = _t1_one_graph_native(
                 indptr=indptr,
                 indices=indices,
@@ -525,7 +577,7 @@ def _t1_one_graph_dispatch(
                 rel_mult=rel_mult,
                 key_rank=key_rank,
                 seeds=seeds,
-                params=params,
+                params=params_native,
                 seed_weights=seed_weights,
             )
             _bump(n_met, "used_native")

@@ -61,6 +61,9 @@ def propagate_one_graph_rs(
     radius_cap: int,
     iter_cap_layers: int,
     node_budget: float,
+    queue_cap: int = 0,
+    dedupe_window: int = 0,
+    visited_cap: int = 0,
 ) -> Tuple[np.ndarray, np.ndarray, Dict[str, Any]]:
     """Python stub for the coming Rust kernel.
 
@@ -71,6 +74,11 @@ def propagate_one_graph_rs(
 
     The call shape matches the planned Rust FFI, ltr will internally call
     refactored Python inner loop (PR98) to establish strict-parity harness.
+
+    Caps (perf-ON parity):
+      queue_cap: int       -- max frontier size (0 disables)
+      dedupe_window: int   -- recent-enqueue ring size for duplicate suppression (0 disables)
+      visited_cap: int     -- max expanded nodes before switching to drain-only (0 disables)
     """
     # pref Rust kernel if the extension is present (PR99)
     if _HAVE_RS:
@@ -98,6 +106,9 @@ def propagate_one_graph_rs(
                 int(radius_cap),
                 int(iter_cap_layers),
                 float(node_budget),
+                int(queue_cap),
+                int(dedupe_window),
+                int(visited_cap),
             )
         except (MemoryError, TypeError, ValueError, OverflowError) as e:
             _log_once("pyo3_runtime_exc", logging.ERROR, f"native_t1 PyO3 raised {type(e).__name__}: {e}")
@@ -132,6 +143,20 @@ def propagate_one_graph_rs(
         "iter_cap_layers": int(iter_cap_layers),
         "node_budget": float(node_budget),
     }
+
+    # perf-ON caps parity with Python inner
+    _q = int(queue_cap) if queue_cap else 0
+    _d = int(dedupe_window) if dedupe_window else 0
+    _v = int(visited_cap) if visited_cap else 0
+    caps: Dict[str, Any] = {}
+    if _q > 0:
+        caps["queue_cap"] = _q
+    if _v > 0:
+        caps["visited_cap"] = _v
+    if caps:
+        params["caps"] = caps
+    if _d > 0:
+        params["dedupe_window"] = _d
 
     # kwargs for the inner function, adding optional keys only if supported.
     inner_sig = inspect.signature(_t1_one_graph_python_inner)

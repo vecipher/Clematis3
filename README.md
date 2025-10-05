@@ -2,12 +2,12 @@
 
 Clematis is a deterministic, turn‑based scaffold for agential AI. It models agents with concept graphs and tiered reasoning (T1→T4), uses small LLMs where needed, and keeps runtime behavior reproducible (no hidden network calls in tests/CI).
 
-> **Status:** **v0.9.0a2** (2025‑10‑04) — **M11 complete** ✅ (HS1/GEL substrate). Defaults unchanged; all GEL paths are **gated and OFF by default**; identity path preserved. M10 remains complete; M9 deterministic parallelism remains flag‑gated and OFF by default.
+> **Status:** **Unreleased (v0.9.0a3–a5)** — **M12 in progress** (Native T1 opt‑in, caps parity, optional GEL tick). Defaults unchanged; all new native paths are **gated and OFF by default**; identity path preserved. M11 remains complete; M10 complete; M9 deterministic parallelism stays flag‑gated and OFF by default.
 >
 > **M10 — Reflection Sessions (complete):** Finalized across **PR77** and **PR80–PR90** (config, writer/budgets/tests, fixtures‑only LLM backend, planner flag, telemetry/trace, microbench, optional CI smoke, docs, goldens/identity maintenance). See **[docs/m10/reflection.md](docs/m10/reflection.md)**.
 >
 
-> **M12 — Native T1 (in progress):** PR97–PR100 shipped (config+stubs, FFI parity, Rust kernel perf‑OFF, wheels/CI). **PR101 (bench & docs)** is advisory and Linux‑only. **PR102 (hardening & diagnostics)** adds counters + once‑only logs and a nightly strict‑parity sweep; enable via `CLEMATIS_NATIVE_T1=1` and opt‑in strict parity with `CLEMATIS_STRICT_PARITY=1`. Wheels are **abi3 (cp311)**; `t1.available()` is **True** when importing the installed wheel (avoid source shadowing). See **[docs/m12/native_t1.md](docs/m12/native_t1.md)**.
+> **M12 — Native T1 (in progress):** PR97–PR100 shipped (config+stubs, FFI parity, Rust kernel perf‑OFF, wheels/CI). **PR101 (bench & docs)** is advisory and Linux‑only. **PR102 (hardening & diagnostics)** adds counters + once‑only logs and a nightly strict‑parity sweep. **PR104 (perf‑ON caps parity)** enables the native T1 path when `caps.frontier`, `caps.visited`, or `dedupe_window` are ON, with deterministic semantics. **PR105 (GEL micro‑kernel)** adds an optional decay kernel behind `perf.native.gel.enabled` (or `PERF_NATIVE_GEL_ENABLED`) with parity to the Python reference. Enable native T1 via `CLEMATIS_NATIVE_T1=1`; opt‑in strict parity with `CLEMATIS_STRICT_PARITY=1`. Diagnostics stream: `t1_native_diag.jsonl` (see "Where to see them"). Wheels are **abi3 (cp311+)**; avoid source shadowing by installing from wheel. See **[docs/m12/native_t1.md](docs/m12/native_t1.md)**.
 
 ---
 
@@ -255,6 +255,8 @@ See **docs/m9/overview.md** for determinism rules, identity guarantees, and trou
 ## Environment flags
 - `CLEMATIS_NATIVE_T1=1` — force‑enable the native T1 path (overrides config).
 - `CLEMATIS_STRICT_PARITY=1` — compute native & python and fail on mismatch (CI/advisory).
+-
+`PERF_NATIVE_GEL_ENABLED=1` — enable the optional GEL tick native path (engine fast‑path). Equivalent config gate: `perf.native.gel.enabled: true`. When disabled (default), behavior/logs are unchanged; counters appear under `metrics["native_gel"]` when enabled.
 - `CLEMATIS_NETWORK_BAN=1` — enforce no network (recommended in CI).
 - `CLEMATIS_DEBUG=1` — enable a single stderr breadcrumb for wrapper delegation.
   Exit codes and stdout remain identical.
@@ -268,6 +270,8 @@ When `CI=true`, log writes route through `clematis/engine/orchestrator/logging.a
 ### CI workflows (advisory)
 - **Perf smoke (Linux)** — `.github/workflows/perf-smoke.yml`: builds & installs the wheel, asserts `_t1_rs` import + `t1.available()` and runs the bounded perf smoke. Trigger on push to default branches or label PRs `perf-smoke`. Non‑required.
 - **Strict parity nightly** — `.github/workflows/strict-parity-nightly.yml`: daily at 20:00 UTC (or manual). Runs perf smoke and diagnostics under `CLEMATIS_NATIVE_T1=1`, `CLEMATIS_STRICT_PARITY=1`, `PERF_SMOKE=1`. Non‑required.
+- **Strict parity (caps advisory):** The nightly strict‑parity job includes a small caps matrix for T1 under advisory status; uploads `t1_native_diag.jsonl` artifacts.
+- **GEL parity (optional):** A tiny GEL parity test (native or fallback) runs in the nightly advisory job when enabled.
 
 ## Milestones snapshot
 - **M1–M4:** core stages + apply/persist + logs.

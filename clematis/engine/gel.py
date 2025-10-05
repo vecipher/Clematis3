@@ -25,6 +25,8 @@
 from __future__ import annotations
 
 from typing import Any, Dict, Iterable, List, Optional, Tuple
+import os
+import numpy as np
 
 
 # Helper: gate all behavior when GEL is disabled
@@ -680,6 +682,68 @@ def tick(
         decay_factor = 0.0
     else:
         decay_factor = 0.5 ** (float(dt) / half_life)
+
+    # Optional native GEL path (PR105): use Rust micro-kernel when enabled
+    try:
+        from clematis.native import gel as _ng  # lazy import to avoid hard dep
+        have_native = bool(_ng.available())
+    except Exception:
+        have_native = False
+
+    # Feature flag: cfg.perf.native.gel.enabled or PERF_NATIVE_GEL_ENABLED
+    enabled_native = False
+    try:
+        root_cfg = ctx if isinstance(ctx, dict) else (getattr(ctx, "config", None) or getattr(ctx, "cfg", None) or {})
+        gel_block = (((root_cfg.get("perf") or {}).get("native") or {}).get("gel") or {}) if isinstance(root_cfg, dict) else {}
+        enabled_native = bool(gel_block.get("enabled", False)) or (os.getenv("PERF_NATIVE_GEL_ENABLED", "").strip().lower() in {"1", "true", "yes", "on"})
+    except Exception:
+        enabled_native = (os.getenv("PERF_NATIVE_GEL_ENABLED", "").strip().lower() in {"1", "true", "yes", "on"})
+
+    if enabled_native and have_native and edges:
+        # Build a stable list of keys to map weights to/from the native call
+        _keys = list(edges.keys())
+        _w_in = np.asarray([float(edges[k].get("weight", 0.0)) for k in _keys], dtype=np.float32)
+        # Apply multiplicative decay via native kernel; floor is applied below in Python
+        _w_out, _nmet = _ng.tick_decay(_w_in, rate=float(decay_factor), floor=0.0)
+
+        decayed = 0
+        dropped = 0
+        for k, w_old, w_new in zip(_keys, _w_in.tolist(), _w_out.tolist()):
+            if abs(w_new) < float(floor):
+                # Drop edge below threshold
+                edges.pop(k, None)
+                dropped += 1
+            else:
+                if w_new != w_old:
+                    edges[k]["weight"] = float(w_new)
+                    decayed += 1
+                # deterministic bookkeeping
+                if turn is not None:
+                    edges[k]["updated_at"] = None
+                attrs = edges[k].setdefault("attrs", {})
+                if attrs.get("last_seen_turn") is None and turn is not None:
+                    attrs["last_seen_turn"] = int(turn)
+
+        # keep meta edges_count consistent
+        meta = gstore.setdefault("meta", {})
+        meta["edges_count"] = len(edges)
+
+        # Return metrics including native counters (non-identity diag is best-effort)
+        out_metrics = {
+            "event": "edge_decay",
+            "agent": agent,
+            "decayed_edges": decayed,
+            "dropped_edges": dropped,
+            "half_life_turns": half_life,
+            "floor": floor,
+            "native_gel": {"used_native": 1, **dict(_nmet)},
+        }
+        try:
+            from clematis.engine.orchestrator.logging import log_t1_native_diag as _log_diag  # reuse diag stream
+            _log_diag(ctx=None, agent="gel", native_t1={"gel": dict(_nmet)})
+        except Exception:
+            pass
+        return out_metrics
 
     decayed = 0
     dropped = 0
