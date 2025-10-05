@@ -311,6 +311,28 @@ None.
 - **.gitignore:** deduplicated entries; clarified JSONL ignore patterns for local logs while keeping identity goldens intact.
 
 
+
+## [0.9.0a3] - 2025-10-05
+
+### M12 — Native T1 (opt‑in) release roll‑up
+
+**Summary:** Formalizes the M12 native T1 path behind flags and ships wheels. Defaults remain identity‑safe; byte‑stable logs on the disabled path. Detailed entries for PR97–PR102 appear above in this file.
+
+- Kernel: optional Rust T1; gated by `perf.native.t1.enabled`; strict‑parity mode available via `perf.native.t1.strict_parity` or `CLEMATIS_STRICT_PARITY=1`.
+- Diagnostics: native counters/logs emitted to `t1_native_diag.jsonl` (non‑identity stream). `turn.jsonl` schema unchanged.
+- CI: advisory perf smoke and nightly strict‑parity jobs; neither gates merges.
+- Packaging: abi3 (cp311) wheels for Linux/macOS/Windows; source distribution published.
+- Docs: `docs/m12/native_t1.md` updated; README status row reflects M12.
+
+### Upgrade notes
+- **Native T1 diagnostics:** Counters moved to `t1_native_diag.jsonl` (non-identity). `turn.jsonl` schema unchanged.
+- **pytest discovery scope:** `pytest.ini` now sets `testpaths = tests`. If you normally run `pytest` from a parent directory (e.g., your Desktop or a monorepo root), only this repo’s `tests/` will be collected. Run from the project root or pass an explicit path (e.g., `pytest tests/`).
+- **abi3 wheels/local build:** Wheels use abi3 (cp311). When building locally on Python 3.13, set `PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1` (or upgrade PyO3) before building to avoid version probes.
+- **Nightly strict parity:** The `strict-parity-nightly.yml` job is advisory (non‑required).
+
+### Breaking changes
+None.
+
 ## [0.9.0a2] - 2025-10-04
 
 ### M11 — Field‑Control GEL (HS1): contracts + safe plumbing (no planner)
