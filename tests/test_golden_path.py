@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import os
+import shutil
 from clematis.world.scenario import run_one_turn
 from clematis.engine.types import Config
 from clematis.io.log import _append_jsonl_unbuffered
@@ -15,6 +16,16 @@ from clematis.engine.util.io_logging import (
 
 
 def test_golden_path(tmp_path, monkeypatch):
+    # Force identity-style logging to repo .logs (no redirection)
+    monkeypatch.setenv("IDENTITY_TESTS", "1")
+    monkeypatch.delenv("CLEMATIS_LOG_DIR", raising=False)
+
+    # Start from a clean .logs so presence/contents checks are deterministic
+    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    logs_dir = os.path.join(repo_root, ".logs")
+    shutil.rmtree(logs_dir, ignore_errors=True)
+    os.makedirs(logs_dir, exist_ok=True)
+
     # Ensure logs go under repo .logs (relative to package path)
     cfg = Config()
     state = {}

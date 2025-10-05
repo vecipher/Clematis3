@@ -1,0 +1,1 @@
+{"turn": "demo-1", "agent": "AgentA", "pops": 5, "iters": 1, "propagations": 3, "radius_cap_hits": 0, "layer_cap_hits": 0, "node_budget_hits": 0, "max_delta": 1.0, "graphs_touched": 1, "cache_hits": 0, "cache_misses": 1, "cache_used": false, "cache_enabled": true, "ms": 0.109, "now": "2025-10-05T06:32:35.993068+00:00"}
