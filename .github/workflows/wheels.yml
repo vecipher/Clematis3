@@ -27,6 +27,7 @@ jobs:
         with:
           python-version: "3.11"
 
+      # Avoid PATH poisoning on Windows if a repo file/folder is named 'python'
       - name: Windows PATH sanity (remove stray 'python')
         if: runner.os == 'Windows'
         shell: pwsh
@@ -37,12 +38,13 @@ jobs:
       - name: Build wheels via cibuildwheel
         uses: pypa/cibuildwheel@v2.21.3
         env:
-          CIBW_BUILD: "cp311-*"
+          # Build for 3.11/3.12/3.13 so tests can install a matching wheel
+          CIBW_BUILD: "cp311-* cp312-* cp313-*"
           CIBW_SKIP: "pp* *musllinux*"
           CIBW_ARCHS_LINUX: "x86_64"
           CIBW_ARCHS_MACOS: "native"
 
-          # Linux: install Rust inside manylinux and expose cargo on PATH
+          # --- Linux: install Rust inside manylinux container ---
           CIBW_BEFORE_BUILD_LINUX: |
             curl https://sh.rustup.rs -sSf | sh -s -- -y --profile minimal
             . "$HOME/.cargo/env"
@@ -52,7 +54,7 @@ jobs:
           CIBW_ENVIRONMENT_LINUX: >
             PATH="$HOME/.cargo/bin:$PATH" PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1 RUSTFLAGS="-C link-arg=-Wl,--build-id=none"
 
-          # macOS: ensure cargo exists and set deployment target for delocate
+          # --- macOS: install Rust and set deployment target for delocate ---
           CIBW_BEFORE_BUILD_MACOS: |
             rustc -V || (curl https://sh.rustup.rs -sSf | sh -s -- -y --profile minimal)
             . "$HOME/.cargo/env"
@@ -62,7 +64,7 @@ jobs:
           CIBW_ENVIRONMENT_MACOS: >
             PATH="$HOME/.cargo/bin:$PATH" PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1 SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH MACOSX_DEPLOYMENT_TARGET=10.12
 
-          # Windows: prepend cargo to PATH *inside* the build, don't clobber PATH in env
+          # --- Windows: add cargo to PATH *inside* build, don't clobber env PATH ---
           CIBW_BEFORE_BUILD_WINDOWS: |
             set PATH=C:\Users\runneradmin\.cargo\bin;%PATH%
             rustup toolchain install stable --profile minimal
@@ -72,17 +74,24 @@ jobs:
           CIBW_ENVIRONMENT_WINDOWS: >
             PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1
 
-      - name: Assert wheel contains native module
+      - name: Assert each built wheel has the native module
         shell: bash
         run: |
-          WHL=$(ls wheelhouse/*.whl | head -n1)
           python - <<'PY'
-          import glob, zipfile
-          whl = glob.glob('wheelhouse/*.whl')[0]
-          with zipfile.ZipFile(whl) as z:
+          import glob, zipfile, sys
+          wheels = sorted(glob.glob('wheelhouse/*.whl'))
+          assert wheels, "no wheels found in wheelhouse/"
+          ok = True
+          for whl in wheels:
+            with zipfile.ZipFile(whl) as z:
               names = z.namelist()
-          assert any(n.endswith('_t1_rs.so') or n.endswith('_t1_rs.pyd') or '_t1_rs.' in n for n in names), f"no native _t1_rs in {whl}"
-          print('OK:', whl)
+            if not any(n.endswith('_t1_rs.so') or n.endswith('_t1_rs.pyd') or '_t1_rs.' in n for n in names):
+              print("MISSING _t1_rs in", whl)
+              ok = False
+            else:
+              print("OK:", whl)
+          if not ok:
+            sys.exit(1)
           PY
 
       - name: Upload wheels
@@ -133,11 +142,30 @@ jobs:
         run: |
           if [ -d clematis ]; then mv clematis clematis_src; fi
 
-      - name: Install wheel
+      - name: Install test deps
         shell: bash
         run: |
           python -m pip install --upgrade pip
-          python -m pip install wheelhouse/*.whl
+          python -m pip install pytest hypothesis
+
+      - name: Install our wheel (pick the right one automatically)
+        shell: bash
+        run: |
+          # Pin to the project version so pip picks our local wheels over PyPI; still uses index for deps
+          VER=$(python - <<'PY'
+          import glob, re
+          files = sorted(glob.glob('wheelhouse/clematis-*.whl'))
+          import sys
+          assert files, "no clematis wheels in wheelhouse/"
+          m = re.search(r'clematis-([0-9][^-]*)-', files[0])
+          print(m.group(1))
+          PY
+          )
+          python -m pip install --find-links wheelhouse "clematis==$VER"
+
+      - name: Sanity import (native present)
+        shell: bash
+        run: |
           python - <<'PY'
           import importlib
           from clematis.native import t1
@@ -152,6 +180,5 @@ jobs:
           CI: "true"
           CLEMATIS_NETWORK_BAN: "1"
         run: |
-          python -m pip install -r tests/requirements.txt || true
           cd tests
           pytest -q native config helpers packaging/test_wheel_has_native.py
