@@ -9,8 +9,18 @@ All notable changes to this project will be documented in this file.
 
 
 
+
 ## [Unreleased]
-**Summary:** PR98 + PR99 land the Python FFI surface, strict‑parity harness, and the first Rust kernel (perf‑OFF semantics; optional; identity‑safe by default).
+**Summary:** PR98–PR102 land the Python FFI surface, strict‑parity harness, Rust kernel, **abi3 wheels + CI matrix**, advisory **bench + docs**, and **hardening/diagnostics** (counters, once‑only logs, strict‑parity nightly). Defaults remain identity‑safe unless explicitly enabled.
+
+
+### Breaking changes
+None.
+
+### Upgrade notes
+- **pytest discovery scope:** `pytest.ini` now sets `testpaths = tests`. If you normally run `pytest` from a parent directory (e.g., your Desktop or a monorepo root), only this repo’s `tests/` will be collected. Run from the project root or pass an explicit path (e.g., `pytest tests/`).
+- **abi3 wheels/local build:** Wheels use abi3 (cp311). When building locally on Python 3.13, set `PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1` (or upgrade PyO3) before building to avoid version probes.
+- **Nightly strict parity:** New nightly job (`strict-parity-nightly.yml`) is advisory (non‑required). It compares native vs Python; failures won’t block PRs but should be triaged on `main`.
 
 
 ### Added (PR98 — M12-02: Python FFI surface & strict-parity harness; identity-safe)
@@ -133,6 +143,48 @@ All notable changes to this project will be documented in this file.
   - Installing those wheels on **3.11 / 3.12 / 3.13** passes the focused test subset and `t1.available() == True`.
 - **PR101–102:** Bench doc + diagnostics/hardening; optional nightly strict-parity job.
 - **PR103:** Version bump (0.9.0a3) + release.
+
+
+### Added (PR101 — M12-05: Bench & Docs; advisory)
+- **Goal:** bounded perf smoke and complete operator docs (no change to defaults).
+- **Bench:** `tests/perf/test_bench_t1_smoke.py`
+  - Builds a deterministic synthetic graph (~50k edges) with a fixed seed.
+  - Measures Python vs native (when enabled/allowed) and asserts native ≥ **1.8×** speedup on Linux.
+  - Markers: `@pytest.mark.slow`; runs only when `PERF_SMOKE=1` and on Linux in CI.
+- **Docs:** `docs/m12/native_t1.md` updated — scope, enablement, parity, fallback conditions, build‑from‑source, bench notes.
+- **README:** status/badge updated for M12 Native T1.
+- **CI:** `perf-smoke-linux` (advisory, non‑required)
+  - `ubuntu-22.04`, Python 3.12, native enabled.
+  - Triggers on push to default branch and when PRs are labelled `perf-smoke`.
+  - Does **not** gate merges.
+- **Invariants:** identity path unchanged when native is disabled; bench is observational only.
+
+### Changed (PR102 — M12-06: Hardening & Diagnostics; in progress)
+- **Engine (T1 dispatcher):** `clematis/engine/stages/t1.py`
+  - Once‑only logging helper and metrics counter helper.
+  - Fallback counters under `metrics["native_t1"]`:
+    - `used_native`, `fallback_import_failed`,
+    - `fallback_gated_caps`, `fallback_gated_dedupe`, `fallback_gated_other`,
+    - `fallback_runtime_exc`, `strict_parity_mismatch`, `strict_parity_native_exc`.
+  - Gated‑off behavior (caps/dedupe) logs once and never calls native.
+  - **Strict parity mode** (`perf.native.t1.strict_parity=true` or `CLEMATIS_STRICT_PARITY=1`): compute both, compare (`atol=1e-6`, `rtol=1e-5`), raise with concise diff on mismatch.
+  - Runtime exceptions from native (MemoryError/TypeError/ValueError/OverflowError) cause a **soft fallback** (unless strict parity, which re‑raises).
+- **Native bridge:** `clematis/native/t1.py`
+  - Wraps the PyO3 call in try/except; logs once (`pyo3_runtime_exc`) then re‑raises for the dispatcher to handle.
+- **Tests:** `tests/native/test_diagnostics.py`
+  - Import‑failure fallback & logging (once‑only),
+  - Gated‑off counters (caps + dedupe),
+  - Runtime‑exception fallback path,
+  - Strict parity mismatch raises with a short diff,
+  - Log‑once semantics verified via `caplog`.
+- **CI:** `.github/workflows/strict-parity-nightly.yml`
+  - Nightly (20:00 UTC) and manual dispatch.
+  - Installs the wheel, validates `_t1_rs` import from `/tmp` (no source shadowing),
+  - Runs perf smoke and diagnostics under `CLEMATIS_NATIVE_T1=1`, `CLEMATIS_STRICT_PARITY=1`, `PERF_SMOKE=1`.
+  - Non‑required; must be green on the default branch over time.
+- **Repo hygiene:** `pytest.ini`
+  - `testpaths = tests` to constrain discovery; corrected `filterwarnings` placement; markers documented.
+- **Invariants:** defaults remain identity‑safe; diagnostics are observational; parity mode affects tests/CI behavior only.
 
 
 ### Added (PR97 — M12-01: Native T1 scaffold; config + stubs; identity-safe)

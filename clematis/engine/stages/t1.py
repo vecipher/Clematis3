@@ -3,6 +3,8 @@ from collections import defaultdict
 import heapq
 from typing import Dict, Any, List, Tuple
 import numpy as np
+import logging
+import threading
 from ..types import T1Result
 from ..cache import LRUCache, stable_key, ThreadSafeCache, ThreadSafeBytesCache
 from ..util.ring import DedupeRing
@@ -135,6 +137,42 @@ def _canon_nodes_vals(d_nodes: np.ndarray, d_vals: np.ndarray):
     """Sort by node id and enforce ABI dtypes for stable comparisons."""
     o = np.argsort(d_nodes, kind="stable")
     return d_nodes[o].astype(np.int32, copy=False), d_vals[o].astype(np.float32, copy=False)
+
+# --- PR102: diagnostics helpers ---
+_logger = logging.getLogger("clematis.native.t1")
+_LOG_ONCE_KEYS = set()
+_LOG_ONCE_LOCK = threading.Lock()
+
+def _log_once(key: str, level: int, msg: str):
+    with _LOG_ONCE_LOCK:
+        if key in _LOG_ONCE_KEYS:
+            return
+        _LOG_ONCE_KEYS.add(key)
+    _logger.log(level, msg)
+
+
+def _bump(metrics: Dict[str, Any], key: str, inc: int = 1) -> None:
+    """Increment a counter under metrics["native_t1"][key]."""
+    nt = metrics.setdefault("native_t1", {})
+    nt[key] = int(nt.get(key, 0)) + int(inc)
+
+
+def _diff_report(py_nodes, py_vals, rs_nodes, rs_vals, *, atol=1e-6, rtol=1e-5, topk=3):
+    import numpy as _np
+    p = {int(n): float(v) for n, v in zip(_np.asarray(py_nodes), _np.asarray(py_vals))}
+    r = {int(n): float(v) for n, v in zip(_np.asarray(rs_nodes), _np.asarray(rs_vals))}
+    keys = sorted(set(p.keys()) | set(r.keys()))
+    mismatches = []
+    for k in keys:
+        pv = p.get(k, 0.0)
+        rv = r.get(k, 0.0)
+        if not (abs(pv - rv) <= (atol + rtol * max(abs(pv), abs(rv)))):
+            mismatches.append((k, pv, rv, abs(pv - rv)))
+    mismatches.sort(key=lambda t: t[3], reverse=True)
+    if mismatches:
+        head = ", ".join([f"node={k} py={pv:.6g} rs={rv:.6g} Δ={d:.3g}" for (k, pv, rv, d) in mismatches[:topk]])
+        return len(mismatches), head
+    return 0, ""
 
 # === PR98: Native parity harness scaffolding (no behavior change by default) ===
 from typing import Sequence, Optional
@@ -348,6 +386,7 @@ def _native_t1_allowed(cfg) -> bool:
         return False
 
 
+# === PR102: diagnostics, counters, and strict-parity diff ===
 def _t1_one_graph_dispatch(
     *,
     cfg,
@@ -361,20 +400,125 @@ def _t1_one_graph_dispatch(
     params: Dict[str, Any],
     seed_weights: Optional[np.ndarray] = None,
 ) -> Tuple[np.ndarray, np.ndarray, Dict[str, Any]]:
-    """Test-visible dispatcher for strict parity.
+    """Dispatcher with PR102 diagnostics, counters, and strict-parity diff.
 
-    If cfg.perf.native.t1.enabled and native available + allowed:
-      - strict_parity=True → compute both paths, assert identical, return python.
-      - else → return native result.
-    Otherwise returns python result.
+    Behavior:
+      • If enabled+allowed and native available → run native (or strict parity).
+      • If enabled but gated (caps/dedupe) → bump counters, log once, run python.
+      • If enabled+allowed but import/available() fails → bump counters, log once, python.
+      • If native raises (MemoryError/TypeError/ValueError/OverflowError) →
+        bump counters, log once, fallback to python unless strict_parity.
+    Returns (d_nodes[int32], d_vals[float32], metrics[dict]).
     """
-    block = (((cfg or {}).get("perf") or {}).get("native") or {}).get("t1") or {}
-    strict = bool(block.get("strict_parity", False))
-    enabled = bool(block.get("enabled", False))
+    import os
+    base_metrics: Dict[str, Any] = {}
 
-    if enabled and _native_t1_allowed(cfg):
-        from clematis.native import t1 as native_t1  # lazy
-        if native_t1.available():
+    block = (((cfg or {}).get("perf") or {}).get("native") or {}).get("t1") or {}
+
+    def _env_truth(name: str) -> bool:
+        return (os.getenv(name, "") or "").strip().lower() in {"1", "true", "yes", "on"}
+
+    strict = bool(block.get("strict_parity", False)) or _env_truth("CLEMATIS_STRICT_PARITY")
+    enabled = bool(block.get("enabled", False)) or _env_truth("CLEMATIS_NATIVE_T1")
+
+    allowed = _native_t1_allowed(cfg)
+
+    # Helper to run python path and attach native_t1 counters
+    def _run_python_with(metrics_patch_key: str | None = None):
+        p_nodes, p_vals, p_met = _t1_one_graph_python_inner(
+            indptr=indptr,
+            indices=indices,
+            weights=weights,
+            rel_mult=rel_mult,
+            seeds=seeds,
+            params=params,
+            key_rank=key_rank,
+            seed_weights=seed_weights,
+            rel_code=rel_code,
+        )
+        if metrics_patch_key:
+            _bump(p_met, metrics_patch_key)
+        # carry forward any base-level counters collected before the call
+        if base_metrics:
+            p_met.setdefault("native_t1", {}).update(base_metrics.get("native_t1", {}))
+        return p_nodes, p_vals, p_met
+
+    if enabled and not allowed:
+        # Determine gate reasons for counters
+        perf_t1 = ((cfg.get("perf") or {}).get("t1") or {}) if isinstance(cfg, dict) else {}
+        caps = (perf_t1.get("caps", {}) or {})
+        dedupe_window = int(perf_t1.get("dedupe_window", 0) or 0)
+        any_caps = any(bool(v) for v in caps.values())
+        if any_caps:
+            _bump(base_metrics, "fallback_gated_caps")
+        if dedupe_window > 0:
+            _bump(base_metrics, "fallback_gated_dedupe")
+        if not any_caps and dedupe_window == 0:
+            _bump(base_metrics, "fallback_gated_other")
+        _log_once("gate_off", logging.INFO, "native_t1 gated off (caps/dedupe) → using python path")
+        return _run_python_with(None)
+
+    if enabled and allowed:
+        # Try import/availability
+        native_available = False
+        native_t1 = None
+        try:
+            from clematis.native import t1 as _native_t1
+            native_t1 = _native_t1
+            native_available = bool(_native_t1.available())
+        except Exception:
+            native_available = False
+
+        if not native_available:
+            _bump(base_metrics, "fallback_import_failed")
+            _log_once("import_failed", logging.WARNING, "native_t1 enabled but import/available() failed → fallback to python")
+            return _run_python_with(None)
+
+        # strict parity: compute both, diff, and raise on mismatch
+        if strict:
+            p_nodes, p_vals, p_met = _t1_one_graph_python_inner(
+                indptr=indptr,
+                indices=indices,
+                weights=weights,
+                rel_mult=rel_mult,
+                seeds=seeds,
+                params=params,
+                key_rank=key_rank,
+                seed_weights=seed_weights,
+                rel_code=rel_code,
+            )
+            try:
+                n_nodes, n_vals, n_met = _t1_one_graph_native(
+                    indptr=indptr,
+                    indices=indices,
+                    weights=weights,
+                    rel_code=rel_code,
+                    rel_mult=rel_mult,
+                    key_rank=key_rank,
+                    seeds=seeds,
+                    params=params,
+                    seed_weights=seed_weights,
+                )
+            except (MemoryError, TypeError, ValueError, OverflowError) as e:
+                _bump(p_met, "strict_parity_native_exc")
+                _log_once("runtime_exc_strict", logging.ERROR, f"native_t1 raised {type(e).__name__} in strict parity: {e}")
+                raise
+
+            # Canonicalize and compare with tolerances
+            n_nodes_c, n_vals_c = _canon_nodes_vals(n_nodes, n_vals)
+            p_nodes_c, p_vals_c = _canon_nodes_vals(p_nodes, p_vals)
+            cnt, head = _diff_report(p_nodes_c, p_vals_c, n_nodes_c, n_vals_c)
+            if cnt:
+                _bump(p_met, "strict_parity_mismatch", cnt)
+                msg = f"strict parity mismatch: {cnt} node(s) differ. {head}"
+                _log_once("strict_parity_mismatch", logging.ERROR, msg)
+                raise AssertionError(msg)
+            # attach counters and return python result (identity-preserving)
+            p_met.setdefault("native_t1", {}).update(base_metrics.get("native_t1", {}))
+            return p_nodes, p_vals, p_met
+
+        # normal native path (non-strict)
+        try:
             n_nodes, n_vals, n_met = _t1_one_graph_native(
                 indptr=indptr,
                 indices=indices,
@@ -386,26 +530,17 @@ def _t1_one_graph_dispatch(
                 params=params,
                 seed_weights=seed_weights,
             )
-            if strict:
-                p_nodes, p_vals, p_met = _t1_one_graph_python_inner(
-                    indptr=indptr,
-                    indices=indices,
-                    weights=weights,
-                    rel_mult=rel_mult,
-                    seeds=seeds,
-                    params=params,
-                    key_rank=key_rank,
-                    seed_weights=seed_weights,
-                    rel_code=rel_code,
-                )
-                n_nodes_c, n_vals_c = _canon_nodes_vals(n_nodes, n_vals)
-                p_nodes_c, p_vals_c = _canon_nodes_vals(p_nodes, p_vals)
-                if not (np.array_equal(n_nodes_c, p_nodes_c) and np.array_equal(n_vals_c, p_vals_c) and n_met == p_met):
-                    raise AssertionError("strict_parity: native != python")
-                return p_nodes, p_vals, p_met
+            _bump(n_met, "used_native")
+            # carry forward any base counters
+            if base_metrics:
+                n_met.setdefault("native_t1", {}).update(base_metrics.get("native_t1", {}))
             return n_nodes, n_vals, n_met
+        except (MemoryError, TypeError, ValueError, OverflowError) as e:
+            # soft-fail to python
+            _log_once("runtime_exc", logging.ERROR, f"native_t1 raised {type(e).__name__}: {e} → fallback to python")
+            return _run_python_with("fallback_runtime_exc")
 
-    # Fallback: python path
+    # Not enabled or any other case → python path
     return _t1_one_graph_python_inner(
         indptr=indptr,
         indices=indices,

@@ -1,6 +1,6 @@
 # M12 — Native Kernel Acceleration (T1)
 
-**Status**: PR99 — Rust kernel (perf‑OFF semantics) shipped; PR98 — Python FFI & strict‑parity harness included; **PR100 — Wheels & CI matrix (abi3, cp311) shipped**; **PR101 — Bench & Docs (advisory) in progress**. Default behavior unchanged unless enabled. `available()` returns **True** when the compiled extension (`clematis.native._t1_rs`) is importable; otherwise we fall back to Python.
+**Status**: PR99 — Rust kernel (perf‑OFF semantics) shipped; PR98 — Python FFI & strict‑parity harness included; **PR100 — Wheels & CI matrix (abi3, cp311) shipped**; **PR101 — Bench & Docs (advisory) shipped**; **PR102 — Hardening & Diagnostics (in progress)**. Default behavior unchanged unless enabled. `available()` returns **True** when the compiled extension (`clematis.native._t1_rs`) is importable; otherwise we fall back to Python.
 
 ---
 
@@ -10,7 +10,7 @@ An optional, strictly-parity **native inner loop** for the T1 propagation stage.
 ### Goals
 - **Determinism first**: byte-identical disabled path; native path returns exactly what the Python loop would (same order, same tie‑breaks).
 - **Opt‑in**: behind `perf.native.t1.enabled` and additional safety gates.
-- **Cross‑platform**: prebuilt wheels planned for PR100+ (Linux/macOS/Windows; Py 3.11–3.13).
+- **Cross-platform**: prebuilt wheels **shipped in PR100** (Linux/macOS/Windows; Py 3.11–3.13).
 - **Frictionless fallback**: if any gate fails, we silently use the Python path and optionally log a gated metric.
 
 ### Non-goals (M12)
@@ -40,12 +40,16 @@ perf:
 
 > **Note:** The `perf.native` subtree appears in the normalized config **only** if you provide it. We do not inject this block by default.
 
+### Env overrides (PR102)
+- `CLEMATIS_NATIVE_T1=1` — enables the native path even if config sets `enabled: false`.
+- `CLEMATIS_STRICT_PARITY=1` — turns on strict parity without touching config.
+
 ---
 
 ## When does the native path run?
 All of the following must hold:
 
-1. `perf.native.t1.enabled == true`.
+1. `perf.native.t1.enabled == true` **or** environment `CLEMATIS_NATIVE_T1=1`.
 2. The native backend is available (e.g., the `_t1_rs` extension is importable in a future PR).
 3. **Perf‑ON features are OFF** (M12 scope):
    - No `perf.t1.caps.frontier` / `visited` gating.
@@ -55,7 +59,7 @@ All of the following must hold:
 > **Note (PR99):**
 > `available()` now reflects whether the compiled extension can be imported. If it’s missing, the engine silently uses the Python path—even when `perf.native.t1.enabled=true`.
 
-If any of these fail, the engine uses the Python loop. A gated counter may be incremented for observability in later PRs (not in PR97).
+Counters are incremented (PR102) for observability when native is gated or disabled.
 
 ---
 
@@ -231,19 +235,108 @@ jobs:
           python -m pip wheel . -w wheelhouse --no-deps
       - name: Install wheel
         run: |
-          python -m pip install --no-index --find-links=wheelhouse clematis
-      - name: Run perf smoke (outside checkout to avoid shadowing)
+          python -m pip install --find-links=wheelhouse clematis
+      - name: Sanity check native import (outside checkout to avoid shadowing)
         working-directory: /tmp
         env:
-          CI: 'true'
-          CLEMATIS_NETWORK_BAN: '1'
-          PERF_SMOKE: '1'
-          CLEMATIS_NATIVE_T1: '1'
+          PYTHONNOUSERSITE: "1"
         run: |
-          pytest -q $GITHUB_WORKSPACE/tests/perf/test_bench_t1_smoke.py -m slow
+          python - <<'PY'
+          import importlib.util
+          spec = importlib.util.find_spec('clematis.native._t1_rs')
+          print('ext spec:', spec)
+          import clematis.native.t1 as n
+          print('available():', n.available())
+          assert n.available(), 'native module should be available from installed wheel'
+          PY
 ```
 
 > **Why run from `/tmp`?** Importing from the repo root can **shadow** the installed wheel so `_t1_rs` appears missing. Running from a clean working directory ensures the compiled extension is used. See **Troubleshooting** below.
+
+---
+
+## Diagnostics & Hardening (PR102 — in progress)
+
+**What’s new** (observable behavior):
+- **Metrics counters** under `metrics["native_t1"]`:
+  - `used_native` — native kernel executed successfully.
+  - `fallback_import_failed` — native was enabled+allowed but `available()`/import failed; Python fallback used.
+  - `fallback_gated_caps` — native gated off due to `perf.t1.caps`.
+  - `fallback_gated_dedupe` — native gated off due to `perf.t1.dedupe_window`.
+  - `fallback_gated_other` — native gated off for other reasons.
+  - `fallback_runtime_exc` — native raised a runtime exception; Python fallback used.
+  - `strict_parity_mismatch` — strict parity found differences (value = count of mismatched nodes).
+  - `strict_parity_native_exc` — native raised while in strict parity mode.
+- **Once‑only logs** (no spam):
+  - `gate_off` (INFO) — native gated (caps/dedupe) → Python path.
+  - `import_failed` (WARNING) — enabled but native import/`available()` failed.
+  - `runtime_exc` (ERROR) — native raised; fell back to Python.
+  - `runtime_exc_strict` (ERROR) — native raised in strict parity.
+  - `strict_parity_mismatch` (ERROR) — first mismatch summary.
+  - `pyo3_runtime_exc` (ERROR) — exception surfaced out of the Rust/PyO3 layer.
+
+**Where to see them**
+- Stage metrics carry these under `metrics["native_t1"]`. They also bubble up into the top-level turn log under `t1.native_t1` (see `logs/turn.jsonl`). Example:
+
+```json
+{
+  "turn_id": 42,
+  "t1": {
+    "pops": 1234,
+    "iters": 17,
+    "graphs_touched": 1,
+    "native_t1": {
+      "used_native": 1,
+      "fallback_import_failed": 0,
+      "fallback_gated_caps": 0,
+      "fallback_gated_dedupe": 0,
+      "fallback_runtime_exc": 0
+    }
+  }
+}
+
+**Strict parity (mode)**
+- Toggle via config (`perf.native.t1.strict_parity: true`) or `CLEMATIS_STRICT_PARITY=1`.
+- Engine computes **both** Python and native results and compares with tolerances `atol=1e-6`, `rtol=1e-5`.
+- On mismatch → raises with a concise report (first few nodes):
+  ```
+  strict parity mismatch: 1 node(s) differ. node=123 py=0.532 rs=0.531 Δ=0.001
+  ```
+
+**Failure modes & fallbacks**
+- **Import unavailable**: if native is enabled but `_t1_rs` cannot be imported, the engine logs `import_failed`, bumps `fallback_import_failed`, and uses the Python path.
+- **Runtime exception** (`MemoryError`, `TypeError`, `ValueError`, `OverflowError`): logs `runtime_exc`, bumps `fallback_runtime_exc`, and uses the Python path (unless strict parity, in which case it re‑raises).
+
+**Local toggle examples**
+```bash
+# Force native and strict parity locally (useful for debugging)
+export CLEMATIS_NATIVE_T1=1
+export CLEMATIS_STRICT_PARITY=1
+```
+
+## Nightly strict parity (PR102)
+A nightly workflow validates that native matches Python under strict parity on Linux.
+
+- **Workflow**: `.github/workflows/strict-parity-nightly.yml` (scheduled daily at 20:00 UTC; also manual).
+- **Env**: `CLEMATIS_NATIVE_T1=1`, `CLEMATIS_STRICT_PARITY=1`, `PERF_SMOKE=1`.
+- **Runs**:
+  - Perf smoke: `tests/perf/test_bench_t1_smoke.py -m slow` (from `/tmp` to avoid shadowing).
+  - Diagnostics/parity: `tests/native`.
+
+```yaml
+# excerpt
+- name: Run strict-parity suites
+  working-directory: /tmp
+  env:
+    CI: "true"
+    CLEMATIS_NETWORK_BAN: "1"
+    PERF_SMOKE: "1"
+    CLEMATIS_NATIVE_T1: "1"
+    CLEMATIS_STRICT_PARITY: "1"
+  run: |
+    pytest --maxfail=1 -q $GITHUB_WORKSPACE/tests/perf/test_bench_t1_smoke.py -m slow
+    pytest --maxfail=1 -q $GITHUB_WORKSPACE/tests/native
+```
 
 ---
 
@@ -268,7 +361,8 @@ jobs:
 - **PR98**: Python FFI & strict‑parity harness. ✅
 - **PR99**: Rust kernel (perf‑OFF semantics), parity tests. ✅
 - **PR100**: Wheels/CI matrix, prebuilt artifacts, docs polish, hardening. ✅
-- **PR101**: Bench & docs (advisory perf smoke on Linux). _In progress_
+- **PR101**: Bench & docs (advisory perf smoke on Linux). ✅
+- **PR102**: Hardening & diagnostics (counters, once‑logs, strict‑parity nightly). _In progress_
 - **Post‑M12**: perf‑ON semantics in kernel (dedupe & caps), GEL micro‑kernels.
 
 ---

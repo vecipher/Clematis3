@@ -579,6 +579,7 @@ class Orchestrator:
                             "pops": t1.metrics.get("pops"),
                             "iters": t1.metrics.get("iters"),
                             "graphs_touched": t1.metrics.get("graphs_touched"),
+                            "native_t1": t1.metrics.get("native_t1"),
                         },
                         "t2": {},
                         "t4": {},
@@ -678,6 +679,7 @@ class Orchestrator:
                             "pops": t1.metrics.get("pops"),
                             "iters": t1.metrics.get("iters"),
                             "graphs_touched": t1.metrics.get("graphs_touched"),
+                            "native_t1": t1.metrics.get("native_t1"),
                         },
                         "t2": {
                             "k_returned": t2.metrics.get("k_returned"),
@@ -782,6 +784,7 @@ class Orchestrator:
                             "pops": t1.metrics.get("pops"),
                             "iters": t1.metrics.get("iters"),
                             "graphs_touched": t1.metrics.get("graphs_touched"),
+                            "native_t1": t1.metrics.get("native_t1"),
                         },
                         "t2": {
                             "k_returned": t2.metrics.get("k_returned"),
@@ -1116,6 +1119,7 @@ class Orchestrator:
                                 "pops": t1.metrics.get("pops"),
                                 "iters": t1.metrics.get("iters"),
                                 "graphs_touched": t1.metrics.get("graphs_touched"),
+                                "native_t1": t1.metrics.get("native_t1"),
                             },
                             "t2": {
                                 "k_returned": t2.metrics.get("k_returned"),
@@ -1297,6 +1301,7 @@ class Orchestrator:
                                 "pops": t1.metrics.get("pops"),
                                 "iters": t1.metrics.get("iters"),
                                 "graphs_touched": t1.metrics.get("graphs_touched"),
+                                "native_t1": t1.metrics.get("native_t1"),
                             },
                             "t2": {
                                 "k_returned": t2.metrics.get("k_returned"),
@@ -1443,6 +1448,7 @@ class Orchestrator:
                     "pops": t1.metrics.get("pops"),
                     "iters": t1.metrics.get("iters"),
                     "graphs_touched": t1.metrics.get("graphs_touched"),
+                    "native_t1": t1.metrics.get("native_t1"),
                 },
                 "t2": {
                     "k_returned": t2.metrics.get("k_returned"),

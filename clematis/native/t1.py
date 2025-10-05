@@ -3,6 +3,20 @@ from typing import Any, Tuple, Sequence, Dict
 import numpy as np
 import inspect
 
+import logging
+import threading
+
+_logger = logging.getLogger("clematis.native.t1")
+_LOG_ONCE_KEYS = set()
+_LOG_ONCE_LOCK = threading.Lock()
+
+def _log_once(key: str, level: int, msg: str) -> None:
+    with _LOG_ONCE_LOCK:
+        if key in _LOG_ONCE_KEYS:
+            return
+        _LOG_ONCE_KEYS.add(key)
+    _logger.log(level, msg)
+
 try:
     from . import _t1_rs as _rs  # PyO3 extension (PR99)
     _HAVE_RS = True
@@ -69,21 +83,26 @@ def propagate_one_graph_rs(
         seed_weights = _as_np_float32(seed_weights)
         key_rank = _as_np_int32(key_rank)
 
-        d_nodes, d_vals, metrics = _rs.t1_propagate_one_graph(
-            indptr,
-            indices,
-            weights,
-            rel_code,
-            rel_mult,
-            seed_nodes,
-            seed_weights,
-            key_rank,
-            float(rate),
-            float(floor),
-            int(radius_cap),
-            int(iter_cap_layers),
-            float(node_budget),
-        )
+        try:
+            d_nodes, d_vals, metrics = _rs.t1_propagate_one_graph(
+                indptr,
+                indices,
+                weights,
+                rel_code,
+                rel_mult,
+                seed_nodes,
+                seed_weights,
+                key_rank,
+                float(rate),
+                float(floor),
+                int(radius_cap),
+                int(iter_cap_layers),
+                float(node_budget),
+            )
+        except (MemoryError, TypeError, ValueError, OverflowError) as e:
+            _log_once("pyo3_runtime_exc", logging.ERROR, f"native_t1 PyO3 raised {type(e).__name__}: {e}")
+            # Re-raise so the dispatcher can decide whether to fall back or fail (strict parity)
+            raise
         # Enforce ABI dtypes
         return _as_np_int32(d_nodes), _as_np_float32(d_vals), metrics
 
