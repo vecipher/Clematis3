@@ -14,6 +14,8 @@ concurrency:
 jobs:
   strict-parity:
     runs-on: ubuntu-22.04
+    env:
+      CLEMATIS_LOG_DIR: /tmp/logs
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4

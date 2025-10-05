@@ -83,6 +83,7 @@ jobs:
         env:
           CLEMATIS_NETWORK_BAN: "1"
           CI: "true"
+          CLEMATIS_LOG_DIR: /tmp/logs
         shell: bash
         run: |
           set -euxo pipefail
@@ -92,6 +93,7 @@ jobs:
         env:
           CLEMATIS_NETWORK_BAN: "1"
           CI: "true"
+          CLEMATIS_LOG_DIR: /tmp/logs
         shell: bash
         run: |
           set -euxo pipefail
@@ -104,6 +106,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # Ensure identity uses the default .logs and starts clean
+          unset CLEMATIS_LOG_DIR || true
+          rm -rf .logs
+          mkdir -p .logs
           # Use the shared Python guard which generates logs, normalizes, and compares
           python3 scripts/ci_compare_golden.py
 

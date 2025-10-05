@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, Tuple, Optional
 import sys as _sys
+import os
+from pathlib import Path
 
 from ..util.logmux import LogMux, set_mux, reset_mux
 from ..util.io_logging import LogStager, enable_staging, disable_staging, default_key_for
@@ -26,6 +28,26 @@ __all__ = [
     "log_t1_native_diag",
 ]
 
+# Optional base directory for logs; defaults to whatever the lower-level writer uses (.logs)
+_LOG_BASE = os.getenv("CLEMATIS_LOG_DIR")
+
+
+def _resolve_log_path(file_path: str) -> str:
+    """Join file_path with CLEMATIS_LOG_DIR if set and file_path is bare (no separators).
+    Leaves absolute or already-qualified paths unchanged. Creates the directory if needed.
+    """
+    try:
+        if not _LOG_BASE:
+            return file_path
+        # If caller already provided a path (has a slash) or absolute, do nothing
+        if os.path.isabs(file_path) or ("/" in file_path or "\\" in file_path):
+            return file_path
+        base = Path(_LOG_BASE)
+        base.mkdir(parents=True, exist_ok=True)
+        return str(base / file_path)
+    except Exception:
+        return file_path
+
 
 def _get_logging_callable(name: str):
     """Return an override from the orchestrator namespace when available."""
@@ -43,9 +65,9 @@ def _append_unbuffered(path: str, payload: Dict[str, Any]) -> None:
     if orch_module is not None:
         writer = getattr(orch_module, "_append_jsonl_unbuffered", None)
         if callable(writer) and writer is not _append_unbuffered:
-            writer(path, payload)
+            writer(_resolve_log_path(path), payload)
             return
-    _append_jsonl_unbuffered(path, payload)
+    _append_jsonl_unbuffered(_resolve_log_path(path), payload)
 
 
 def _append_jsonl(file_path: str, payload: Dict[str, Any]) -> None:
@@ -54,18 +76,20 @@ def _append_jsonl(file_path: str, payload: Dict[str, Any]) -> None:
     if orch_module is not None:
         writer = getattr(orch_module, "append_jsonl", None)
         if callable(writer) and writer is not _append_jsonl:
-            writer(file_path, payload)
+            writer(_resolve_log_path(file_path), payload)
             return
-    _append_jsonl_default(file_path, payload)
+    _append_jsonl_default(_resolve_log_path(file_path), payload)
 
 
 def append_jsonl(file_path: str, payload: Dict[str, Any]) -> None:
     """Public append hook; applies CI/identity normalization, then delegates."""
     try:
-        rec = IOL.normalize_for_identity(file_path, payload)
+        # Normalize against the logical filename (not the resolved filesystem path)
+        logical_name = os.path.basename(file_path)
+        rec = IOL.normalize_for_identity(logical_name, payload)
     except Exception:
         rec = payload
-    _append_jsonl(file_path, rec)
+    _append_jsonl(_resolve_log_path(file_path), rec)
 
 
 def _begin_log_capture() -> Tuple[LogMux, object]:

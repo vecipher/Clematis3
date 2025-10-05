@@ -24,6 +24,26 @@ os.environ["PATH"] = os.pathsep.join(segments)
 import socket
 import pytest
 
+# Redirect logs away from ./.logs for non-identity suites
+# Identity workflows should export IDENTITY_TESTS=1 so this fixture no-ops
+@pytest.fixture(autouse=True, scope="session")
+def _isolate_logs_for_non_identity(tmp_path_factory):
+    # Respect explicit overrides and identity runs
+    if os.environ.get("IDENTITY_TESTS") == "1":
+        yield
+        return
+    if os.environ.get("CLEMATIS_LOG_DIR"):
+        yield
+        return
+    # Default: write logs to a session temp dir to avoid polluting ./.logs
+    tmp_logs = str(tmp_path_factory.mktemp("logs"))
+    os.environ["CLEMATIS_LOG_DIR"] = tmp_logs
+    try:
+        yield
+    finally:
+        # Leave temp logs in place for debugging; test harness may clean up
+        pass
+
 
 @pytest.fixture(autouse=True, scope="session")
 def _ban_network():
