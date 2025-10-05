@@ -26,6 +26,7 @@ Clematis is a deterministic, turn‑based scaffold for agential AI. It models ag
   **Reflection (M10):** gated and deterministic. Default OFF; when enabled it runs post‑Apply, never mutates T1/T2/T4/apply artifacts for the current turn. Rule‑based backend is pure/deterministic; LLM backend is **fixtures‑only** for determinism.
   **GEL (M11):** optional field‑control substrate (co‑activation update + half‑life decay; merge/split/promotion available), **default OFF**. See **[docs/m11/overview.md](docs/m11/overview.md)**.
 - **Determinism:** golden logs, identity path when gates are OFF; shadow/quality traces never affect results.
+- **Config freeze:** v3 config schema is frozen at `version: "v1"`. Unknown top‑level keys are rejected. See [docs/m13/config_freeze.md](docs/m13/config_freeze.md).
 
 ## Quick start
 ```bash
