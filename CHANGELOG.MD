@@ -93,7 +93,44 @@ All notable changes to this project will be documented in this file.
   - Native path is **OFF by default** and additionally gated by `_native_t1_allowed(cfg)`.
   - Disabled‑path identity remains **byte‑identical** to `0.9.0a2`.
 
-- **PR100:** Wheels/CI matrix; installed-wheel tests.
+
+### Added (PR100 — M12-04: Wheels & CI Matrix; abi3 cp311)
+- **Goal:** Produce prebuilt wheels for Linux (manylinux x86_64), macOS (x86_64 on macOS‑13; arm64 on macOS‑14), and Windows (AMD64) using **abi3 (cp311)** so one wheel per OS/arch covers Py3.11–3.13. Test the **installed** wheels.
+
+- **Cargo (abi3):** `clematis/native/Cargo.toml` sets PyO3 features to `{"extension-module", "abi3-py311"}`.
+- **Pyproject (setuptools-rust):** `[[tool.setuptools-rust.ext-modules]]` configured with `target = "clematis.native._t1_rs"`, `path = "clematis/native/Cargo.toml"`, `binding = "PyO3"`, and `optional = true`.
+- **Workflow:** new `.github/workflows/wheels.yml` using **cibuildwheel**.
+  - **Build job:** matrix over `{ubuntu-22.04, macos-13, macos-14, windows-2022}`; builds **cp311-abi3** wheels with `CIBW_ARCHS_MACOS=native` (runner-native arch), sets `PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1`, and on Linux sets `RUSTFLAGS="-C link-arg=-Wl,--build-id=none"`. sdist is built **only on Linux**.
+  - **Test job:** installs the produced wheel on Python **3.11 / 3.12 / 3.13** and runs a focused subset: `tests/native`, `tests/config`, `tests/helpers`. Tests are executed from the `tests/` directory to avoid importing the repo tree.
+
+- **Packaging test:** `tests/packaging/test_wheel_has_native.py` — asserts the compiled module exists and that `from clematis.native import t1; t1.available() is True`; also checks the bridge exposes `propagate_one_graph_rs`.
+
+- **.gitignore hygiene:** ignore local wheel outputs and native binaries: `wheelhouse/`, `*.whl`, `*.pyd`, `*.dll`, `*.dylib`, plus `.benchmarks/`.
+
+- **Invariants:** native path remains **OFF by default** and additionally gated by `_native_t1_allowed(cfg)`; disabled path stays byte‑identical to `0.9.0a2`.
+
+- **How to verify (local smoke):**
+  ```bash
+  export PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1
+  python -m pip install -U build setuptools-rust
+  python -m build --wheel -o wheelhouse
+  WHL=$(ls wheelhouse/*.whl | head -n1)
+  python -m pip install --force-reinstall "$WHL"
+  # verify from outside the repo to avoid source shadowing
+  TMP=$(mktemp -d)
+  python - <<'PY'
+  import os, sys, importlib.util
+  os.chdir("$TMP"); sys.path = [p for p in sys.path if p and p != os.getcwd()]
+  from clematis.native import t1
+  print("native available:", t1.available())
+  print("module:", importlib.util.find_spec("clematis.native._t1_rs").origin)
+  PY
+  pytest -q tests/native tests/config tests/helpers
+  ```
+
+- **CI acceptance:**
+  - Each OS/arch produces **one** `cp311-abi3` wheel; Linux also uploads the sdist.
+  - Installing those wheels on **3.11 / 3.12 / 3.13** passes the focused test subset and `t1.available() == True`.
 - **PR101–102:** Bench doc + diagnostics/hardening; optional nightly strict-parity job.
 - **PR103:** Version bump (0.9.0a3) + release.
 

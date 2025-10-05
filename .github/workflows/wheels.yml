@@ -1,0 +1,124 @@
+name: Wheels
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*', '0.*', '1.*' ]
+  pull_request:
+
+jobs:
+  build-wheels:
+    name: Build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, macos-13, macos-14, windows-2022]
+
+    env:
+      # Make builds reproducible-ish
+      PYO3_USE_ABI3_FORWARD_COMPATIBILITY: "1"   # harmless when building against 3.11
+      CARGO_TERM_COLOR: always
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compute SOURCE_DATE_EPOCH
+        shell: bash
+        run: echo "SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)" >> $GITHUB_ENV
+
+      - name: Setup Python (3.11 for abi3 build)
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: ""
+
+      - name: Install cibuildwheel
+        run: python -m pip install --upgrade pip cibuildwheel==2.21.* build
+
+      # Linux: drop build-id for smaller/cleaner wheels; only applies on ELF targets
+      - name: Set Linux RUSTFLAGS
+        if: runner.os == 'Linux'
+        run: echo "RUSTFLAGS=-C link-arg=-Wl,--build-id=none" >> $GITHUB_ENV
+
+      # Build abi3 wheels; cibuildwheel will produce one cp311-abi3 wheel per platform
+      - name: Build wheels via cibuildwheel
+        env:
+          CIBW_BUILD: "cp311-*"
+          CIBW_SKIP: "pp* *musllinux*"
+          CIBW_ARCHS_LINUX: "x86_64"
+          CIBW_ARCHS_MACOS: "native"
+          CIBW_ARCHS_WINDOWS: "AMD64"
+          # Test command at build time kept minimal; full tests run in next job
+          CIBW_TEST_COMMAND: "python -c \"import clematis.native.t1 as t; assert True\""
+          # Ensure reproducible timestamps in wheels where possible
+          CIBW_ENVIRONMENT: "SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1"
+        run: python -m cibuildwheel --output-dir wheelhouse
+
+      - name: Upload wheel artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.os }}
+          path: wheelhouse/*.whl
+
+      - name: Build sdist
+        if: matrix.os == 'ubuntu-22.04'
+        run: python -m build --sdist -o dist
+      - name: Upload sdist
+        if: matrix.os == 'ubuntu-22.04'
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdist
+          path: dist/*.tar.gz
+
+  test-wheels:
+    name: Test (${{ matrix.os }}, py${{ matrix.py }})
+    needs: build-wheels
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, macos-13, macos-14, windows-2022]
+        py: ["3.11", "3.12", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.py }}
+
+      - name: Download wheels
+        uses: actions/download-artifact@v4
+        with:
+          name: wheels-${{ matrix.os }}
+          path: wheelhouse
+
+      - name: Install wheel
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install wheelhouse/*.whl
+          # prove the native module is present and loadable from the installed wheel
+          python - <<'PY'
+          import importlib
+          from clematis.native import t1
+          assert t1.available(), "native _t1_rs should be available in wheel install"
+          m = importlib.import_module("clematis.native._t1_rs")
+          print("OK:", m.__file__)
+          PY
+
+      - name: Run focused test subset
+        shell: bash
+        env:
+          CI: "true"
+          CLEMATIS_NETWORK_BAN: "1"
+        run: |
+          python -m pip install -r tests/requirements.txt || true
+          cd tests
+          pytest -q native config helpers

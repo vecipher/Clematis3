@@ -1,6 +1,6 @@
 # M12 — Native Kernel Acceleration (T1)
 
-**Status**: PR99 — Rust kernel (perf‑OFF semantics) shipped; PR98 Python FFI & strict‑parity harness included. Default behavior unchanged unless enabled. `available()` returns **True** when the compiled extension (`clematis.native._t1_rs`) is importable; otherwise we fall back to Python.
+**Status**: PR99 — Rust kernel (perf‑OFF semantics) shipped; PR98 Python FFI & strict‑parity harness included; **PR100 — Wheels & CI matrix (abi3, cp311) in progress**. Default behavior unchanged unless enabled. `available()` returns **True** when the compiled extension (`clematis.native._t1_rs`) is importable; otherwise we fall back to Python.
 
 ---
 
@@ -134,6 +134,52 @@ print("ok", res is not None)
 ```
 
 If the extension is unavailable or a gate is not met, the run still completes via the Python path.
+
+---
+
+## Wheels & CI Matrix (PR100)
+
+**Targets**
+- Platforms: **Linux (manylinux x86_64), macOS (x86_64 on macOS‑13; arm64 on macOS‑14), Windows (AMD64)**.
+- Python: **abi3 tagged at cp311** → one wheel per OS/arch, tested on **3.11 / 3.12 / 3.13**.
+
+**Key choices**
+- **PyO3 abi3** is enabled via Cargo features: `pyo3 = { features = ["extension-module", "abi3-py311"] }`.
+- `pyproject.toml` uses `setuptools-rust` with `binding = "PyO3"` and the extension marked `optional = true` (source installs succeed without Rust).
+- CI builds wheels with **cibuildwheel**:
+  - macOS builds with `CIBW_ARCHS_MACOS=native` (each runner builds its own arch; no cross‑compile).
+  - Linux sets `RUSTFLAGS=-C link-arg=-Wl,--build-id=none` for lean ELF.
+  - sdist is produced **once on Linux**; other OS jobs skip sdist.
+- CI test job **installs the built wheels** (not the repo) and runs a focused subset: `tests/native`, `tests/config`, `tests/helpers`.
+- Packaging smoke: `tests/packaging/test_wheel_has_native.py` asserts `_t1_rs` is present and `t1.available() is True`.
+
+**Artifacts & tags**
+- Wheels are tagged **cp311‑abi3** per platform:
+  - `manylinux_x86_64`, `macosx_13_x86_64`, `macosx_14_arm64`, `win_amd64`.
+- The sdist **includes Rust sources** (`clematis/native/Cargo.toml` and `clematis/native/src/*.rs`).
+
+**Local wheel smoke (quick)**
+Use this when developing locally (no cibuildwheel required):
+
+```bash
+export PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1  # Python 3.13 + PyO3 ≤ 0.21
+python -m pip install -U build setuptools-rust
+python -m build --wheel -o wheelhouse
+WHL=$(ls wheelhouse/*.whl | head -n1)
+python -m pip install --force-reinstall "$WHL"
+# verify from outside the repo to avoid source shadowing
+TMP=$(mktemp -d)
+python - <<'PY'
+import os, sys, importlib.util
+os.chdir("$TMP"); sys.path = [p for p in sys.path if p and p != os.getcwd()]
+from clematis.native import t1
+print("native?", t1.available())
+print("path:", importlib.util.find_spec("clematis.native._t1_rs").origin)
+PY
+```
+
+**Common pitfall**
+- Importing from the **repo root** shadows the installed wheel, so `_t1_rs` seems missing. Run Python from outside the repo (as above) or remove the repo path from `sys.path`.
 
 ---
 
