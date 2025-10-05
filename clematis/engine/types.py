@@ -1,8 +1,15 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Literal, Optional, Protocol, Tuple
-import numpy as np
-from numpy import ndarray
+from typing import Any, Dict, List, Literal, Optional, Protocol, Tuple, TYPE_CHECKING
+if TYPE_CHECKING:
+    import numpy as np  # type: ignore
+    from numpy.typing import NDArray as ndarray  # type: ignore
+else:
+    # Minimal shim to keep get_type_hints() from breaking without importing numpy
+    from typing import Any as ndarray
+    class _NP:
+        float32 = Any
+    np = _NP()  # type: ignore
 
 PlanVersion = Literal["t3-plan-v1"]
 BundleVersion = Literal["t3-bundle-v1"]
