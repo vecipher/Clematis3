@@ -461,10 +461,8 @@ def _t1_one_graph_dispatch(
     if enabled and allowed:
         # Try import/availability
         native_available = False
-        native_t1 = None
         try:
             from clematis.native import t1 as _native_t1
-            native_t1 = _native_t1
             native_available = bool(_native_t1.available())
         except Exception:
             native_available = False
