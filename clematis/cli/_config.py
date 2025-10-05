@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
-from typing import Mapping, Optional, TextIO, Tuple
+from typing import Any, Dict, Mapping, Optional, TextIO, Tuple
 
 # Relative default searched under the current working directory
 DEFAULT_REL = Path("configs") / "config.yaml"
@@ -93,9 +93,29 @@ def maybe_log_selected(
         pass
 
 
+def validate_or_die(cfg: Mapping[str, Any]) -> Dict[str, Any]:
+    """
+    Validate and normalize a config dict against the frozen v1 schema.
+    Exits with code 2 on invalid configs.
+    """
+    try:
+        from configs.validate import validate_config
+    except Exception as e:  # pragma: no cover
+        sys.stderr.write(f"Config error: internal validator unavailable: {e}\n")
+        sys.stderr.flush()
+        raise SystemExit(2)
+    try:
+        return validate_config(dict(cfg))
+    except ValueError as e:
+        sys.stderr.write(f"Config error: {e}\n")
+        sys.stderr.flush()
+        raise SystemExit(2)
+
+
 __all__ = [
     "DEFAULT_REL",
     "XDG_SUBPATH",
     "discover_config_path",
     "maybe_log_selected",
+    "validate_or_die",
 ]

@@ -12,7 +12,11 @@ Public API:
 from __future__ import annotations
 from typing import Any, Dict, List
 
-__all__ = ["validate_config", "validate_config_verbose", "validate_config_api"]
+
+__all__ = ["validate_config", "validate_config_verbose", "validate_config_api", "CONFIG_VERSION"]
+
+# ---- Config schema version (frozen for v3) ----
+CONFIG_VERSION = "v1"
 
 
 # ------------------------------
@@ -231,6 +235,7 @@ ALLOWED_TOP = {
     "flags",
     "scheduler",
     "perf",
+    "version",
 }
 ALLOWED_T1 = {
     "cache",
@@ -439,6 +444,14 @@ def _validate_config_normalize_impl(cfg: Dict[str, Any]) -> Dict[str, Any]:
     cfg_in = _ensure_dict(cfg)
 
     errors: List[str] = []
+
+    # ---- Config version freeze (v3) ----
+    ver = cfg_in.get("version")
+    if ver is None:
+        # Inject default for v3; downstream code can rely on presence.
+        cfg_in["version"] = CONFIG_VERSION
+    elif ver != CONFIG_VERSION:
+        _err(errors, "version", f"must be '{CONFIG_VERSION}', got: {ver!r}")
 
     # Capture raw sections for precedence/suggestions (user-provided view)
     raw_t1 = _ensure_dict(cfg_in.get("t1"))
