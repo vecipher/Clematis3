@@ -6,7 +6,8 @@ Clematis is a deterministic, turn‑based scaffold for agential AI. It models ag
 >
 > **M10 — Reflection Sessions (complete):** Finalized across **PR77** and **PR80–PR90** (config, writer/budgets/tests, fixtures‑only LLM backend, planner flag, telemetry/trace, microbench, optional CI smoke, docs, goldens/identity maintenance). See **[docs/m10/reflection.md](docs/m10/reflection.md)**.
 >
-> **M11 — Field‑Control GEL (HS1) (complete):** Substrate landed across **PR91–PR96** (docs, identity tests, runtime smoke, examples, CLI inspector, milestone close). Default **OFF**; no ranking changes by default; identity preserved. See **[docs/m11/overview.md](docs/m11/overview.md)**. _Nudge planner is deferred to v4._
+
+> **M12 — Native T1 (in progress):** PR97–PR100 shipped (config+stubs, FFI parity, Rust kernel perf‑OFF, wheels/CI). **PR101 (bench & docs)** is advisory and Linux‑only. Wheels are **abi3 (cp311)**; `t1.available()` is **True** when importing the installed wheel (avoid source shadowing). See **[docs/m12/native_t1.md](docs/m12/native_t1.md)**.
 
 ---
 

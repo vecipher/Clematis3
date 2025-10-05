@@ -851,4 +851,91 @@ def t1_propagate(ctx, state, text: str) -> T1Result:
             {"parallel_workers": int(effective_workers), "task_count": int(task_count)},
             ctx.cfg,
         )
+
     return T1Result(graph_deltas=all_deltas, metrics=metrics)
+
+
+# --- test hook: used by tests/perf/test_bench_t1_smoke.py (Option B) ---
+def _run_kernel_for_bench(graph_dict):
+    """
+    Accepts {"num_nodes": int, "edges": [(u,v,w,rel), ...]}.
+    Uses CLEMATIS_NATIVE_T1=1 to choose backend via cfg.perf.native.t1.enabled.
+    Runs exactly one single-graph T1 propagation through the same dispatcher
+    used in production so gates/semantics are preserved. Return value is
+    (d_nodes[int32], d_vals[float32], metrics[dict]); the perf test ignores it.
+    """
+    import os
+    import numpy as _np
+
+    num_nodes = int((graph_dict or {}).get("num_nodes", 0) or 0)
+    edges = list((graph_dict or {}).get("edges") or [])
+
+    # Build CSR from edge list
+    deg = [0] * num_nodes
+    for u, v, *_ in edges:
+        u_i = int(u)
+        v_i = int(v)
+        if 0 <= u_i < num_nodes and 0 <= v_i < num_nodes:
+            deg[u_i] += 1
+
+    indptr = _np.zeros(num_nodes + 1, dtype=_np.int32)
+    for i in range(num_nodes):
+        indptr[i + 1] = indptr[i] + deg[i]
+    m = int(indptr[-1])
+
+    indices = _np.zeros(m, dtype=_np.int32)
+    weights = _np.zeros(m, dtype=_np.float32)
+    rel_mult = _np.zeros(m, dtype=_np.float32)
+    rel_code = _np.zeros(m, dtype=_np.int32)
+
+    mult_map = {"supports": 1.0, "associates": 0.6, "contradicts": 0.8}
+    code_map = {"supports": 0, "associates": 1, "contradicts": 2}
+
+    cursor = indptr[:-1].copy()
+    for (u, v, w, rel) in edges:
+        u_i = int(u)
+        v_i = int(v)
+        # assume edges were counted; skip out-of-range defensively
+        if not (0 <= u_i < num_nodes and 0 <= v_i < num_nodes):
+            continue
+        k = int(cursor[u_i])
+        cursor[u_i] = k + 1
+        indices[k] = v_i
+        weights[k] = float(w)
+        rel_mult[k] = float(mult_map.get(rel, 0.6))
+        rel_code[k] = int(code_map.get(rel, 1))
+
+    key_rank = _np.arange(num_nodes, dtype=_np.int32)
+
+    # Deterministic small seed set
+    seeds = _np.arange(min(64, num_nodes), dtype=_np.int32)
+    seed_weights = _np.ones_like(seeds, dtype=_np.float32)
+
+    params = {
+        "decay": {"rate": 0.6, "floor": 0.05},
+        "radius_cap": 4,
+        "iter_cap_layers": 50,
+        "node_budget": 1.5,
+    }
+
+    # Minimal cfg: enable/disable native via env; keep perf caps OFF so native is allowed
+    cfg = {
+        "perf": {
+            "native": {"t1": {"enabled": os.getenv("CLEMATIS_NATIVE_T1", "0") == "1", "strict_parity": False, "backend": "rust"}},
+            "t1": {"caps": {}, "dedupe_window": 0},
+            "parallel": {"max_workers": 0},
+        }
+    }
+
+    return _t1_one_graph_dispatch(
+        cfg=cfg,
+        indptr=indptr,
+        indices=indices,
+        weights=weights,
+        rel_code=rel_code,
+        rel_mult=rel_mult,
+        key_rank=key_rank,
+        seeds=seeds,
+        params=params,
+        seed_weights=seed_weights,
+    )

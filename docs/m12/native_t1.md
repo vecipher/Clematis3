@@ -1,6 +1,6 @@
 # M12 — Native Kernel Acceleration (T1)
 
-**Status**: PR99 — Rust kernel (perf‑OFF semantics) shipped; PR98 Python FFI & strict‑parity harness included; **PR100 — Wheels & CI matrix (abi3, cp311) in progress**. Default behavior unchanged unless enabled. `available()` returns **True** when the compiled extension (`clematis.native._t1_rs`) is importable; otherwise we fall back to Python.
+**Status**: PR99 — Rust kernel (perf‑OFF semantics) shipped; PR98 — Python FFI & strict‑parity harness included; **PR100 — Wheels & CI matrix (abi3, cp311) shipped**; **PR101 — Bench & Docs (advisory) in progress**. Default behavior unchanged unless enabled. `available()` returns **True** when the compiled extension (`clematis.native._t1_rs`) is importable; otherwise we fall back to Python.
 
 ---
 
@@ -139,6 +139,8 @@ If the extension is unavailable or a gate is not met, the run still completes vi
 
 ## Wheels & CI Matrix (PR100)
 
+**Status:** Shipped in PR100.
+
 **Targets**
 - Platforms: **Linux (manylinux x86_64), macOS (x86_64 on macOS‑13; arm64 on macOS‑14), Windows (AMD64)**.
 - Python: **abi3 tagged at cp311** → one wheel per OS/arch, tested on **3.11 / 3.12 / 3.13**.
@@ -147,7 +149,7 @@ If the extension is unavailable or a gate is not met, the run still completes vi
 - **PyO3 abi3** is enabled via Cargo features: `pyo3 = { features = ["extension-module", "abi3-py311"] }`.
 - `pyproject.toml` uses `setuptools-rust` with `binding = "PyO3"` and the extension marked `optional = true` (source installs succeed without Rust).
 - CI builds wheels with **cibuildwheel**:
-  - macOS builds with `CIBW_ARCHS_MACOS=native` (each runner builds its own arch; no cross‑compile).
+  - macOS builds use `CIBW_ARCHS_MACOS=native` on `macos-13` (x86_64) and `macos-14` (arm64); no cross‑compile.
   - Linux sets `RUSTFLAGS=-C link-arg=-Wl,--build-id=none` for lean ELF.
   - sdist is produced **once on Linux**; other OS jobs skip sdist.
 - CI test job **installs the built wheels** (not the repo) and runs a focused subset: `tests/native`, `tests/config`, `tests/helpers`.
@@ -183,39 +185,72 @@ PY
 
 ---
 
-## Building from source (developers)
-> Not required when installing official wheels (planned for PR100+); this is for contributors.
+## Perf Smoke (PR101 — advisory)
 
-1. Install toolchains:
-   ```bash
-   xcode-select --install               # macOS SDK/linker (macOS only)
-   curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-   source "$HOME/.cargo/env"
-   rustup default stable
-   ```
-2. (Python 3.13 only) enable ABI3 forward‑compat for PyO3 ≤ 0.21:
-   ```bash
-   export PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1
-   ```
-3. Build the wheel with the extension:
-   ```bash
-   python -m pip install -U pip build wheel setuptools-rust
-   rm -rf build dist *.egg-info
-   python -m build -w
-   ```
-4. Install & verify:
-   ```bash
-   python -m pip uninstall -y clematis || true
-   python -m pip install dist/clematis-*.whl
-   python - <<'PY'
-   import clematis.native.t1 as t
-   print('native available:', t.available())
-   PY
-   ```
+**Goal**
+Validate a modest speedup for the native kernel with a tiny, deterministic smoke test. This job is informational and **not required** for merge.
+
+**Test**
+- Location: `tests/perf/test_bench_t1_smoke.py`
+- Deterministic graph: ~8k nodes, ~50k directed edges (seed=1337)
+- Mode: prefers parity helpers; otherwise toggles backend via `CLEMATIS_NATIVE_T1`
+- Assertion (Linux CI): native ≥ **1.8×** faster than Python
+- Gating: `@pytest.mark.slow`; **Linux-only** by default; opt-in via `PERF_SMOKE=1`
+- Local override (optional): set `PERF_SMOKE_ANY_OS=1` to run on macOS/Windows
+
+**Local run (outside the repo to avoid source shadowing)**
+```bash
+PERF_SMOKE=1 pytest -q /path/to/Clematis3/tests/perf/test_bench_t1_smoke.py -m slow
+```
+
+**CI job (GitHub Actions, runs on push or when PR labeled `perf-smoke`)**
+```yaml
+name: perf-smoke-linux
+on:
+  push:
+    branches: [ main, master, trunk, develop ]
+  pull_request:
+    types: [ opened, synchronize, labeled, reopened ]
+jobs:
+  perf-smoke:
+    if: github.event_name == 'push' || contains(join(fromJson(toJson(github.event.pull_request.labels)).*.name, ','), 'perf-smoke')
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip wheel setuptools
+          python -m pip install pytest pytest-timeout pyyaml
+      - name: Build wheel (abi3-capable)
+        run: |
+          python -m pip wheel . -w wheelhouse --no-deps
+      - name: Install wheel
+        run: |
+          python -m pip install --no-index --find-links=wheelhouse clematis
+      - name: Run perf smoke (outside checkout to avoid shadowing)
+        working-directory: /tmp
+        env:
+          CI: 'true'
+          CLEMATIS_NETWORK_BAN: '1'
+          PERF_SMOKE: '1'
+          CLEMATIS_NATIVE_T1: '1'
+        run: |
+          pytest -q $GITHUB_WORKSPACE/tests/perf/test_bench_t1_smoke.py -m slow
+```
+
+> **Why run from `/tmp`?** Importing from the repo root can **shadow** the installed wheel so `_t1_rs` appears missing. Running from a clean working directory ensures the compiled extension is used. See **Troubleshooting** below.
 
 ---
 
 ## Troubleshooting (once enabled)
+- **Perf smoke skipped locally** — The perf test is Linux-only by default. This is expected on macOS/Windows. Use CI, or set
+
+  `PERF_SMOKE_ANY_OS=1` to override locally (advisory only).
 - **`ModuleNotFoundError: clematis.native._t1_rs`** — You’re likely importing from the source tree which shadows the installed package. Run Python from outside the repo, or remove the repo path from `sys.path`. Ensure you installed a platform wheel.
 - **`error: can't find Rust compiler`** — Install Rust via `rustup` and ensure `cargo` is on `PATH`.
 - **`the configured Python interpreter version (3.13) is newer than PyO3's maximum supported`** — set `PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1` in the build environment (or upgrade PyO3 in a follow‑up).
@@ -232,7 +267,8 @@ PY
 - **PR97**: Config surface + stubs. ✅
 - **PR98**: Python FFI & strict‑parity harness. ✅
 - **PR99**: Rust kernel (perf‑OFF semantics), parity tests. ✅
-- **PR100+**: Wheels/CI matrix, prebuilt artifacts, docs polish, hardening.
+- **PR100**: Wheels/CI matrix, prebuilt artifacts, docs polish, hardening. ✅
+- **PR101**: Bench & docs (advisory perf smoke on Linux). _In progress_
 - **Post‑M12**: perf‑ON semantics in kernel (dedupe & caps), GEL micro‑kernels.
 
 ---
