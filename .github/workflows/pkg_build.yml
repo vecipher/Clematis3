@@ -74,7 +74,17 @@ jobs:
             bleach==6.1.0 \
             pkginfo==1.10.0 \
             requests==2.32.3 \
-            requests-toolbelt==1.0.0
+            requests-toolbelt==1.0.0 \
+            urllib3==2.2.2 \
+            idna==3.7 \
+            charset-normalizer==3.3.2 \
+            certifi==2024.8.30
+          # Sanity import to fail fast if a dep is missing
+          python - <<'PY'
+          import twine, requests, importlib_metadata, readme_renderer, pkginfo
+          import urllib3, idna, charset_normalizer, certifi, zipp, docutils, pygments, bleach
+          print("twine check deps OK")
+          PY
           python -m twine check dist/*
 
       - name: Upload manpages artifact
@@ -420,7 +430,11 @@ jobs:
             bleach==6.1.0 \
             pkginfo==1.10.0 \
             requests==2.32.3 \
-            requests-toolbelt==1.0.0
+            requests-toolbelt==1.0.0 \
+            urllib3==2.2.2 \
+            idna==3.7 \
+            charset-normalizer==3.3.2 \
+            certifi==2024.8.30
           python -m build
           python -m twine check dist/*
 
