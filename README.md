@@ -2,7 +2,14 @@
 
 Clematis is a deterministic, turn‑based scaffold for agential AI. It models agents with concept graphs and tiered reasoning (T1→T4), uses small LLMs where needed, and keeps runtime behavior reproducible (no hidden network calls in tests/CI).
 
-> **Status:** **v0.9.0a2** (2025‑10‑04) — **M11 complete** ✅ (HS1/GEL substrate). Defaults unchanged; all GEL paths are **gated and OFF by default**; identity path preserved. M10 remains complete; M9 deterministic parallelism remains flag‑gated and OFF by default.
+> **Status:** **v0.9.0a2** (2025‑10‑06) — **M13 Hardening & Freeze (active)**. **M12 skipped** for v3. **M11 complete** ✅ (HS1/GEL substrate). Defaults unchanged; all GEL paths are **gated and OFF by default**; identity path preserved. M10 remains complete; M9 deterministic parallelism remains flag‑gated and OFF by default.
+>
+> **M13 — Hardening & Freeze (active):** In progress across **PR106–PR110**:
+> – **PR106**: Cross‑OS identity matrix (Ubuntu/macOS/Windows; Python 3.11–3.13) with deterministic env.
+> – **PR107**: LF‑only JSONL writes; key‑based path normalization; CRLF normalization in identity helpers.
+> – **PR108**: Config schema lock `version: "v1"`; strict unknown‑key rejection.
+> – **PR109**: Snapshot header lock `schema_version: "v1"`; inspector strict by default (exit 2); `--no-strict` to warn.
+> – **PR110**: Reproducible wheels/sdists across OS; pinned toolchain; cross‑OS hash compare; `scripts/repro_check_local.sh`.
 >
 > **M10 — Reflection Sessions (complete):** Finalized across **PR77** and **PR80–PR90** (config, writer/budgets/tests, fixtures‑only LLM backend, planner flag, telemetry/trace, microbench, optional CI smoke, docs, goldens/identity maintenance). See **[docs/m10/reflection.md](docs/m10/reflection.md)**.
 >
@@ -27,7 +34,7 @@ Clematis is a deterministic, turn‑based scaffold for agential AI. It models ag
   **GEL (M11):** optional field‑control substrate (co‑activation update + half‑life decay; merge/split/promotion available), **default OFF**. See **[docs/m11/overview.md](docs/m11/overview.md)**.
 - **Determinism:** golden logs, identity path when gates are OFF; shadow/quality traces never affect results.
 - **Config freeze:** v3 config schema is frozen at `version: "v1"`. Unknown top‑level keys are rejected. See [docs/m13/config_freeze.md](docs/m13/config_freeze.md).
-- **Snapshot freeze:** v3 snapshots carry a schema lock via a sidecar `<snapshot>.meta` with `schema_version: "v1"`; the inspector validates the schema (default warns to stderr; `--strict` fails). See [docs/m13/snapshot_freeze.md](docs/m13/snapshot_freeze.md).
+- **Snapshot freeze:** v3 snapshots include a header field `schema_version: "v1"`; the inspector validates the header and **fails by default** (exit 2). Use `--no-strict` to only warn. See [docs/m13/snapshot_freeze.md](docs/m13/snapshot_freeze.md).
 
 ## Quick start
 ```bash
@@ -44,6 +51,17 @@ python -m clematis --dir ./.logs rotate-logs -- --dry-run
 
 # Some scripts need optional extras. See docs/m8/packaging_cli.md (e.g., pip install "clematis[zstd]" or "clematis[lancedb]").
 ```
+
+### Reproducible builds (local)
+
+Build artifacts deterministically and verify hashes:
+
+```bash
+scripts/repro_check_local.sh            # build sdist+wheel, print SHA256
+scripts/repro_check_local.sh --twice    # build twice and assert byte‑identical artifacts
+```
+
+CI also enforces cross‑OS reproducibility; see `.github/workflows/pkg_build.yml`.
 
 
 ### GEL (HS1) examples
@@ -264,6 +282,7 @@ See **docs/m9/overview.md** for determinism rules, identity guarantees, and trou
 When `CI=true`, log writes route through `clematis/engine/orchestrator/logging.append_jsonl`, which applies `clematis/engine/util/io_logging.normalize_for_identity`. Identity logs keep their existing rules (e.g., drop `now`, clamp times) to ensure byte identity. For the reflection stream `t3_reflection.jsonl`, only the `ms` field is normalized to `0.0`; this stream is **not** part of the identity set.
 
 ## Milestones snapshot
+- **M13 (active):** Hardening & Freeze — cross‑OS identity (PR106), LF/CRLF & path normalization (PR107), config v1 lock (PR108), snapshot v1 header + strict inspector (PR109), reproducible builds (PR110). **M12 skipped** for v3.
 - **M1–M4:** core stages + apply/persist + logs.
 - **M5:** scheduler config and groundwork (feature‑gated; identity path when disabled).
 - **M6:** memory/perf scaffolding; caches and snapshot hygiene (default‑off quality toggles).

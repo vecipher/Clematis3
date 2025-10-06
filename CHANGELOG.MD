@@ -10,20 +10,27 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-### Added (PR109 — M13-01: Snapshot schema freeze & sidecar; inspector/loader)
-- **Snapshot schema v1 freeze:** all snapshots carry a schema lock via a sidecar `<snapshot>.meta` with `schema_version: "v1"` and `created_at` (honors `SOURCE_DATE_EPOCH`).
-- **Inspector:** falls back to the sidecar **before** validation; default warns to **stderr** and still prints JSON to **stdout**; `--strict` fails on schema errors (exit **2**).
-- **Loader:** understands PR34 full/delta and legacy bodies, reconstructs from baseline for deltas, and extracts `version_etag` from body or header. Latest‑snapshot discovery **excludes sidecars**.
-- **Legacy writer:** ensures legacy single‑JSON bodies include `graph_schema_version` and a `gel` mirror for round‑trip parity.
+### Added (PR109 — M13-01: Snapshot schema v1 header; inspector/loader)
+- **Snapshot schema v1 freeze:** all snapshots now include a **header** with `schema_version: "v1"` and `created_at` (UTC ISO). `created_at` honors `SOURCE_DATE_EPOCH` for determinism.
+- **Inspector:** **strict by default** — exits **2** on schema errors (missing/mismatch). `--no-strict` prints a warning to **stderr** and still emits JSON to **stdout**.
+- **Loader:** understands PR34 full/delta and legacy bodies, reconstructs from baseline for deltas, and extracts `version_etag` from body or header. Latest‑snapshot discovery is unchanged (no sidecars involved).
 
-### Changed (PR109 — sidecar suffix, discovery, CLI polish)
-- Sidecar suffix changed from `.meta.json` → `.meta` to avoid `*.json` glob collisions (e.g., `state_*.json`).
-- `_pick_latest_snapshot_path(...)` filters sidecars and prefers PR34 `snapshot-*.full.json`/`snapshot-*.delta.json` before generic fallbacks.
+### Changed (PR109 — inspector strict default; discovery unchanged; CLI polish)
+- Default behavior flipped to **strict**: `inspect-snapshot` fails with exit **2** on schema errors; `--no-strict` opts into warn‑and‑print.
 - `inspect-snapshot` keeps warnings/errors on **stderr**; **stdout** remains pure JSON in `--format json` mode.
+- Latest‑snapshot discovery behavior unchanged (no sidecar files to filter).
 
 ### Tests (PR109)
-- Updated `tests/test_snapshot_schema_lock.py` to use `.meta` sidecar and verify `--strict` accepts a valid sidecar.
-- Fixed/validated GEL and loader paths: `test_gel_snapshot_roundtrip` and `tests/test_snapshot_loader.py::*` cover graph schema tag, sidecar exclusion, and PR34 delta reconstruction.
+- Added `tests/test_snapshot_schema_lock.py` to validate header presence and `--no-strict` behavior; rejects wrong/missing schema.
+- CLI tests assert exit **2** on strict failure and warn‑and‑print with `--no-strict`.
+- GEL and loader paths validated: `test_gel_snapshot_roundtrip` and `tests/test_snapshot_loader.py::*` cover graph schema tag and PR34 delta reconstruction.
+- Removed references to sidecar discovery; tests now assert correct latest‑snapshot selection without sidecar filtering.
+### Packaging/CI (PR110 — M13-02: Reproducible builds)
+- **Pinned toolchain:** `build==1.2.1`, `wheel==0.45.1`, `setuptools==80.9.0`, `twine==5.1.1` in CI jobs.
+- **Deterministic env:** `TZ=UTC`, `PYTHONHASHSEED=0`, `PYTHONUTF8=1`, `PYTHONIOENCODING=UTF-8`, `SOURCE_DATE_EPOCH` from last git commit. Windows: `core.autocrlf=false`, `core.eol=lf`.
+- **Cross‑OS matrix:** Ubuntu/macOS/Windows; Python **3.11–3.13**. Build **sdist + wheel** on each axis.
+- **Repro compare job:** downloads artifacts and asserts identical **SHA256** for same‑named wheels **and** sdists across OSes; fails on mismatch.
+- **Local script:** `scripts/repro_check_local.sh` builds with the pinned toolchain and prints hashes; `--twice` compares two builds; `--sde` overrides the epoch. Workflow marks it executable.
 
 ### Docs (PR109)
 - Added `docs/m13/snapshot_freeze.md` (freeze rationale, inspector/loader semantics, operator notes).
