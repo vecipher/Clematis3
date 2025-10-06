@@ -118,23 +118,11 @@ jobs:
           rm -rf ./.data ./.logs ./clematis/.logs || true
 
       - name: Disabled-path golden compare (pytest)
-        env:
-          CLEMATIS_NETWORK_BAN: "1"
-          CI: "true"
-          CLEMATIS_LOG_DIR: ${{ github.workspace }}/.logs
-          CLEMATIS_LOGS_DIR: ${{ github.workspace }}/.logs
-          CLEMATIS_DATA_DIR: ${{ github.workspace }}/.data
-          CLEMATIS_T3__ALLOW_REFLECTION: "false"
-          CLEMATIS_SCHEDULER__ENABLED: "false"
-          CLEMATIS_PERF__PARALLEL__ENABLED: "false"
-          CLEMATIS_T2__QUALITY__ENABLED: "false"
-          CLEMATIS_T2__QUALITY__SHADOW: "false"
-          CLEMATIS_T2__HYBRID__ENABLED: "false"
-          CLEMATIS_GRAPH__ENABLED: "false"
         shell: bash
         run: |
           set -euxo pipefail
-          # Run the same golden check the unit suite uses
+          # Let the test control its environment: drop any leaked CLEMATIS_* vars
+          for v in $(env | awk -F= '/^CLEMATIS_/ {print $1}'); do unset "$v"; done
           pytest -q -m "not manual" tests/identity/test_disabled_path_identity.py::test_disabled_path_identity
 
       - name: Atomic IO tests (Windows only)
