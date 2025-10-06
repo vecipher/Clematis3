@@ -18,6 +18,8 @@
 #   WHEEL_VER       = version for 'wheel'     (default 0.45.1)
 #   SETUPTOOLS_VER  = version for 'setuptools' (default 80.9.0)
 #   TWINE_VER       = version for 'twine'     (default 5.1.1)
+#   HOOKS_VER       = version for 'pyproject-hooks' (default 1.1.0)
+#   PACKAGING_VER   = version for 'packaging' (default 24.1)
 set -euo pipefail
 
 die() { echo "error: $*" >&2; exit 2; }
@@ -48,6 +50,8 @@ BUILD_VER="${BUILD_VER:-1.2.1}"
 WHEEL_VER="${WHEEL_VER:-0.45.1}"
 SETUPTOOLS_VER="${SETUPTOOLS_VER:-80.9.0}"
 TWINE_VER="${TWINE_VER:-5.1.1}"
+HOOKS_VER="${HOOKS_VER:-1.1.0}"
+PACKAGING_VER="${PACKAGING_VER:-24.1}"
 
 if [[ -z "${SDE}" ]]; then
   if TS="$(git log -1 --pretty=%ct 2>/dev/null)"; then
@@ -73,7 +77,9 @@ if [[ "${NO_INSTALL}" -eq 0 ]]; then
     "build==${BUILD_VER}" \
     "wheel==${WHEEL_VER}" \
     "setuptools==${SETUPTOOLS_VER}" \
-    "twine==${TWINE_VER}" >/dev/null
+    "twine==${TWINE_VER}" \
+    "pyproject-hooks==${HOOKS_VER}" \
+    "packaging==${PACKAGING_VER}" >/dev/null
 else
   echo "[info] Skipping toolchain install (--no-install)"
 fi
