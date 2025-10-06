@@ -1,4 +1,4 @@
-name: CLI Smoke (cross-OS)
+name: Run CLI smoke tests
 
 on:
   pull_request:
