@@ -36,18 +36,23 @@ def _fsync_best_effort(path: Path) -> None:
         pass
 
 
-def atomic_replace(tmp_path: Path, final_path: Path, *, retries: int = 6, backoff_ms: int = 25) -> None:
-    """Cross-platform atomic replace with a small retry window for Windows.
+def atomic_replace(tmp_path: Path, final_path: Path, *, retries: int = 80, backoff_ms: int = 10) -> None:
+    """Cross-platform atomic replace resilient to Windows sharing violations.
 
-    Ensures parent exists, preserves retry semantics on Windows "sharing violation"
-    errors, and cleans up the temporary file on failure.
+    Retries on common Windows/Posix sharing/permission errors with exponential
+    backoff and small jitter; cleans up the temp file on failure. On success,
+    best-effort fsync is performed on the target and parent directory.
     """
+    import random
+    import errno
+
     final_path.parent.mkdir(parents=True, exist_ok=True)
     last_err: Optional[BaseException] = None
+    delay = backoff_ms / 1000.0
 
     for _ in range(retries):
         try:
-            os.replace(str(tmp_path), str(final_path))  # atomic on POSIX and Windows
+            os.replace(str(tmp_path), str(final_path))  # atomic on POSIX & Windows
             # Best-effort durability: fsync target and parent dir
             try:
                 with open(final_path, "rb", buffering=0) as f:
@@ -56,11 +61,24 @@ def atomic_replace(tmp_path: Path, final_path: Path, *, retries: int = 6, backof
                 pass
             _fsync_best_effort(final_path.parent)
             return
-        except Exception as e:  # pragma: no cover - platform-specific timing
+        except PermissionError as e:
+            # Treat PermissionError as retryable on all platforms.
+            # On Windows, sharing violations typically surface as winerror 5/32,
+            # but generic PermissionError can also occur (e.g., in tests or POSIX).
             last_err = e
-            time.sleep(backoff_ms / 1000.0)
+            # no break; retry with backoff
+        except OSError as e:
+            # POSIX: treat common contention as retryable
+            if e.errno not in {errno.EACCES, errno.EPERM, errno.EBUSY}:
+                last_err = e
+                break
+            last_err = e
 
-    # Replace never succeeded; attempt cleanup then re-raise.
+        # Exponential backoff with jitter; cap ~250ms between attempts
+        time.sleep(delay + (random.uniform(0, delay * 0.25)))
+        delay = min(delay * 1.5, 0.25)
+
+    # Replace never succeeded; attempt cleanup then re-raise the last error
     try:
         if tmp_path.exists():
             tmp_path.unlink()
