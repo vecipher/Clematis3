@@ -76,18 +76,15 @@ jobs:
             pkginfo==1.10.0 \
             requests==2.32.3 \
             requests-toolbelt==1.0.0 \
+            rich==13.7.1 \
             urllib3==2.2.2 \
             idna==3.7 \
             charset-normalizer==3.3.2 \
             certifi==2024.8.30
           # Sanity import to fail fast if a dep is missing (avoid importing bleach)
           python - <<'PY'
-          import twine, requests, importlib_metadata, readme_renderer, pkginfo
+          import twine, requests, importlib_metadata, readme_renderer, pkginfo, rich
           import urllib3, idna, charset_normalizer, certifi, zipp, docutils, pygments, nh3
-          try:
-              import cmarkgfm  # optional for Markdown
-          except Exception as e:
-              print(f"[warn] cmarkgfm import failed: {e}")
           print("twine check deps OK")
           PY
           python -m twine check dist/*
@@ -437,6 +434,7 @@ jobs:
             pkginfo==1.10.0 \
             requests==2.32.3 \
             requests-toolbelt==1.0.0 \
+            rich==13.7.1 \
             urllib3==2.2.2 \
             idna==3.7 \
             charset-normalizer==3.3.2 \
