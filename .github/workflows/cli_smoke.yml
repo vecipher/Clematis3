@@ -3,10 +3,6 @@ name: Run CLI smoke tests
 on:
   pull_request:
     branches: [ main ]
-    paths:
-      - "scripts/**"
-      - "tests/cli/**"
-      - ".github/workflows/cli_smoke.yml"
   workflow_dispatch:
 
 permissions:
