@@ -109,6 +109,8 @@ jobs:
           # Install Twine with its dependencies normally; reproducibility of artifacts
           # does not depend on Twine's transitive versions.
           python -m pip install twine==5.1.1
+          # Ensure parser supports Core Metadata 2.4+
+          python -m pip install -U "pkginfo>=1.12.1.2" "readme_renderer>=44.0"
           python -m twine check dist/*.tar.gz
 
       - name: Wheel metadata self-check (Name/Version)
@@ -591,6 +593,8 @@ jobs:
           os.replace(dst, src)
           print("Canonicalized wheel (stored):", src)
           PY
+          # Ensure parser supports Core Metadata 2.4+
+          python -m pip install -U "pkginfo>=1.12.1.2" "readme_renderer>=44.0"
           # Check sdist with Twine; wheel validated separately below
           python -m twine check dist/*.tar.gz
 
