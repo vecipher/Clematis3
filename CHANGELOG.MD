@@ -7,7 +7,27 @@ All notable changes to this project will be documented in this file.
 
 
 
+
 ## [Unreleased]
+
+### Added (PR109 — M13-01: Snapshot schema freeze & sidecar; inspector/loader)
+- **Snapshot schema v1 freeze:** all snapshots carry a schema lock via a sidecar `<snapshot>.meta` with `schema_version: "v1"` and `created_at` (honors `SOURCE_DATE_EPOCH`).
+- **Inspector:** falls back to the sidecar **before** validation; default warns to **stderr** and still prints JSON to **stdout**; `--strict` fails on schema errors (exit **2**).
+- **Loader:** understands PR34 full/delta and legacy bodies, reconstructs from baseline for deltas, and extracts `version_etag` from body or header. Latest‑snapshot discovery **excludes sidecars**.
+- **Legacy writer:** ensures legacy single‑JSON bodies include `graph_schema_version` and a `gel` mirror for round‑trip parity.
+
+### Changed (PR109 — sidecar suffix, discovery, CLI polish)
+- Sidecar suffix changed from `.meta.json` → `.meta` to avoid `*.json` glob collisions (e.g., `state_*.json`).
+- `_pick_latest_snapshot_path(...)` filters sidecars and prefers PR34 `snapshot-*.full.json`/`snapshot-*.delta.json` before generic fallbacks.
+- `inspect-snapshot` keeps warnings/errors on **stderr**; **stdout** remains pure JSON in `--format json` mode.
+
+### Tests (PR109)
+- Updated `tests/test_snapshot_schema_lock.py` to use `.meta` sidecar and verify `--strict` accepts a valid sidecar.
+- Fixed/validated GEL and loader paths: `test_gel_snapshot_roundtrip` and `tests/test_snapshot_loader.py::*` cover graph schema tag, sidecar exclusion, and PR34 delta reconstruction.
+
+### Docs (PR109)
+- Added `docs/m13/snapshot_freeze.md` (freeze rationale, inspector/loader semantics, operator notes).
+- **README:** added a “Snapshot freeze” bullet linking to the doc.
 
 ### Added (PR80 — M10-04: Reflection write path; deterministic)
 - **Writer module:** `clematis/engine/orchestrator/reflection.py` with `write_reflection_entries(ctx, state, cfg_root, result) -> WriteReport`.

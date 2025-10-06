@@ -7,6 +7,7 @@ import math
 import hashlib
 import logging
 import sys
+import time
 
 try:
     import zstandard as _zstd  # optional; used for .zst snapshots
@@ -18,16 +19,38 @@ except Exception:
 # PR18: schema tag & inspector helpers
 # -------------------------
 
+
 SCHEMA_VERSION = "v1"  # snapshots written going forward should include this
 
 
+# --- Schema version enforcement (PR109 freeze) ---
+class SnapshotSchemaError(ValueError):
+    """Raised when a snapshot payload is missing or has an unexpected schema version."""
+
+
+def validate_snapshot_schema(payload: Dict[str, Any], *, expected: str = SCHEMA_VERSION) -> None:
+    """Strict validation: require `schema_version` key and exact match.
+    This validates the JSON payload (not the PR34 header).
+    """
+    sv = (payload or {}).get("schema_version")
+    if sv is None:
+        raise SnapshotSchemaError("snapshot: missing 'schema_version' in payload")
+    if sv != expected:
+        raise SnapshotSchemaError(f"snapshot: expected schema_version='{expected}', got '{sv}'")
+
+
 def _safe_read_json(path: str) -> Optional[Dict[str, Any]]:
-    """Read JSON file; return None on any error."""
+    """Read JSON file; return None on any error. Falls back to PR34 header+payload."""
     try:
         with open(path, "r", encoding="utf-8") as f:
             return json.load(f)
     except Exception:
-        return None
+        # Try PR34 'header\npayload' format (and .zst) as a fallback
+        try:
+            header, payload = _read_header_payload(path)
+            return payload if isinstance(payload, dict) else None
+        except Exception:
+            return None
 
 
 def _pick_latest_snapshot_path(directory: str) -> Optional[str]:
@@ -47,6 +70,9 @@ def _pick_latest_snapshot_path(directory: str) -> Optional[str]:
         names = os.listdir(directory)
     except Exception:
         return None
+
+    # Only consider real JSON bodies; exclude sidecars
+    names = [n for n in names if n.endswith(".json")]
 
     for name in names:
         if not name.endswith(".json"):
@@ -111,6 +137,14 @@ def get_latest_snapshot_info(directory: str = "./.data/snapshots") -> Optional[D
         return None
 
     schema = data.get("schema_version", "unknown")
+    # If schema_version is missing in payload, fall back to sidecar meta
+    if not schema or schema == "unknown":
+        try:
+            sv = _schema_from_sidecar(path)
+            if sv:
+                schema = sv
+        except Exception:
+            pass
     graph_schema = data.get("graph_schema_version", None)
     gel = data.get("gel") or {}
     graph = data.get("graph") or {}
@@ -634,8 +668,30 @@ def write_snapshot(ctx, state, version_etag: str, applied: int = 0, deltas=None)
             "graph", {"nodes_count": None, "edges_count": None, "meta": {"last_update": None}}
         )
 
+    # Ensure legacy body includes graph schema and GEL block (for loader/tests)
+    if isinstance(payload, dict):
+        payload.setdefault("graph_schema_version", "v1")
+        if "gel" not in payload:
+            gsrc = None
+            if isinstance(state, dict):
+                gsrc = state.get("graph") or state.get("gel")
+            else:
+                gsrc = getattr(state, "graph", None) or getattr(state, "gel", None)
+            if isinstance(gsrc, dict) and gsrc:
+                try:
+                    payload["gel"] = _sanitize_gel_for_write(gsrc, ctx)
+                except Exception:
+                    payload["gel"] = {"nodes": {}, "edges": {}, "meta": {"schema": "v1.1", "merges": [], "splits": [], "promotions": [], "concept_nodes_count": 0, "edges_count": 0}}
+            else:
+                payload.setdefault("gel", {"nodes": {}, "edges": {}, "meta": {"schema": "v1.1", "merges": [], "splits": [], "promotions": [], "concept_nodes_count": 0, "edges_count": 0}})
     with open(path, "w", encoding="utf-8") as f:
         json.dump(payload, f)
+
+    # Emit sidecar meta for legacy single-JSON snapshots as well
+    try:
+        _write_sidecar_meta(path, schema_version=SCHEMA_VERSION)
+    except Exception:
+        pass
 
     return path
 
@@ -665,13 +721,32 @@ def load_latest_snapshot(ctx, state) -> Dict[str, Any]:
     if not path or not os.path.isfile(path):
         return {"loaded": False, "path": None, "version_etag": None}
 
+    header = None
+    data = None
     try:
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
+        header, data = _read_header_payload(path)
     except Exception:
         return {"loaded": False, "path": path, "version_etag": None}
 
-    ver = data.get("version_etag")
+    # If delta file, reconstruct from baseline full if available
+    if isinstance(header, dict) and header.get("mode") == "delta":
+        try:
+            delta_of = header.get("delta_of") or header.get("etag_from")
+            base = _find_snapshot_file(os.path.dirname(path), f"snapshot-{delta_of}.full")
+            if base:
+                _, base_payload = _read_header_payload(base)
+                from clematis.engine.util.snapshot_delta import apply_delta  # local import
+                data = apply_delta(base_payload or {}, data or {})
+            else:
+                logging.warning("SNAPSHOT_BASELINE_MISSING: delta_of=%s etag_to=%s", delta_of, header.get("etag_to"))
+        except Exception:
+            return {"loaded": False, "path": path, "version_etag": None}
+
+    # Prefer body version_etag (legacy); fall back to header etag_to (PR34)
+    ver = (data or {}).get("version_etag")
+    if ver is None and isinstance(header, dict):
+        ver = header.get("etag_to")
+
     if ver is not None:
         if isinstance(state, dict):
             state["version_etag"] = str(ver)
@@ -681,16 +756,16 @@ def load_latest_snapshot(ctx, state) -> Dict[str, Any]:
     # Import store if present and compatible
     store = getattr(state, "store", None) if not isinstance(state, dict) else state.get("store")
     loaded_store = False
-    snap_store = data.get("store")
+    snap_store = (data or {}).get("store")
     if store is not None and snap_store is not None:
         loaded_store = _import_store_from_snapshot(store, snap_store)
 
     # GEL restore (tolerant): prefer `gel`, fall back to `graph`; normalize keys to "src→dst"
     gel_out = {"nodes": {}, "edges": {}}
     try:
-        snap_gel = data.get("gel")
+        snap_gel = (data or {}).get("gel")
         if snap_gel is None:
-            snap_gel = data.get("graph")
+            snap_gel = (data or {}).get("graph")
         gel_out = _sanitize_gel_for_load(snap_gel or {"nodes": {}, "edges": {}}, ctx)
         try:
             edges = gel_out.get("edges", {})
@@ -857,6 +932,57 @@ def read_snapshot(
     # Nothing found
     return {}
 
+# Sidecar helpers: deterministic timestamp and meta writer
+def _iso_utc(ts: int) -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(ts))
+
+
+def _deterministic_created_at() -> str:
+    # Honor SOURCE_DATE_EPOCH for reproducible builds; fallback to current time
+    sde = os.environ.get("SOURCE_DATE_EPOCH")
+    try:
+        ts = int(sde) if sde is not None else int(time.time())
+    except Exception:
+        ts = int(time.time())
+    return _iso_utc(ts)
+
+
+def _write_sidecar_meta(p: str, *, schema_version: str) -> None:
+    """
+    Write a .meta sidecar next to the snapshot file path `p`.
+    The sidecar is plain JSON and not compressed, regardless of the main file codec.
+    """
+    meta_path = p + ".meta"
+    meta = {
+        "schema_version": schema_version,
+        "created_at": _deterministic_created_at(),
+    }
+    # Always terminate with LF for consistency
+    try:
+        with open(meta_path, "w", encoding="utf-8", newline="\n") as mfh:
+            json.dump(meta, mfh, ensure_ascii=False, sort_keys=True)
+            mfh.write("\n")
+    except Exception:
+        # Sidecar failure must not break snapshot write
+        pass
+
+def _read_sidecar_meta(p: str) -> Optional[Dict[str, Any]]:
+    """Read sidecar meta JSON if present; return dict or None on any failure."""
+    meta_path = p + ".meta"
+    try:
+        with open(meta_path, "r", encoding="utf-8") as mfh:
+            return json.load(mfh)
+    except Exception:
+        return None
+
+
+def _schema_from_sidecar(p: str) -> Optional[str]:
+    meta = _read_sidecar_meta(p)
+    if isinstance(meta, dict):
+        sv = meta.get("schema_version")
+        if isinstance(sv, str) and sv:
+            return sv
+    return None
 
 # Writer helpers reuse _canonical_json, _find_snapshot_file, and _read_header_payload above.
 def _write_lines(p: str, header: Dict[str, Any], body_json: str, *, codec: str, level: int) -> None:
@@ -873,6 +999,11 @@ def _write_lines(p: str, header: Dict[str, Any], body_json: str, *, codec: str, 
     else:
         with open(p, "w", encoding="utf-8") as f:
             f.write(payload)
+    # Write sidecar meta with schema_version for inspector/ops tools
+    try:
+        _write_sidecar_meta(p, schema_version=SCHEMA_VERSION)
+    except Exception:
+        pass
 
 
 def write_snapshot_auto(
@@ -896,6 +1027,7 @@ def write_snapshot_auto(
     """
     os.makedirs(dir_path, exist_ok=True)
     codec = "zstd" if str(compression).lower() == "zstd" else "none"
+
     body_json = _canonical_json(payload)
 
     # Try delta when requested and possible
