@@ -94,6 +94,15 @@ jobs:
                   if name.endswith(".dist-info/RECORD"):
                       record_path = name
               assert record_path, "wheel missing .dist-info/RECORD"
+              # Normalize dist-info textual metadata to LF to avoid CRLF on Windows
+              meta_path = next((n for n in entries.keys() if n.endswith(".dist-info/METADATA")), None)
+              wheel_meta_path = next((n for n in entries.keys() if n.endswith(".dist-info/WHEEL")), None)
+              def _lf(b: bytes) -> bytes:
+                  return b.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+              for pth in (meta_path, wheel_meta_path):
+                  if pth:
+                      data, info = entries[pth]
+                      entries[pth] = (_lf(data), info)
 
           # Build deterministic RECORD with LF + sorted rows; empty hash/size for RECORD row
           rows = []
@@ -238,6 +247,15 @@ jobs:
                   if name.endswith(".dist-info/RECORD"):
                       record_path = name
               assert record_path, "wheel missing .dist-info/RECORD"
+              # Normalize dist-info textual metadata to LF to avoid CRLF on Windows
+              meta_path = next((n for n in entries.keys() if n.endswith(".dist-info/METADATA")), None)
+              wheel_meta_path = next((n for n in entries.keys() if n.endswith(".dist-info/WHEEL")), None)
+              def _lf(b: bytes) -> bytes:
+                  return b.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+              for pth in (meta_path, wheel_meta_path):
+                  if pth:
+                      data, info = entries[pth]
+                      entries[pth] = (_lf(data), info)
 
           # Build deterministic RECORD with LF + sorted rows; empty hash/size for RECORD row
           rows = []
@@ -401,6 +419,15 @@ jobs:
                   if name.endswith(".dist-info/RECORD"):
                       record_path = name
               assert record_path, "wheel missing .dist-info/RECORD"
+              # Normalize dist-info textual metadata to LF to avoid CRLF on Windows
+              meta_path = next((n for n in entries.keys() if n.endswith(".dist-info/METADATA")), None)
+              wheel_meta_path = next((n for n in entries.keys() if n.endswith(".dist-info/WHEEL")), None)
+              def _lf(b: bytes) -> bytes:
+                  return b.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+              for pth in (meta_path, wheel_meta_path):
+                  if pth:
+                      data, info = entries[pth]
+                      entries[pth] = (_lf(data), info)
 
           # Build deterministic RECORD with LF + sorted rows; empty hash/size for RECORD row
           rows = []
@@ -767,6 +794,15 @@ jobs:
                   if name.endswith(".dist-info/RECORD"):
                       record_path = name
               assert record_path, "wheel missing .dist-info/RECORD"
+              # Normalize dist-info textual metadata to LF to avoid CRLF on Windows
+              meta_path = next((n for n in entries.keys() if n.endswith(".dist-info/METADATA")), None)
+              wheel_meta_path = next((n for n in entries.keys() if n.endswith(".dist-info/WHEEL")), None)
+              def _lf(b: bytes) -> bytes:
+                  return b.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+              for pth in (meta_path, wheel_meta_path):
+                  if pth:
+                      data, info = entries[pth]
+                      entries[pth] = (_lf(data), info)
 
           # Build deterministic RECORD with LF + sorted rows; empty hash/size for RECORD row
           rows = []
