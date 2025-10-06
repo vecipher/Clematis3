@@ -117,7 +117,7 @@ jobs:
           set -euxo pipefail
           rm -rf ./.data ./.logs ./clematis/.logs || true
 
-      - name: Run golden disabled identity guard
+      - name: Disabled-path golden compare (pytest)
         env:
           CLEMATIS_NETWORK_BAN: "1"
           CI: "true"
@@ -133,9 +133,9 @@ jobs:
           CLEMATIS_GRAPH__ENABLED: "false"
         shell: bash
         run: |
-          set -euo pipefail
-          # Use the shared Python guard which generates logs, normalizes, and compares
-          python3 scripts/ci_compare_golden.py
+          set -euxo pipefail
+          # Run the same golden check the unit suite uses
+          pytest -q -m "not manual" tests/identity/test_disabled_path_identity.py::test_disabled_path_identity
 
       - name: Atomic IO tests (Windows only)
         if: runner.os == 'Windows'
