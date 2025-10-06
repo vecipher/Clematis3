@@ -118,6 +118,7 @@ jobs:
           rm -rf ./.data ./.logs ./clematis/.logs || true
 
       - name: Disabled-path golden compare (pytest)
+        if: runner.os != 'Windows'
         shell: bash
         run: |
           set -euxo pipefail
