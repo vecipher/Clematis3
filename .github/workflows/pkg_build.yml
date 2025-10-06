@@ -109,7 +109,28 @@ jobs:
           # Install Twine with its dependencies normally; reproducibility of artifacts
           # does not depend on Twine's transitive versions.
           python -m pip install twine==5.1.1
-          python -m twine check dist/*
+          python -m twine check dist/*.tar.gz
+
+      - name: Wheel metadata self-check (Name/Version)
+        run: |
+          python - <<'PY'
+          import zipfile, glob
+          wheels = sorted(glob.glob('dist/*.whl'))
+          assert wheels, "no wheel found in dist/"
+          w = wheels[0]
+          with zipfile.ZipFile(w) as z:
+              names = z.namelist()
+              meta = [n for n in names if n.endswith('.dist-info/METADATA')]
+              assert meta, "wheel missing .dist-info/METADATA"
+              data = z.read(meta[0]).decode('utf-8', 'replace')
+              lines = [ln.strip() for ln in data.splitlines() if ln.strip()]
+              has_name = any(ln.lower().startswith("name:") for ln in lines)
+              has_ver = any(ln.lower().startswith("version:") for ln in lines)
+              mv = next((ln.split(":",1)[1].strip() for ln in lines if ln.lower().startswith("metadata-version:")), "unknown")
+              if not (has_name and has_ver):
+                  raise SystemExit(f"wheel METADATA missing headers: Name={has_name}, Version={has_ver}")
+              print("OK: wheel METADATA contains Name and Version (Metadata-Version:", mv + ")")
+          PY
 
       - name: Upload manpages artifact
         if: always()
@@ -572,6 +593,27 @@ jobs:
           PY
           # Check sdist with Twine; wheel validated separately below
           python -m twine check dist/*.tar.gz
+
+      - name: Wheel metadata self-check (Name/Version)
+        run: |
+          python - <<'PY'
+          import zipfile, glob
+          wheels = sorted(glob.glob('dist/*.whl'))
+          assert wheels, "no wheel found in dist/"
+          w = wheels[0]
+          with zipfile.ZipFile(w) as z:
+              names = z.namelist()
+              meta = [n for n in names if n.endswith('.dist-info/METADATA')]
+              assert meta, "wheel missing .dist-info/METADATA"
+              data = z.read(meta[0]).decode('utf-8', 'replace')
+              lines = [ln.strip() for ln in data.splitlines() if ln.strip()]
+              has_name = any(ln.lower().startswith("name:") for ln in lines)
+              has_ver = any(ln.lower().startswith("version:") for ln in lines)
+              mv = next((ln.split(":",1)[1].strip() for ln in lines if ln.lower().startswith("metadata-version:")), "unknown")
+              if not (has_name and has_ver):
+                  raise SystemExit(f"wheel METADATA missing headers: Name={has_name}, Version={has_ver}")
+              print("OK: wheel METADATA contains Name and Version (Metadata-Version:", mv + ")")
+          PY
 
       - name: Upload artifacts to Release (sdist + wheel)
         if: ${{ github.event_name == 'release' }}
