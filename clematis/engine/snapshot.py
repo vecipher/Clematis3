@@ -9,6 +9,8 @@ import logging
 import sys
 import time
 
+from clematis.errors import SnapshotError
+
 try:
     import zstandard as _zstd  # optional; used for .zst snapshots
 except Exception:
@@ -24,8 +26,9 @@ SCHEMA_VERSION = "v1"  # snapshots written going forward should include this
 
 
 # --- Schema version enforcement (PR109 freeze) ---
-class SnapshotSchemaError(ValueError):
-    """Raised when a snapshot payload is missing or has an unexpected schema version."""
+class SnapshotSchemaError(SnapshotError):
+    """Deprecated alias; prefer SnapshotError. Kept for backward compatibility in v3."""
+    pass
 
 
 def validate_snapshot_schema(payload: Dict[str, Any], *, expected: str = SCHEMA_VERSION) -> None:
@@ -34,9 +37,9 @@ def validate_snapshot_schema(payload: Dict[str, Any], *, expected: str = SCHEMA_
     """
     sv = (payload or {}).get("schema_version")
     if sv is None:
-        raise SnapshotSchemaError("snapshot: missing 'schema_version' in payload")
+        raise SnapshotError("snapshot: missing 'schema_version' in payload")
     if sv != expected:
-        raise SnapshotSchemaError(f"snapshot: expected schema_version='{expected}', got '{sv}'")
+        raise SnapshotError(f"snapshot: expected schema_version='{expected}', got '{sv}'")
 
 
 def _safe_read_json(path: str) -> Optional[Dict[str, Any]]:

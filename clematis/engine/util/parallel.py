@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from concurrent.futures import ThreadPoolExecutor, as_completed, Future
 from typing import Callable, Iterable, List, Sequence, Tuple, TypeVar, Generic, Any
+from clematis.errors import ClematisError
 
 K = TypeVar("K")  # task key (e.g., graph_id, shard_id)
 R = TypeVar("R")  # task result
@@ -16,7 +17,7 @@ class TaskError(Generic[K]):
     message: str
 
 
-class ParallelError(Exception):
+class ParallelError(ClematisError):
     """Deterministic container for parallel task failures."""
 
     def __init__(self, errors: Sequence[TaskError[Any]]):
