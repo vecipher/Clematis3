@@ -4,6 +4,7 @@ import os
 import sys
 from pathlib import Path
 from typing import Any, Dict, Mapping, Optional, TextIO, Tuple
+from clematis.errors import ConfigError, CLIError, format_error
 
 # Relative default searched under the current working directory
 DEFAULT_REL = Path("configs") / "config.yaml"
@@ -101,14 +102,16 @@ def validate_or_die(cfg: Mapping[str, Any]) -> Dict[str, Any]:
     try:
         from configs.validate import validate_config
     except Exception as e:  # pragma: no cover
-        sys.stderr.write(f"Config error: internal validator unavailable: {e}\n")
-        sys.stderr.flush()
+        print(format_error(CLIError(f"internal validator unavailable: {e}")))
         raise SystemExit(2)
     try:
         return validate_config(dict(cfg))
-    except ValueError as e:
-        sys.stderr.write(f"Config error: {e}\n")
-        sys.stderr.flush()
+    except ConfigError as e:
+        print(format_error(e))
+        raise SystemExit(2)
+    except Exception as e:
+        # Unexpected error; wrap as CLIError to keep operator output uniform
+        print(format_error(CLIError(str(e))))
         raise SystemExit(2)
 
 

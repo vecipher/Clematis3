@@ -4,13 +4,14 @@
 Public API:
     validate_config(cfg: dict) -> dict
 
-- Raises ValueError with clear messages (field paths + constraints) on invalid input.
+- Raises ConfigError with clear messages (field paths + constraints) on invalid input.
 - Returns a **new** normalized dict; the input is not mutated.
 - No external dependencies.
 """
 
 from __future__ import annotations
 from typing import Any, Dict, List
+from clematis.errors import ConfigError
 
 
 __all__ = ["validate_config", "validate_config_verbose", "validate_config_api", "CONFIG_VERSION"]
@@ -438,7 +439,7 @@ def _validate_config_normalize_impl(cfg: Dict[str, Any]) -> Dict[str, Any]:
     Validate and normalize a configuration dictionary.
 
     Returns a NEW dict with defaults merged and certain fields coerced.
-    Raises ValueError on invalid configurations with actionable messages.
+    Raises ConfigError on invalid configurations with actionable messages.
     """
     # Normalize top-level shape and merge defaults non-destructively
     cfg_in = _ensure_dict(cfg)
@@ -1679,9 +1680,9 @@ def _validate_config_normalize_impl(cfg: Dict[str, Any]) -> Dict[str, Any]:
         # attach normalized quality only if provided
         t2["quality"] = q
 
-    # If we collected errors, raise a single ValueError with all messages (stable order)
+    # If we collected errors, raise a single ConfigError with all messages (stable order)
     if errors:
-        raise ValueError("\n".join(errors))
+        raise ConfigError("\n".join(errors))
 
     # Return merged/normalized config
     merged["t1"] = t1
@@ -1706,7 +1707,7 @@ def validate_config_verbose(cfg: Dict[str, Any]) -> Tuple[Dict[str, Any], List[s
     Warnings currently include:
     - Duplicate cache namespace overlap between t2.stage cache and t4.orchestrator cache.
     """
-    normalized = _validate_config_normalize_impl(cfg)  # will raise ValueError on errors
+    normalized = _validate_config_normalize_impl(cfg)  # will raise ConfigError on errors
 
     warnings: List[str] = []
     try:
@@ -2006,7 +2007,7 @@ def validate_config_api(cfg: Dict[str, Any]):
     try:
         normalized = _validate_config_normalize_impl(cfg)
         return True, [], normalized
-    except ValueError as e:
+    except ConfigError as e:
         msg = str(e).strip()
         errs = msg.split("\n") if msg else ["invalid configuration"]
         return False, errs, None
@@ -2015,7 +2016,7 @@ def validate_config_api(cfg: Dict[str, Any]):
 def validate_config(cfg: Dict[str, Any], **kwargs):
     """Validate configuration.
 
-    Primary form: validate_config(cfg) -> dict (normalized) and raises ValueError on errors.
+    Primary form: validate_config(cfg) -> dict (normalized) and raises ConfigError on errors.
     Compatibility form (if any kwargs like 'strict' or 'verbose' are provided):
       returns (errors, warnings) instead of raising, matching older tests.
     """
@@ -2026,7 +2027,7 @@ def validate_config(cfg: Dict[str, Any], **kwargs):
             # Collect warnings using the verbose API
             _, warnings = validate_config_verbose(cfg)
             return [], warnings
-        except ValueError as e:
+        except ConfigError as e:
             msg = str(e).strip()
             errs = msg.split("\n") if msg else ["invalid configuration"]
             return errs, []

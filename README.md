@@ -4,12 +4,13 @@ Clematis is a deterministic, turn‑based scaffold for agential AI. It models ag
 
 > **Status:** **v0.9.0a2** (2025‑10‑06) — **M13 Hardening & Freeze (active)**. **M12 skipped** for v3. **M11 complete** ✅ (HS1/GEL substrate). Defaults unchanged; all GEL paths are **gated and OFF by default**; identity path preserved. M10 remains complete; M9 deterministic parallelism remains flag‑gated and OFF by default.
 >
-> **M13 — Hardening & Freeze (active):** In progress across **PR106–PR110**:
+> **M13 — Hardening & Freeze (active):** In progress across **PR106–PR111**:
 > – **PR106**: Cross‑OS identity matrix (Ubuntu/macOS/Windows; Python 3.11–3.13) with deterministic env.
 > – **PR107**: LF‑only JSONL writes; key‑based path normalization; CRLF normalization in identity helpers.
 > – **PR108**: Config schema lock `version: "v1"`; strict unknown‑key rejection.
 > – **PR109**: Snapshot header lock `schema_version: "v1"`; inspector strict by default (exit 2); `--no-strict` to warn.
 > – **PR110**: Reproducible wheels/sdists across OS; pinned toolchain; cross‑OS hash compare; `scripts/repro_check_local.sh`.
+> – **PR111**: Typed error taxonomy — central errors module; public-path raises/catches; tests/docs.
 >
 > **M10 — Reflection Sessions (complete):** Finalized across **PR77** and **PR80–PR90** (config, writer/budgets/tests, fixtures‑only LLM backend, planner flag, telemetry/trace, microbench, optional CI smoke, docs, goldens/identity maintenance). See **[docs/m10/reflection.md](docs/m10/reflection.md)**.
 >
@@ -35,6 +36,7 @@ Clematis is a deterministic, turn‑based scaffold for agential AI. It models ag
 - **Determinism:** golden logs, identity path when gates are OFF; shadow/quality traces never affect results.
 - **Config freeze:** v3 config schema is frozen at `version: "v1"`. Unknown top‑level keys are rejected. See [docs/m13/config_freeze.md](docs/m13/config_freeze.md).
 - **Snapshot freeze:** v3 snapshots include a header field `schema_version: "v1"`; the inspector validates the header and **fails by default** (exit 2). Use `--no-strict` to only warn. See [docs/m13/snapshot_freeze.md](docs/m13/snapshot_freeze.md).
+- **Typed errors:** operator‑facing failures use `clematis.errors.*`. See [docs/m13/error_taxonomy.md](docs/m13/error_taxonomy.md).
 
 ## Quick start
 ```bash
@@ -50,6 +52,25 @@ python -m clematis rotate-logs -- --dir ./.logs --dry-run
 python -m clematis --dir ./.logs rotate-logs -- --dry-run
 
 # Some scripts need optional extras. See docs/m8/packaging_cli.md (e.g., pip install "clematis[zstd]" or "clematis[lancedb]").
+```
+
+
+### Operator‑facing errors (typed)
+
+CLIs print a single, typed line to **stdout** and exit with **code 2** on user errors (e.g., invalid config), keeping logs quiet and machine‑parseable.
+
+Example message:
+
+```text
+ConfigError: unknown top-level key: foo
+```
+
+From Python:
+
+```python
+from clematis.errors import format_error, ConfigError
+print(format_error(ConfigError("unknown top-level key: foo")))
+# -> "ConfigError: unknown top-level key: foo"
 ```
 
 ### Reproducible builds (local)

@@ -36,6 +36,24 @@ All notable changes to this project will be documented in this file.
 - Added `docs/m13/snapshot_freeze.md` (freeze rationale, inspector/loader semantics, operator notes).
 - **README:** added a “Snapshot freeze” bullet linking to the doc.
 
+
+### Added (PR111 — M13-03: Typed error taxonomy & CLI uniform errors)
+- **Central taxonomy:** new `clematis/errors.py` with:
+  `ClematisError` (base), `ConfigError`, `SnapshotError`, `IdentityError`, `QualityShadowError`, `ReflectionError`, `CLIError`; re‑exports `ParallelError` for a consistent import path.
+- **Uniform formatting:** `format_error(e)` helper yields short, class‑prefixed messages suitable for CLIs/logs.
+- **Docs:** `docs/m13/error_taxonomy.md` and README additions (operator‑facing errors block).
+
+### Changed (PR111 — validator/snapshot/CLI; back‑compat kept for v3)
+- **Validator:** public error paths now raise `ConfigError` (typed). **Back‑compat:** for v3, `ConfigError` also inherits from `ValueError` so legacy callers/tests that catch `ValueError` still work. **TODO (v4):** drop the `ValueError` parent.
+- **Snapshot:** header validation now raises `SnapshotError` (typed). `SnapshotSchemaError` remains as a **deprecated alias** subclassing `SnapshotError` for compatibility. **Back‑compat:** `SnapshotError` also inherits from `ValueError` in v3; plan to drop in v4.
+- **Parallel:** `clematis.engine.util.parallel.ParallelError` now subclasses `ClematisError` (taxonomy‑consistent), message remains aggregated/deterministic.
+- **CLI (validate):** on invalid configs, prints a **single typed line to stdout** (e.g., `ConfigError: …`) and exits **2** (tests assert on STDOUT).
+- **CLI (inspect‑snapshot):** errors/warnings use `format_error(...)` for consistency; strict‑by‑default behavior unchanged, and `--no-strict` continues to warn on **stderr** while emitting JSON to **stdout**.
+
+### Tests (PR111)
+- `tests/test_errors_typing.py` covers taxonomy hierarchy, `format_error`, config/version lock using typed errors, and snapshot header validation using typed errors. Parallel error construction updated to use a fake record (no API change).
+- CLI tests that inspect validator output assert on **stdout**; wiring updated accordingly.
+
 ### Added (PR80 — M10-04: Reflection write path; deterministic)
 - **Writer module:** `clematis/engine/orchestrator/reflection.py` with `write_reflection_entries(ctx, state, cfg_root, result) -> WriteReport`.
 - **Determinism:** fixed `ts_iso` from `ctx.now_iso`; stable episode IDs `refl-<turn>-<agent>-<slot>-<sha12>`.

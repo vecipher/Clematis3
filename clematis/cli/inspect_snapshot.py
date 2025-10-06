@@ -6,8 +6,8 @@ import inspect
 import io
 import json
 import os
-import sys
 from pathlib import Path
+from clematis.errors import CLIError, format_error
 
 from ._exit import INTERNAL, IO_ERR, OK, USER_ERR
 from ._io import eprint_once, print_table, set_verbosity
@@ -35,9 +35,8 @@ def _import_script():
         assert spec and spec.loader
         spec.loader.exec_module(mod)
         return mod
-    print(
-        f"[clematis] inspect-snapshot: cannot locate {path.name}. Last error: {last}",
-        file=sys.stderr,
+    eprint_once(
+        format_error(CLIError(f"inspect-snapshot: cannot locate {path.name}. Last error: {last}"))
     )
     return None
 
@@ -48,7 +47,7 @@ def _delegate(argv):
         return IO_ERR
     main = getattr(mod, "main", None)
     if main is None:
-        print("[clematis] inspect-snapshot: script has no main().", file=sys.stderr)
+        eprint_once(format_error(CLIError("inspect-snapshot: script has no main().")))
         return IO_ERR
     try:
         sig = inspect.signature(main)
@@ -86,7 +85,7 @@ def _entrypoint(ns: argparse.Namespace) -> int:
 
     if wants_json and wants_table:
         if not quiet:
-            eprint_once("Choose exactly one of --json or --table.")
+            eprint_once(format_error(CLIError("Choose exactly one of --json or --table.")))
         return USER_ERR
 
     if wants_table:
@@ -102,7 +101,11 @@ def _entrypoint(ns: argparse.Namespace) -> int:
             if fmt and fmt.lower() != "json":
                 if not quiet:
                     eprint_once(
-                        "`inspect-snapshot`: --table requires --format json if --format is supplied."
+                        format_error(
+                            CLIError(
+                                "`inspect-snapshot`: --table requires --format json if --format is supplied."
+                            )
+                        )
                     )
                 return USER_ERR
 
@@ -126,7 +129,11 @@ def _entrypoint(ns: argparse.Namespace) -> int:
             payload = json.loads(raw)
         except Exception:
             if not quiet:
-                eprint_once("`inspect-snapshot`: expected JSON output to render table.")
+                eprint_once(
+                    format_error(
+                        CLIError("`inspect-snapshot`: expected JSON output to render table.")
+                    )
+                )
             return IO_ERR
 
         def _val_to_str(v):
@@ -163,7 +170,11 @@ def _entrypoint(ns: argparse.Namespace) -> int:
             if fmt and fmt.lower() != "json":
                 if not quiet:
                     eprint_once(
-                        "`inspect-snapshot`: --json requires --format json if --format is supplied."
+                        format_error(
+                            CLIError(
+                                "`inspect-snapshot`: --json requires --format json if --format is supplied."
+                            )
+                        )
                     )
                 return USER_ERR
 
