@@ -123,6 +123,7 @@ jobs:
           CI: "true"
           CLEMATIS_LOG_DIR: ${{ github.workspace }}/.logs
           CLEMATIS_LOGS_DIR: ${{ github.workspace }}/.logs
+          CLEMATIS_DATA_DIR: ${{ github.workspace }}/.data
           CLEMATIS_T3__ALLOW_REFLECTION: "false"
           CLEMATIS_SCHEDULER__ENABLED: "false"
           CLEMATIS_PERF__PARALLEL__ENABLED: "false"
@@ -141,12 +142,31 @@ jobs:
             [ -f "${CLEMATIS_LOG_DIR}/$f" ] && wc -l "${CLEMATIS_LOG_DIR}/$f" || echo "missing $f"
           done
 
+      - name: Mirror alt log dirs into ./.logs
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p ./.logs
+          for alt in './.data/logs' './clematis/.logs'; do
+            if [ -d "$alt" ]; then
+              shopt -s nullglob
+              for f in "$alt"/*.jsonl; do
+                cp -f "$f" ./.logs/
+              done
+            fi
+          done
+          ls -lah ./.logs || true
+          for f in t1.jsonl t2.jsonl t4.jsonl turn.jsonl; do
+            [ -f ".logs/$f" ] && wc -l ".logs/$f" || echo "missing $f"
+          done
+
       - name: Run golden disabled identity guard
         env:
           CLEMATIS_NETWORK_BAN: "1"
           CI: "true"
           CLEMATIS_LOG_DIR: ${{ github.workspace }}/.logs
           CLEMATIS_LOGS_DIR: ${{ github.workspace }}/.logs
+          CLEMATIS_DATA_DIR: ${{ github.workspace }}/.data
           CLEMATIS_T3__ALLOW_REFLECTION: "false"
           CLEMATIS_SCHEDULER__ENABLED: "false"
           CLEMATIS_PERF__PARALLEL__ENABLED: "false"
