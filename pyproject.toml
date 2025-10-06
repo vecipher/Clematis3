@@ -5,8 +5,7 @@ description = "Clematis — deterministic mind-like simulation engine (M1–M8 b
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
 
-license = { file = "LICENSE" }
-license-files = ["LICENSE"]
+license = "Apache-2.0"
 authors = [{ name = "vecipher" }]
 
 dependencies = [
@@ -89,6 +88,8 @@ namespaces = false
 [tool.setuptools]
 include-package-data = true
 zip-safe = false
+
+license-files = ["LICENSE", "NOTICE"]
 
 
 [tool.pytest.ini_options]
