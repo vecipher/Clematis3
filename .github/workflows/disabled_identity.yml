@@ -30,7 +30,7 @@ jobs:
       PYTHONUTF8: "1"
       PYTHONHASHSEED: "0"
       LC_ALL: C.UTF-8
-      SOURCE_DATE_EPOCH: "0"
+      SOURCE_DATE_EPOCH: "315532800"
 
     steps:
       - name: Checkout
@@ -51,7 +51,7 @@ jobs:
           echo "PYTHONHASHSEED=0" >> $GITHUB_ENV
           echo "TZ=UTC" >> $GITHUB_ENV
           echo "LC_ALL=C.UTF-8" >> $GITHUB_ENV
-          echo "SOURCE_DATE_EPOCH=0" >> $GITHUB_ENV
+          echo "SOURCE_DATE_EPOCH=315532800" >> $GITHUB_ENV
           echo "PIP_DISABLE_PIP_VERSION_CHECK=1" >> $GITHUB_ENV
           echo "CLEMATIS_NETWORK_BAN=1" >> $GITHUB_ENV
 
