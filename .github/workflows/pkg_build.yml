@@ -61,6 +61,59 @@ jobs:
           python -m build
           ls -l dist
 
+      - name: Canonicalize sdist (deterministic tar+gz) #1
+        shell: bash
+        run: |
+          python - <<'PY'
+          import os, tarfile, gzip, io, pathlib
+          dist = pathlib.Path("dist")
+          sdists = sorted(dist.glob("*.tar.gz"))
+          assert sdists, "no sdist found in dist/"
+          src = sdists[0]
+          sde = int(os.environ.get("SOURCE_DATE_EPOCH","0"))
+          if sde < 0: sde = 0
+          raw = src.read_bytes()
+          with gzip.GzipFile(fileobj=io.BytesIO(raw), mode="rb") as gz:
+              tar_bytes = gz.read()
+          entries = []
+          with tarfile.open(fileobj=io.BytesIO(tar_bytes), mode="r:*") as tin:
+              for m in tin.getmembers():
+                  data = b""
+                  if m.isfile():
+                      f = tin.extractfile(m)
+                      data = f.read() if f else b""
+                  entries.append((m, data))
+          out_tar = io.BytesIO()
+          with tarfile.open(fileobj=out_tar, mode="w", format=tarfile.PAX_FORMAT) as tout:
+              for m, data in sorted(entries, key=lambda x: x[0].name):
+                  ti = tarfile.TarInfo(m.name)
+                  ti.type = m.type
+                  if m.isdir():
+                      ti.mode = 0o755
+                  elif m.isfile():
+                      execy = (m.mode & 0o111) != 0 or data.startswith(b"#!")
+                      ti.mode = 0o755 if execy else 0o644
+                  else:
+                      ti.mode = 0o644
+                  ti.uid = 0; ti.gid = 0; ti.uname = ""; ti.gname = ""
+                  ti.mtime = sde if sde else 0
+                  if m.issym():
+                      ti.type = tarfile.SYMTYPE; ti.linkname = m.linkname; ti.size = 0; data = b""
+                  elif m.islnk():
+                      ti.type = tarfile.LNKTYPE; ti.linkname = m.linkname; ti.size = 0; data = b""
+                  elif m.isfile():
+                      ti.size = len(data)
+                  else:
+                      ti.size = 0
+                  ti.pax_headers = {}
+                  tout.addfile(ti, io.BytesIO(data) if ti.size else None)
+          gz_buf = io.BytesIO()
+          with gzip.GzipFile(fileobj=gz_buf, mode="wb", mtime=0) as gz:
+              gz.write(out_tar.getvalue())
+          src.write_bytes(gz_buf.getvalue())
+          print("Canonicalized sdist:", src)
+          PY
+
       - name: Canonicalize wheel (zip, stored) #1
         run: |
           python - <<'PY'
@@ -213,6 +266,59 @@ jobs:
           rm -rf build dist *.egg-info
           python -m build
           ls -l dist
+
+      - name: Canonicalize sdist (deterministic tar+gz) #2
+        shell: bash
+        run: |
+          python - <<'PY'
+          import os, tarfile, gzip, io, pathlib
+          dist = pathlib.Path("dist")
+          sdists = sorted(dist.glob("*.tar.gz"))
+          assert sdists, "no sdist found in dist/"
+          src = sdists[0]
+          sde = int(os.environ.get("SOURCE_DATE_EPOCH","0"))
+          if sde < 0: sde = 0
+          raw = src.read_bytes()
+          with gzip.GzipFile(fileobj=io.BytesIO(raw), mode="rb") as gz:
+              tar_bytes = gz.read()
+          entries = []
+          with tarfile.open(fileobj=io.BytesIO(tar_bytes), mode="r:*") as tin:
+              for m in tin.getmembers():
+                  data = b""
+                  if m.isfile():
+                      f = tin.extractfile(m)
+                      data = f.read() if f else b""
+                  entries.append((m, data))
+          out_tar = io.BytesIO()
+          with tarfile.open(fileobj=out_tar, mode="w", format=tarfile.PAX_FORMAT) as tout:
+              for m, data in sorted(entries, key=lambda x: x[0].name):
+                  ti = tarfile.TarInfo(m.name)
+                  ti.type = m.type
+                  if m.isdir():
+                      ti.mode = 0o755
+                  elif m.isfile():
+                      execy = (m.mode & 0o111) != 0 or data.startswith(b"#!")
+                      ti.mode = 0o755 if execy else 0o644
+                  else:
+                      ti.mode = 0o644
+                  ti.uid = 0; ti.gid = 0; ti.uname = ""; ti.gname = ""
+                  ti.mtime = sde if sde else 0
+                  if m.issym():
+                      ti.type = tarfile.SYMTYPE; ti.linkname = m.linkname; ti.size = 0; data = b""
+                  elif m.islnk():
+                      ti.type = tarfile.LNKTYPE; ti.linkname = m.linkname; ti.size = 0; data = b""
+                  elif m.isfile():
+                      ti.size = len(data)
+                  else:
+                      ti.size = 0
+                  ti.pax_headers = {}
+                  tout.addfile(ti, io.BytesIO(data) if ti.size else None)
+          gz_buf = io.BytesIO()
+          with gzip.GzipFile(fileobj=gz_buf, mode="wb", mtime=0) as gz:
+              gz.write(out_tar.getvalue())
+          src.write_bytes(gz_buf.getvalue())
+          print("Canonicalized sdist:", src)
+          PY
 
       - name: Canonicalize wheel (zip, stored) #2
         run: |
@@ -384,6 +490,59 @@ jobs:
 
       - name: Build sdist + wheel (axis-local)
         run: python -m build --sdist --wheel
+
+      - name: Canonicalize sdist (axis-local)
+        shell: bash
+        run: |
+          python - <<'PY'
+          import os, tarfile, gzip, io, pathlib
+          dist = pathlib.Path("dist")
+          sdists = sorted(dist.glob("*.tar.gz"))
+          assert sdists, "no sdist found in dist/"
+          src = sdists[0]
+          sde = int(os.environ.get("SOURCE_DATE_EPOCH","0"))
+          if sde < 0: sde = 0
+          raw = src.read_bytes()
+          with gzip.GzipFile(fileobj=io.BytesIO(raw), mode="rb") as gz:
+              tar_bytes = gz.read()
+          entries = []
+          with tarfile.open(fileobj=io.BytesIO(tar_bytes), mode="r:*") as tin:
+              for m in tin.getmembers():
+                  data = b""
+                  if m.isfile():
+                      f = tin.extractfile(m)
+                      data = f.read() if f else b""
+                  entries.append((m, data))
+          out_tar = io.BytesIO()
+          with tarfile.open(fileobj=out_tar, mode="w", format=tarfile.PAX_FORMAT) as tout:
+              for m, data in sorted(entries, key=lambda x: x[0].name):
+                  ti = tarfile.TarInfo(m.name)
+                  ti.type = m.type
+                  if m.isdir():
+                      ti.mode = 0o755
+                  elif m.isfile():
+                      execy = (m.mode & 0o111) != 0 or data.startswith(b"#!")
+                      ti.mode = 0o755 if execy else 0o644
+                  else:
+                      ti.mode = 0o644
+                  ti.uid = 0; ti.gid = 0; ti.uname = ""; ti.gname = ""
+                  ti.mtime = sde if sde else 0
+                  if m.issym():
+                      ti.type = tarfile.SYMTYPE; ti.linkname = m.linkname; ti.size = 0; data = b""
+                  elif m.islnk():
+                      ti.type = tarfile.LNKTYPE; ti.linkname = m.linkname; ti.size = 0; data = b""
+                  elif m.isfile():
+                      ti.size = len(data)
+                  else:
+                      ti.size = 0
+                  ti.pax_headers = {}
+                  tout.addfile(ti, io.BytesIO(data) if ti.size else None)
+          gz_buf = io.BytesIO()
+          with gzip.GzipFile(fileobj=gz_buf, mode="wb", mtime=0) as gz:
+              gz.write(out_tar.getvalue())
+          src.write_bytes(gz_buf.getvalue())
+          print("Canonicalized sdist:", src)
+          PY
 
       - name: Canonicalize wheel (axis-local, stored)
         shell: bash
@@ -762,6 +921,56 @@ jobs:
           # Install Twine with dependencies (no --no-deps) for README/metadata checks
           python -m pip install twine==5.1.1
           python -m build
+          # Canonicalize sdist for deterministic tar+gz
+          python - <<'PY'
+          import os, tarfile, gzip, io, pathlib
+          dist = pathlib.Path("dist")
+          sdists = sorted(dist.glob("*.tar.gz"))
+          assert sdists, "no sdist found in dist/"
+          src = sdists[0]
+          sde = int(os.environ.get("SOURCE_DATE_EPOCH","0"))
+          if sde < 0: sde = 0
+          raw = src.read_bytes()
+          with gzip.GzipFile(fileobj=io.BytesIO(raw), mode="rb") as gz:
+              tar_bytes = gz.read()
+          entries = []
+          with tarfile.open(fileobj=io.BytesIO(tar_bytes), mode="r:*") as tin:
+              for m in tin.getmembers():
+                  data = b""
+                  if m.isfile():
+                      f = tin.extractfile(m)
+                      data = f.read() if f else b""
+                  entries.append((m, data))
+          out_tar = io.BytesIO()
+          with tarfile.open(fileobj=out_tar, mode="w", format=tarfile.PAX_FORMAT) as tout:
+              for m, data in sorted(entries, key=lambda x: x[0].name):
+                  ti = tarfile.TarInfo(m.name)
+                  ti.type = m.type
+                  if m.isdir():
+                      ti.mode = 0o755
+                  elif m.isfile():
+                      execy = (m.mode & 0o111) != 0 or data.startswith(b"#!")
+                      ti.mode = 0o755 if execy else 0o644
+                  else:
+                      ti.mode = 0o644
+                  ti.uid = 0; ti.gid = 0; ti.uname = ""; ti.gname = ""
+                  ti.mtime = sde if sde else 0
+                  if m.issym():
+                      ti.type = tarfile.SYMTYPE; ti.linkname = m.linkname; ti.size = 0; data = b""
+                  elif m.islnk():
+                      ti.type = tarfile.LNKTYPE; ti.linkname = m.linkname; ti.size = 0; data = b""
+                  elif m.isfile():
+                      ti.size = len(data)
+                  else:
+                      ti.size = 0
+                  ti.pax_headers = {}
+                  tout.addfile(ti, io.BytesIO(data) if ti.size else None)
+          gz_buf = io.BytesIO()
+          with gzip.GzipFile(fileobj=gz_buf, mode="wb", mtime=0) as gz:
+              gz.write(out_tar.getvalue())
+          src.write_bytes(gz_buf.getvalue())
+          print("Canonicalized sdist:", src)
+          PY
           # Canonicalize wheel to ZIP_STORED for cross-OS identical bytes
           python - <<'PY'
           import os, zipfile, pathlib, hashlib, base64, io, csv
