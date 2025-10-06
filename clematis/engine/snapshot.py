@@ -9,6 +9,8 @@ import logging
 import sys
 import time
 
+from clematis.io.atomic import atomic_write_text, atomic_write_bytes
+
 from clematis.errors import SnapshotError
 
 try:
@@ -687,8 +689,8 @@ def write_snapshot(ctx, state, version_etag: str, applied: int = 0, deltas=None)
                     payload["gel"] = {"nodes": {}, "edges": {}, "meta": {"schema": "v1.1", "merges": [], "splits": [], "promotions": [], "concept_nodes_count": 0, "edges_count": 0}}
             else:
                 payload.setdefault("gel", {"nodes": {}, "edges": {}, "meta": {"schema": "v1.1", "merges": [], "splits": [], "promotions": [], "concept_nodes_count": 0, "edges_count": 0}})
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(payload, f)
+    # Atomic, LF-only write of the JSON body (preserve default JSON formatting)
+    atomic_write_text(path, json.dumps(payload), encoding="utf-8", newline="\n")
 
     # Emit sidecar meta for legacy single-JSON snapshots as well
     try:
@@ -962,9 +964,8 @@ def _write_sidecar_meta(p: str, *, schema_version: str) -> None:
     }
     # Always terminate with LF for consistency
     try:
-        with open(meta_path, "w", encoding="utf-8", newline="\n") as mfh:
-            json.dump(meta, mfh, ensure_ascii=False, sort_keys=True)
-            mfh.write("\n")
+        meta_str = json.dumps(meta, ensure_ascii=False, sort_keys=True) + "\n"
+        atomic_write_text(meta_path, meta_str, encoding="utf-8", newline="\n")
     except Exception:
         # Sidecar failure must not break snapshot write
         pass
@@ -997,11 +998,10 @@ def _write_lines(p: str, header: Dict[str, Any], body_json: str, *, codec: str, 
     if codec == "zstd" and _zstd is not None:
         lvl = max(1, min(19, int(level or 3)))
         cctx = _zstd.ZstdCompressor(level=lvl)
-        with open(p, "wb") as f:
-            f.write(cctx.compress(payload.encode("utf-8")))
+        data = cctx.compress(payload.encode("utf-8"))
+        atomic_write_bytes(p, data)
     else:
-        with open(p, "w", encoding="utf-8") as f:
-            f.write(payload)
+        atomic_write_text(p, payload, encoding="utf-8", newline="\n")
     # Write sidecar meta with schema_version for inspector/ops tools
     try:
         _write_sidecar_meta(p, schema_version=SCHEMA_VERSION)

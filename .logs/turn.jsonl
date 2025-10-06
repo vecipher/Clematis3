@@ -1,1 +1,1 @@
-{"turn": "demo-1", "agent": "AgentA", "durations_ms": {"t1": 0.204, "t2": 0.26, "t4": 0.01, "apply": 0.37, "total": 3.536}, "t1": {"pops": 5, "iters": 1, "graphs_touched": 1}, "t2": {"k_returned": 0, "k_used": 0, "cache_hit": false}, "t4": {"approved": 0, "rejected": 0}, "now": "2025-10-06T10:12:57.079163+00:00"}
+{"turn": "demo-1", "agent": "AgentA", "durations_ms": {"t1": 0.0, "t2": 0.0, "t4": 0.0, "apply": 0.0, "total": 0.0}, "t1": {"pops": 5, "iters": 1, "graphs_touched": 1}, "t2": {"k_returned": 0, "k_used": 0, "cache_hit": false}, "t4": {"approved": 0, "rejected": 0}}

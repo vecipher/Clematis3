@@ -24,6 +24,8 @@ from __future__ import annotations
 import argparse
 import glob
 import os
+from pathlib import Path
+from clematis.io.atomic import atomic_replace
 import sys
 from typing import Iterable
 
@@ -57,7 +59,7 @@ def rotate_one(path: str, backups: int, dry_run: bool = False) -> bool:
                 print(f"mv {src} {dst}")
             else:
                 try:
-                    os.replace(src, dst)
+                    atomic_replace(Path(src), Path(dst))
                 except FileNotFoundError:
                     pass
 
@@ -67,7 +69,7 @@ def rotate_one(path: str, backups: int, dry_run: bool = False) -> bool:
             print(f"mv {path} {path}.1")
         else:
             try:
-                os.replace(path, f"{path}.1")
+                atomic_replace(Path(path), Path(f"{path}.1"))
             except FileNotFoundError:
                 pass
         return True
