@@ -64,7 +64,7 @@ jobs:
       - name: Canonicalize wheel (zip, stored) #1
         run: |
           python - <<'PY'
-          import os, zipfile, pathlib
+          import os, zipfile, pathlib, hashlib, base64, io, csv
           from datetime import datetime, timezone
           dist = pathlib.Path("dist")
           wheels = sorted(dist.glob("*.whl"))
@@ -72,15 +72,43 @@ jobs:
           src = wheels[0]
           dst = src.with_suffix(".whl.tmp")
           sde = int(os.environ.get("SOURCE_DATE_EPOCH", "0"))
-          # Guard ZIP minimum date (1980-01-01)
-          if sde < 315532800:
+          if sde < 315532800:  # 1980-01-01 (ZIP min date)
             sde = 315532800
           dt = datetime.fromtimestamp(sde, tz=timezone.utc)
           fixed = (dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second)
-          with zipfile.ZipFile(src, "r") as zin, zipfile.ZipFile(
-              dst, "w", compression=zipfile.ZIP_STORED
-          ) as zout:
-              for name in sorted(zin.namelist()):
+
+          def exec_mode(data: bytes, orig_mode: int) -> int:
+              mode = 0o644
+              if (orig_mode & 0o111) or data.startswith(b"#!"):
+                  mode = 0o755
+              return mode
+
+          # Read all entries
+          with zipfile.ZipFile(src, "r") as zin:
+              entries = {}
+              record_path = None
+              for info in zin.infolist():
+                  name = info.filename
+                  data = b"" if name.endswith("/") else zin.read(name)
+                  entries[name] = (data, info)
+                  if name.endswith(".dist-info/RECORD"):
+                      record_path = name
+              assert record_path, "wheel missing .dist-info/RECORD"
+
+          # Build deterministic RECORD with LF + sorted rows; empty hash/size for RECORD row
+          rows = []
+          for name in sorted(n for n in entries.keys() if not n.endswith("/") and n != record_path):
+              data, _ = entries[name]
+              h = hashlib.sha256(data).digest()
+              b64 = base64.urlsafe_b64encode(h).decode("ascii").rstrip("=")
+              rows.append([name, f"sha256={b64}", str(len(data))])
+          rows.append([record_path, "", ""])
+          buf = io.StringIO()
+          csv.writer(buf, lineterminator="\n").writerows(rows)
+          record_bytes = buf.getvalue().encode("utf-8")
+
+          with zipfile.ZipFile(dst, "w", compression=zipfile.ZIP_STORED) as zout:
+              for name in sorted(entries.keys()):
                   if name.endswith("/"):
                       zi = zipfile.ZipInfo(filename=name, date_time=fixed)
                       zi.create_system = 3
@@ -88,19 +116,18 @@ jobs:
                       zi.compress_type = zipfile.ZIP_STORED
                       zout.writestr(zi, b"")
                       continue
-                  data = zin.read(name)
-                  info = zin.getinfo(name)
+                  data, info = entries[name]
+                  if name == record_path:
+                      data = record_bytes
                   zi = zipfile.ZipInfo(filename=name, date_time=fixed)
                   zi.create_system = 3
                   zi.compress_type = zipfile.ZIP_STORED
-                  mode = 0o644
-                  orig_mode = (info.external_attr >> 16) & 0o7777
-                  if (orig_mode & 0o111) or data.startswith(b"#!"):
-                      mode = 0o755
+                  mode = exec_mode(data, (info.external_attr >> 16) & 0o7777)
                   zi.external_attr = (mode & 0xFFFF) << 16
                   zout.writestr(zi, data)
+
           os.replace(dst, src)
-          print("Canonicalized wheel (stored):", src)
+          print("Canonicalized wheel with deterministic RECORD:", src)
           PY
 
       - name: Twine check
@@ -181,7 +208,7 @@ jobs:
       - name: Canonicalize wheel (zip, stored) #2
         run: |
           python - <<'PY'
-          import os, zipfile, pathlib
+          import os, zipfile, pathlib, hashlib, base64, io, csv
           from datetime import datetime, timezone
           dist = pathlib.Path("dist")
           wheels = sorted(dist.glob("*.whl"))
@@ -189,14 +216,43 @@ jobs:
           src = wheels[0]
           dst = src.with_suffix(".whl.tmp")
           sde = int(os.environ.get("SOURCE_DATE_EPOCH", "0"))
-          if sde < 315532800:
+          if sde < 315532800:  # 1980-01-01 (ZIP min date)
             sde = 315532800
           dt = datetime.fromtimestamp(sde, tz=timezone.utc)
           fixed = (dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second)
-          with zipfile.ZipFile(src, "r") as zin, zipfile.ZipFile(
-              dst, "w", compression=zipfile.ZIP_STORED
-          ) as zout:
-              for name in sorted(zin.namelist()):
+
+          def exec_mode(data: bytes, orig_mode: int) -> int:
+              mode = 0o644
+              if (orig_mode & 0o111) or data.startswith(b"#!"):
+                  mode = 0o755
+              return mode
+
+          # Read all entries
+          with zipfile.ZipFile(src, "r") as zin:
+              entries = {}
+              record_path = None
+              for info in zin.infolist():
+                  name = info.filename
+                  data = b"" if name.endswith("/") else zin.read(name)
+                  entries[name] = (data, info)
+                  if name.endswith(".dist-info/RECORD"):
+                      record_path = name
+              assert record_path, "wheel missing .dist-info/RECORD"
+
+          # Build deterministic RECORD with LF + sorted rows; empty hash/size for RECORD row
+          rows = []
+          for name in sorted(n for n in entries.keys() if not n.endswith("/") and n != record_path):
+              data, _ = entries[name]
+              h = hashlib.sha256(data).digest()
+              b64 = base64.urlsafe_b64encode(h).decode("ascii").rstrip("=")
+              rows.append([name, f"sha256={b64}", str(len(data))])
+          rows.append([record_path, "", ""])
+          buf = io.StringIO()
+          csv.writer(buf, lineterminator="\n").writerows(rows)
+          record_bytes = buf.getvalue().encode("utf-8")
+
+          with zipfile.ZipFile(dst, "w", compression=zipfile.ZIP_STORED) as zout:
+              for name in sorted(entries.keys()):
                   if name.endswith("/"):
                       zi = zipfile.ZipInfo(filename=name, date_time=fixed)
                       zi.create_system = 3
@@ -204,19 +260,18 @@ jobs:
                       zi.compress_type = zipfile.ZIP_STORED
                       zout.writestr(zi, b"")
                       continue
-                  data = zin.read(name)
-                  info = zin.getinfo(name)
+                  data, info = entries[name]
+                  if name == record_path:
+                      data = record_bytes
                   zi = zipfile.ZipInfo(filename=name, date_time=fixed)
                   zi.create_system = 3
                   zi.compress_type = zipfile.ZIP_STORED
-                  mode = 0o644
-                  orig_mode = (info.external_attr >> 16) & 0o7777
-                  if (orig_mode & 0o111) or data.startswith(b"#!"):
-                      mode = 0o755
+                  mode = exec_mode(data, (info.external_attr >> 16) & 0o7777)
                   zi.external_attr = (mode & 0xFFFF) << 16
                   zout.writestr(zi, data)
+
           os.replace(dst, src)
-          print("Canonicalized wheel (stored):", src)
+          print("Canonicalized wheel with deterministic RECORD:", src)
           PY
 
       - name: Canonicalize & hash #2 and compare
@@ -316,7 +371,7 @@ jobs:
         shell: bash
         run: |
           python - <<'PY'
-          import os, zipfile, pathlib
+          import os, zipfile, pathlib, hashlib, base64, io, csv
           from datetime import datetime, timezone
           dist = pathlib.Path("dist")
           wheels = sorted(dist.glob("*.whl"))
@@ -324,14 +379,43 @@ jobs:
           src = wheels[0]
           dst = src.with_suffix(".whl.tmp")
           sde = int(os.environ.get("SOURCE_DATE_EPOCH", "0"))
-          if sde < 315532800:
+          if sde < 315532800:  # 1980-01-01 (ZIP min date)
             sde = 315532800
           dt = datetime.fromtimestamp(sde, tz=timezone.utc)
           fixed = (dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second)
-          with zipfile.ZipFile(src, "r") as zin, zipfile.ZipFile(
-              dst, "w", compression=zipfile.ZIP_STORED
-          ) as zout:
-              for name in sorted(zin.namelist()):
+
+          def exec_mode(data: bytes, orig_mode: int) -> int:
+              mode = 0o644
+              if (orig_mode & 0o111) or data.startswith(b"#!"):
+                  mode = 0o755
+              return mode
+
+          # Read all entries
+          with zipfile.ZipFile(src, "r") as zin:
+              entries = {}
+              record_path = None
+              for info in zin.infolist():
+                  name = info.filename
+                  data = b"" if name.endswith("/") else zin.read(name)
+                  entries[name] = (data, info)
+                  if name.endswith(".dist-info/RECORD"):
+                      record_path = name
+              assert record_path, "wheel missing .dist-info/RECORD"
+
+          # Build deterministic RECORD with LF + sorted rows; empty hash/size for RECORD row
+          rows = []
+          for name in sorted(n for n in entries.keys() if not n.endswith("/") and n != record_path):
+              data, _ = entries[name]
+              h = hashlib.sha256(data).digest()
+              b64 = base64.urlsafe_b64encode(h).decode("ascii").rstrip("=")
+              rows.append([name, f"sha256={b64}", str(len(data))])
+          rows.append([record_path, "", ""])
+          buf = io.StringIO()
+          csv.writer(buf, lineterminator="\n").writerows(rows)
+          record_bytes = buf.getvalue().encode("utf-8")
+
+          with zipfile.ZipFile(dst, "w", compression=zipfile.ZIP_STORED) as zout:
+              for name in sorted(entries.keys()):
                   if name.endswith("/"):
                       zi = zipfile.ZipInfo(filename=name, date_time=fixed)
                       zi.create_system = 3
@@ -339,19 +423,38 @@ jobs:
                       zi.compress_type = zipfile.ZIP_STORED
                       zout.writestr(zi, b"")
                       continue
-                  data = zin.read(name)
-                  info = zin.getinfo(name)
+                  data, info = entries[name]
+                  if name == record_path:
+                      data = record_bytes
                   zi = zipfile.ZipInfo(filename=name, date_time=fixed)
                   zi.create_system = 3
                   zi.compress_type = zipfile.ZIP_STORED
-                  mode = 0o644
-                  orig_mode = (info.external_attr >> 16) & 0o7777
-                  if (orig_mode & 0o111) or data.startswith(b"#!"):
-                      mode = 0o755
+                  mode = exec_mode(data, (info.external_attr >> 16) & 0o7777)
                   zi.external_attr = (mode & 0xFFFF) << 16
                   zout.writestr(zi, data)
+
           os.replace(dst, src)
-          print("Canonicalized wheel (stored):", src)
+          print("Canonicalized wheel with deterministic RECORD:", src)
+          PY
+
+      - name: Assert no CRLF inside wheel entries
+        shell: bash
+        run: |
+          python - <<'PY'
+          import zipfile, glob, sys
+          w = sorted(glob.glob('dist/*.whl'))[0]
+          bad = []
+          with zipfile.ZipFile(w) as z:
+              for n in z.namelist():
+                  if n.endswith('/'):
+                      continue
+                  if b'\r\n' in z.read(n):
+                      bad.append(n)
+          if bad:
+              print("CRLF found in wheel entries:")
+              for n in bad: print("  -", n)
+              sys.exit(1)
+          print("OK: no CRLF in wheel entries")
           PY
 
       - name: Smoke (posix)
@@ -634,7 +737,7 @@ jobs:
           python -m build
           # Canonicalize wheel to ZIP_STORED for cross-OS identical bytes
           python - <<'PY'
-          import os, zipfile, pathlib
+          import os, zipfile, pathlib, hashlib, base64, io, csv
           from datetime import datetime, timezone
           dist = pathlib.Path("dist")
           wheels = sorted(dist.glob("*.whl"))
@@ -642,14 +745,43 @@ jobs:
           src = wheels[0]
           dst = src.with_suffix(".whl.tmp")
           sde = int(os.environ.get("SOURCE_DATE_EPOCH", "0"))
-          if sde < 315532800:
+          if sde < 315532800:  # 1980-01-01 (ZIP min date)
             sde = 315532800
           dt = datetime.fromtimestamp(sde, tz=timezone.utc)
           fixed = (dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second)
-          with zipfile.ZipFile(src, "r") as zin, zipfile.ZipFile(
-              dst, "w", compression=zipfile.ZIP_STORED
-          ) as zout:
-              for name in sorted(zin.namelist()):
+
+          def exec_mode(data: bytes, orig_mode: int) -> int:
+              mode = 0o644
+              if (orig_mode & 0o111) or data.startswith(b"#!"):
+                  mode = 0o755
+              return mode
+
+          # Read all entries
+          with zipfile.ZipFile(src, "r") as zin:
+              entries = {}
+              record_path = None
+              for info in zin.infolist():
+                  name = info.filename
+                  data = b"" if name.endswith("/") else zin.read(name)
+                  entries[name] = (data, info)
+                  if name.endswith(".dist-info/RECORD"):
+                      record_path = name
+              assert record_path, "wheel missing .dist-info/RECORD"
+
+          # Build deterministic RECORD with LF + sorted rows; empty hash/size for RECORD row
+          rows = []
+          for name in sorted(n for n in entries.keys() if not n.endswith("/") and n != record_path):
+              data, _ = entries[name]
+              h = hashlib.sha256(data).digest()
+              b64 = base64.urlsafe_b64encode(h).decode("ascii").rstrip("=")
+              rows.append([name, f"sha256={b64}", str(len(data))])
+          rows.append([record_path, "", ""])
+          buf = io.StringIO()
+          csv.writer(buf, lineterminator="\n").writerows(rows)
+          record_bytes = buf.getvalue().encode("utf-8")
+
+          with zipfile.ZipFile(dst, "w", compression=zipfile.ZIP_STORED) as zout:
+              for name in sorted(entries.keys()):
                   if name.endswith("/"):
                       zi = zipfile.ZipInfo(filename=name, date_time=fixed)
                       zi.create_system = 3
@@ -657,19 +789,18 @@ jobs:
                       zi.compress_type = zipfile.ZIP_STORED
                       zout.writestr(zi, b"")
                       continue
-                  data = zin.read(name)
-                  info = zin.getinfo(name)
+                  data, info = entries[name]
+                  if name == record_path:
+                      data = record_bytes
                   zi = zipfile.ZipInfo(filename=name, date_time=fixed)
                   zi.create_system = 3
                   zi.compress_type = zipfile.ZIP_STORED
-                  mode = 0o644
-                  orig_mode = (info.external_attr >> 16) & 0o7777
-                  if (orig_mode & 0o111) or data.startswith(b"#!"):
-                      mode = 0o755
+                  mode = exec_mode(data, (info.external_attr >> 16) & 0o7777)
                   zi.external_attr = (mode & 0xFFFF) << 16
                   zout.writestr(zi, data)
+
           os.replace(dst, src)
-          print("Canonicalized wheel (stored):", src)
+          print("Canonicalized wheel with deterministic RECORD:", src)
           PY
           # Ensure parser supports Core Metadata 2.4+
           python -m pip install -U "pkginfo>=1.12.1.2" "readme_renderer>=44.0"
