@@ -67,8 +67,14 @@ jobs:
           python -m pip install --no-deps \
             twine==5.1.1 \
             importlib-metadata==8.4.0 \
+            zipp==3.19.2 \
             readme_renderer==43.0 \
-            pkginfo==1.10.0
+            docutils==0.20.1 \
+            pygments==2.18.0 \
+            bleach==6.1.0 \
+            pkginfo==1.10.0 \
+            requests==2.32.3 \
+            requests-toolbelt==1.0.0
           python -m twine check dist/*
 
       - name: Upload manpages artifact
@@ -407,8 +413,14 @@ jobs:
             pyproject-hooks==1.1.0 \
             packaging==24.1 \
             importlib-metadata==8.4.0 \
+            zipp==3.19.2 \
             readme_renderer==43.0 \
-            pkginfo==1.10.0
+            docutils==0.20.1 \
+            pygments==2.18.0 \
+            bleach==6.1.0 \
+            pkginfo==1.10.0 \
+            requests==2.32.3 \
+            requests-toolbelt==1.0.0
           python -m build
           python -m twine check dist/*
 
