@@ -70,6 +70,7 @@ jobs:
             python -m pip install -r requirements-dev.txt
           else
             python -m pip install pytest hypothesis
+          fi
 
       - name: Pre-check (version/help)
         shell: bash
