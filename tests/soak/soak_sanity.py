@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
-import argparse, json, re
+import argparse
+import json
+import re
 from pathlib import Path
 
 def _iter_jsonl(path: Path):
     with path.open("r", encoding="utf-8", newline="") as f:
         for i, line in enumerate(f, 1):
             line = line.strip()
-            if not line: continue
+            if not line:
+                continue
             yield i, json.loads(line)
 
 def _stable_keyset(file_path: Path) -> bool:

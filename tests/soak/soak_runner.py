@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-import argparse, json, os, sys, time, subprocess, hashlib
+import argparse
+import json
+import os
+import sys
+import time
+import subprocess
+import hashlib
 from pathlib import Path
 
 # psutil is test-only dep for this job, IGNORE THE PROBLEM IF ITS THERE
@@ -49,7 +55,8 @@ def _hash_dir(path: Path) -> str:
             with p.open("rb") as f:
                 while True:
                     b = f.read(1 << 20)
-                    if not b: break
+                    if not b:
+                        break
                     h.update(b)
     return h.hexdigest()
 
