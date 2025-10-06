@@ -1,4 +1,4 @@
-name: PR35 — CLI Smoke
+name: CLI Smoke (cross-OS)
 
 on:
   pull_request:
@@ -12,20 +12,32 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: cli-smoke-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
-  cli:
-    name: Run CLI smoke tests
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
+  cli-smoke:
+    name: CLI smoke (${{ matrix.os }} / py${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: [ "3.11" ]
+
+    concurrency:
+      group: cli-smoke-${{ github.ref }}-${{ matrix.os }}-${{ matrix.python-version }}
+      cancel-in-progress: false
+
     env:
-      LC_ALL: C
+      CI: "true"
+      TZ: "UTC"
       PYTHONUTF8: "1"
-      COLUMNS: "80"
       PYTHONHASHSEED: "0"
+      LC_ALL: "C.UTF-8"
+      SOURCE_DATE_EPOCH: "315532800"
+      CLEMATIS_NETWORK_BAN: "1"
+      PYTHONDONTWRITEBYTECODE: "1"
+      COLUMNS: "80"
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -33,23 +45,24 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python-version }}
 
       - name: Cache pip
         uses: actions/cache@v4
         with:
-          path: ~/.cache/pip
-          key: "${{ runner.os }}-pip-${{ hashFiles('**/pyproject.toml', '**/setup.cfg', '**/requirements*.txt') }}"
+          path: |
+            ~/.cache/pip
+          key: ${{ runner.os }}-py${{ matrix.python-version }}-pip-${{ hashFiles('**/pyproject.toml', '**/setup.cfg', '**/requirements*.txt') }}
           restore-keys: |
+            ${{ runner.os }}-py${{ matrix.python-version }}-pip-
             ${{ runner.os }}-pip-
 
-      - name: Install dependencies (editable if available)
+      - name: Install (editable if available)
         shell: bash
         run: |
           set -euxo pipefail
           python -m pip install -U pip
           if [ -f pyproject.toml ] || [ -f setup.cfg ] || [ -f setup.py ]; then
-            # Ensure test extras (shtab) are installed; dev extra may not exist, so try in order.
             python -m pip install -e ".[dev,test]" || \
             python -m pip install -e ".[test]" || \
             python -m pip install -e .
@@ -57,27 +70,32 @@ jobs:
             python -m pip install -r requirements-dev.txt
           else
             python -m pip install pytest hypothesis
-          fi
 
-      - name: Run CLI tests (offline)
-        env:
-          CLEMATIS_NETWORK_BAN: "1"
-          CI: "true"
+      - name: Pre-check (version/help)
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python -m clematis --version || true
+          python -m clematis --help || true
+
+      - name: Run CLI smokes
         shell: bash
         run: |
           set -euxo pipefail
           if [ -d tests/cli ]; then
-            pytest -q -m "not manual" tests/cli
+            pytest -q tests/cli
           else
-            echo "No CLI tests found (tests/cli) — skipping" && exit 0
+            echo "No CLI tests found (tests/cli) — skipping"
+            exit 0
           fi
 
       - name: Upload diagnostics on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: cli-smoke-diagnostics
+          name: cli-smoke-${{ matrix.os }}-py${{ matrix.python-version }}-diagnostics
           path: |
             ./.logs/**
             ./.artifacts/**
             tests/cli/**
+          if-no-files-found: ignore
