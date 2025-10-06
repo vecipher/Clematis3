@@ -110,16 +110,50 @@ jobs:
           set -euxo pipefail
           pytest -q -m "not manual" tests/test_config_perf_quality.py::test_cli_validator_smoke
 
+
       - name: Clean state for disabled-path run
         shell: bash
         run: |
           set -euxo pipefail
           rm -rf ./.data ./.logs ./clematis/.logs || true
 
+      - name: Pre-generate disabled-path logs (deterministic)
+        env:
+          CLEMATIS_NETWORK_BAN: "1"
+          CI: "true"
+          CLEMATIS_LOG_DIR: ${{ github.workspace }}/.logs
+          CLEMATIS_LOGS_DIR: ${{ github.workspace }}/.logs
+          CLEMATIS_T3__ALLOW_REFLECTION: "false"
+          CLEMATIS_SCHEDULER__ENABLED: "false"
+          CLEMATIS_PERF__PARALLEL__ENABLED: "false"
+          CLEMATIS_T2__QUALITY__ENABLED: "false"
+          CLEMATIS_T2__QUALITY__SHADOW: "false"
+          CLEMATIS_T2__HYBRID__ENABLED: "false"
+          CLEMATIS_GRAPH__ENABLED: "false"
+        shell: bash
+        run: |
+          set -euxo pipefail
+          # Emit the deterministic demo logs expected by the golden guard
+          python3 -m clematis.scripts.demo --steps 2 --text identity --fixed-now-ms 0
+          # Quick sanity so failures are obvious in logs
+          ls -lah "${CLEMATIS_LOG_DIR}" || true
+          for f in t1.jsonl t2.jsonl t4.jsonl turn.jsonl; do
+            [ -f "${CLEMATIS_LOG_DIR}/$f" ] && wc -l "${CLEMATIS_LOG_DIR}/$f" || echo "missing $f"
+          done
+
       - name: Run golden disabled identity guard
         env:
           CLEMATIS_NETWORK_BAN: "1"
           CI: "true"
+          CLEMATIS_LOG_DIR: ${{ github.workspace }}/.logs
+          CLEMATIS_LOGS_DIR: ${{ github.workspace }}/.logs
+          CLEMATIS_T3__ALLOW_REFLECTION: "false"
+          CLEMATIS_SCHEDULER__ENABLED: "false"
+          CLEMATIS_PERF__PARALLEL__ENABLED: "false"
+          CLEMATIS_T2__QUALITY__ENABLED: "false"
+          CLEMATIS_T2__QUALITY__SHADOW: "false"
+          CLEMATIS_T2__HYBRID__ENABLED: "false"
+          CLEMATIS_GRAPH__ENABLED: "false"
         shell: bash
         run: |
           set -euo pipefail
