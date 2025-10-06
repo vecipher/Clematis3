@@ -15,6 +15,13 @@ on:
       - 'docs/m9/**'
       - '.github/workflows/identity_parallel.yml'
 
+env:
+  TZ: UTC
+  PYTHONUTF8: "1"
+  PYTHONHASHSEED: "0"
+  LC_ALL: C.UTF-8
+  SOURCE_DATE_EPOCH: "315532800"
+
 jobs:
   identity-parallel:
     name: Identity (seq vs par) [${{ matrix.os }} | py${{ matrix.python-version }} | ${{ matrix.mode }}]
@@ -52,6 +59,7 @@ jobs:
           echo "PYTHONUTF8=1" >> $GITHUB_ENV
           echo "PYTHONIOENCODING=UTF-8" >> $GITHUB_ENV
           echo "TZ=UTC" >> $GITHUB_ENV
+          echo "LC_ALL=C.UTF-8" >> $GITHUB_ENV
           echo "PIP_DISABLE_PIP_VERSION_CHECK=1" >> $GITHUB_ENV
 
       - name: Disable Git autocrlf on Windows
