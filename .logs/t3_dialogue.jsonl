@@ -1,1 +1,1 @@
-{"turn": "demo-1", "agent": "AgentA", "tokens": 6, "truncated": false, "style_prefix_used": false, "snippet_count": 0, "ms": 0.044, "backend": "rulebased", "now": "2025-10-06T09:02:47.661848+00:00"}
+{"turn": "demo-1", "agent": "AgentA", "tokens": 6, "truncated": false, "style_prefix_used": false, "snippet_count": 0, "ms": 0.052, "backend": "rulebased", "now": "2025-10-06T10:05:14.691583+00:00"}

@@ -13,6 +13,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="clematis",
         description="Clematis umbrella CLI",
+        epilog="See Operator Guide: docs/operator-guide.md",
         allow_abbrev=False,
     )
     # Top-level version flag (kept for help determinism/tests)
