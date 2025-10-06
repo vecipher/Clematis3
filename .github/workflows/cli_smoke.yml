@@ -86,13 +86,25 @@ jobs:
             exit 0
           fi
 
-      - name: Upload diagnostics on failure
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: cli-smoke-${{ matrix.os }}-py${{ matrix.python-version }}-diagnostics
-          path: |
-            ./.logs/**
-            ./.artifacts/**
-            tests/cli/**
-          if-no-files-found: ignore
+
+
+  ################################################################################
+  # Aggregator job to satisfy branch protection with a stable check name
+  ################################################################################
+
+  required-check:
+    name: Run CLI smoke tests
+    runs-on: ubuntu-latest
+    needs: [cli-smoke]
+    # Always execute so it posts a status; fail if matrix failed
+    if: ${{ always() }}
+    steps:
+      - name: Evaluate matrix result
+        run: |
+          set -euxo pipefail
+          echo "cli-smoke aggregate result: ${{ needs.cli-smoke.result }}"
+          if [ "${{ needs.cli-smoke.result }}" != "success" ]; then
+            echo "One or more matrix runs failed." >&2
+            exit 1
+          fi
+          echo "All matrix runs succeeded."
