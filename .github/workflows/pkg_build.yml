@@ -83,9 +83,23 @@ jobs:
                       f = tin.extractfile(m)
                       data = f.read() if f else b""
                   entries.append((m, data))
+          def _lf(b: bytes) -> bytes:
+              if b"\r" in b:
+                  b = b.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+              return b
+          def _normalize_bytes(name: str, data: bytes) -> bytes:
+              base = name.rsplit("/", 1)[-1]
+              text_names = {"PKG-INFO","SOURCES.txt","requires.txt","dependency_links.txt","top_level.txt","not-zip-safe"}
+              text_exts = (".txt",".rst",".md",".cfg",".toml",".ini",".json",".yml",".yaml",".py",".sh",".1",".5",".7",".8")
+              if base in text_names or name.endswith(text_exts):
+                  data = _lf(data)
+                  if base == "SOURCES.txt":
+                      data = data.replace(b"\\", b"/")
+              return data
           out_tar = io.BytesIO()
           with tarfile.open(fileobj=out_tar, mode="w", format=tarfile.PAX_FORMAT) as tout:
               for m, data in sorted(entries, key=lambda x: x[0].name):
+                  data = _normalize_bytes(m.name, data)
                   ti = tarfile.TarInfo(m.name)
                   ti.type = m.type
                   if m.isdir():
@@ -289,9 +303,23 @@ jobs:
                       f = tin.extractfile(m)
                       data = f.read() if f else b""
                   entries.append((m, data))
+          def _lf(b: bytes) -> bytes:
+              if b"\r" in b:
+                  b = b.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+              return b
+          def _normalize_bytes(name: str, data: bytes) -> bytes:
+              base = name.rsplit("/", 1)[-1]
+              text_names = {"PKG-INFO","SOURCES.txt","requires.txt","dependency_links.txt","top_level.txt","not-zip-safe"}
+              text_exts = (".txt",".rst",".md",".cfg",".toml",".ini",".json",".yml",".yaml",".py",".sh",".1",".5",".7",".8")
+              if base in text_names or name.endswith(text_exts):
+                  data = _lf(data)
+                  if base == "SOURCES.txt":
+                      data = data.replace(b"\\", b"/")
+              return data
           out_tar = io.BytesIO()
           with tarfile.open(fileobj=out_tar, mode="w", format=tarfile.PAX_FORMAT) as tout:
               for m, data in sorted(entries, key=lambda x: x[0].name):
+                  data = _normalize_bytes(m.name, data)
                   ti = tarfile.TarInfo(m.name)
                   ti.type = m.type
                   if m.isdir():
@@ -513,9 +541,23 @@ jobs:
                       f = tin.extractfile(m)
                       data = f.read() if f else b""
                   entries.append((m, data))
+          def _lf(b: bytes) -> bytes:
+              if b"\r" in b:
+                  b = b.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+              return b
+          def _normalize_bytes(name: str, data: bytes) -> bytes:
+              base = name.rsplit("/", 1)[-1]
+              text_names = {"PKG-INFO","SOURCES.txt","requires.txt","dependency_links.txt","top_level.txt","not-zip-safe"}
+              text_exts = (".txt",".rst",".md",".cfg",".toml",".ini",".json",".yml",".yaml",".py",".sh",".1",".5",".7",".8")
+              if base in text_names or name.endswith(text_exts):
+                  data = _lf(data)
+                  if base == "SOURCES.txt":
+                      data = data.replace(b"\\", b"/")
+              return data
           out_tar = io.BytesIO()
           with tarfile.open(fileobj=out_tar, mode="w", format=tarfile.PAX_FORMAT) as tout:
               for m, data in sorted(entries, key=lambda x: x[0].name):
+                  data = _normalize_bytes(m.name, data)
                   ti = tarfile.TarInfo(m.name)
                   ti.type = m.type
                   if m.isdir():
@@ -941,9 +983,23 @@ jobs:
                       f = tin.extractfile(m)
                       data = f.read() if f else b""
                   entries.append((m, data))
+          def _lf(b: bytes) -> bytes:
+              if b"\r" in b:
+                  b = b.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+              return b
+          def _normalize_bytes(name: str, data: bytes) -> bytes:
+              base = name.rsplit("/", 1)[-1]
+              text_names = {"PKG-INFO","SOURCES.txt","requires.txt","dependency_links.txt","top_level.txt","not-zip-safe"}
+              text_exts = (".txt",".rst",".md",".cfg",".toml",".ini",".json",".yml",".yaml",".py",".sh",".1",".5",".7",".8")
+              if base in text_names or name.endswith(text_exts):
+                  data = _lf(data)
+                  if base == "SOURCES.txt":
+                      data = data.replace(b"\\", b"/")
+              return data
           out_tar = io.BytesIO()
           with tarfile.open(fileobj=out_tar, mode="w", format=tarfile.PAX_FORMAT) as tout:
               for m, data in sorted(entries, key=lambda x: x[0].name):
+                  data = _normalize_bytes(m.name, data)
                   ti = tarfile.TarInfo(m.name)
                   ti.type = m.type
                   if m.isdir():
