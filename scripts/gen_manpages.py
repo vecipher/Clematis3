@@ -87,6 +87,29 @@ def _ensure_lf(text: str) -> str:
     return text.replace("\r\n", "\n").replace("\r", "\n")
 
 
+# Scrub OS-specific absolute paths/env tokens so manpages are identical on Windows/POSIX
+_PATH_PATTERNS = [
+    re.compile(r"[A-Za-z]:\\[^ \t\r\n]+"),   # Windows drive path like C:\Users\foo
+    re.compile(r"\\\\[^ \t\r\n]+"),        # UNC \\server\share\path
+    re.compile(r"/(?:[^ \t\r\n]+/?)+"),       # Absolute POSIX path /a/b/c
+]
+_ENV_PATTERNS = [
+    re.compile(r"%(?:APPDATA|LOCALAPPDATA|USERPROFILE)%", re.IGNORECASE),
+    re.compile(r"\$(?:HOME|USERPROFILE)\b"),
+    re.compile(r"~[^ \t\r\n]*"),
+]
+
+def _scrub_platform_specifics(text: str) -> str:
+    """Replace obviously platform-specific absolute paths and env tokens with placeholders.
+    This keeps manpages OS-agnostic for reproducible builds.
+    """
+    for pat in _PATH_PATTERNS:
+        text = pat.sub("<PATH>", text)
+    for pat in _ENV_PATTERNS:
+        text = pat.sub("<HOME>", text)
+    return text
+
+
 _USAGE_RE = re.compile(r"^(usage:\s*)(.*)$", re.IGNORECASE)
 
 def _stable_prog(cmd_name: str, module: str) -> str:
@@ -138,6 +161,7 @@ def _emit_page(
     help_text = _ensure_lf(help_text)
     # Normalize any 'usage:' lines to a deterministic program string
     help_text = _normalize_usage(help_text, module, cmd_name)
+    help_text = _scrub_platform_specifics(help_text)
 
     # SYNOPSIS: take the first normalized 'usage:' line; else a generic fallback
     synopsis = next(
