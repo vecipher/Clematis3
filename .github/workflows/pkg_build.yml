@@ -61,10 +61,10 @@ jobs:
           python -m build
           ls -l dist
 
-      - name: Canonicalize wheel (zip) #1
+      - name: Canonicalize wheel (zip, stored) #1
         run: |
           python - <<'PY'
-          import os, sys, zipfile, pathlib
+          import os, zipfile, pathlib
           from datetime import datetime, timezone
           dist = pathlib.Path("dist")
           wheels = sorted(dist.glob("*.whl"))
@@ -72,27 +72,27 @@ jobs:
           src = wheels[0]
           dst = src.with_suffix(".whl.tmp")
           sde = int(os.environ.get("SOURCE_DATE_EPOCH", "0"))
-          # ZIP can't represent pre-1980; but our SDE is set from git/tag anyway.
+          # Guard ZIP minimum date (1980-01-01)
           if sde < 315532800:
             sde = 315532800
           dt = datetime.fromtimestamp(sde, tz=timezone.utc)
           fixed = (dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second)
           with zipfile.ZipFile(src, "r") as zin, zipfile.ZipFile(
-              dst, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9
+              dst, "w", compression=zipfile.ZIP_STORED
           ) as zout:
               for name in sorted(zin.namelist()):
                   if name.endswith("/"):
                       zi = zipfile.ZipInfo(filename=name, date_time=fixed)
-                      zi.create_system = 3  # pretend Unix
+                      zi.create_system = 3
                       zi.external_attr = (0o755 & 0xFFFF) << 16
+                      zi.compress_type = zipfile.ZIP_STORED
                       zout.writestr(zi, b"")
                       continue
                   data = zin.read(name)
                   info = zin.getinfo(name)
                   zi = zipfile.ZipInfo(filename=name, date_time=fixed)
-                  zi.compress_type = zipfile.ZIP_DEFLATED
-                  zi.create_system = 3  # force Unix for stable external_attr semantics
-                  # Preserve exec bit if present or if shebang detected; else 0644
+                  zi.create_system = 3
+                  zi.compress_type = zipfile.ZIP_STORED
                   mode = 0o644
                   orig_mode = (info.external_attr >> 16) & 0o7777
                   if (orig_mode & 0o111) or data.startswith(b"#!"):
@@ -100,7 +100,7 @@ jobs:
                   zi.external_attr = (mode & 0xFFFF) << 16
                   zout.writestr(zi, data)
           os.replace(dst, src)
-          print("Canonicalized wheel:", src)
+          print("Canonicalized wheel (stored):", src)
           PY
 
       - name: Twine check
@@ -155,10 +155,10 @@ jobs:
           python -m build
           ls -l dist
 
-      - name: Canonicalize wheel (zip) #2
+      - name: Canonicalize wheel (zip, stored) #2
         run: |
           python - <<'PY'
-          import os, sys, zipfile, pathlib
+          import os, zipfile, pathlib
           from datetime import datetime, timezone
           dist = pathlib.Path("dist")
           wheels = sorted(dist.glob("*.whl"))
@@ -171,20 +171,21 @@ jobs:
           dt = datetime.fromtimestamp(sde, tz=timezone.utc)
           fixed = (dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second)
           with zipfile.ZipFile(src, "r") as zin, zipfile.ZipFile(
-              dst, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9
+              dst, "w", compression=zipfile.ZIP_STORED
           ) as zout:
               for name in sorted(zin.namelist()):
                   if name.endswith("/"):
                       zi = zipfile.ZipInfo(filename=name, date_time=fixed)
                       zi.create_system = 3
                       zi.external_attr = (0o755 & 0xFFFF) << 16
+                      zi.compress_type = zipfile.ZIP_STORED
                       zout.writestr(zi, b"")
                       continue
                   data = zin.read(name)
                   info = zin.getinfo(name)
                   zi = zipfile.ZipInfo(filename=name, date_time=fixed)
-                  zi.compress_type = zipfile.ZIP_DEFLATED
                   zi.create_system = 3
+                  zi.compress_type = zipfile.ZIP_STORED
                   mode = 0o644
                   orig_mode = (info.external_attr >> 16) & 0o7777
                   if (orig_mode & 0o111) or data.startswith(b"#!"):
@@ -192,7 +193,7 @@ jobs:
                   zi.external_attr = (mode & 0xFFFF) << 16
                   zout.writestr(zi, data)
           os.replace(dst, src)
-          print("Canonicalized wheel:", src)
+          print("Canonicalized wheel (stored):", src)
           PY
 
       - name: Canonicalize & hash #2 and compare
@@ -288,11 +289,11 @@ jobs:
       - name: Build sdist + wheel (axis-local)
         run: python -m build --sdist --wheel
 
-      - name: Canonicalize wheel (axis-local)
+      - name: Canonicalize wheel (axis-local, stored)
         shell: bash
         run: |
           python - <<'PY'
-          import os, sys, zipfile, pathlib
+          import os, zipfile, pathlib
           from datetime import datetime, timezone
           dist = pathlib.Path("dist")
           wheels = sorted(dist.glob("*.whl"))
@@ -305,20 +306,21 @@ jobs:
           dt = datetime.fromtimestamp(sde, tz=timezone.utc)
           fixed = (dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second)
           with zipfile.ZipFile(src, "r") as zin, zipfile.ZipFile(
-              dst, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9
+              dst, "w", compression=zipfile.ZIP_STORED
           ) as zout:
               for name in sorted(zin.namelist()):
                   if name.endswith("/"):
                       zi = zipfile.ZipInfo(filename=name, date_time=fixed)
                       zi.create_system = 3
                       zi.external_attr = (0o755 & 0xFFFF) << 16
+                      zi.compress_type = zipfile.ZIP_STORED
                       zout.writestr(zi, b"")
                       continue
                   data = zin.read(name)
                   info = zin.getinfo(name)
                   zi = zipfile.ZipInfo(filename=name, date_time=fixed)
-                  zi.compress_type = zipfile.ZIP_DEFLATED
                   zi.create_system = 3
+                  zi.compress_type = zipfile.ZIP_STORED
                   mode = 0o644
                   orig_mode = (info.external_attr >> 16) & 0o7777
                   if (orig_mode & 0o111) or data.startswith(b"#!"):
@@ -326,7 +328,7 @@ jobs:
                   zi.external_attr = (mode & 0xFFFF) << 16
                   zout.writestr(zi, data)
           os.replace(dst, src)
-          print("Canonicalized wheel:", src)
+          print("Canonicalized wheel (stored):", src)
           PY
 
       - name: Smoke (posix)
@@ -529,9 +531,9 @@ jobs:
           # Install Twine with dependencies (no --no-deps) for README/metadata checks
           python -m pip install twine==5.1.1
           python -m build
-          # Canonicalize wheel for cross-OS reproducibility
+          # Canonicalize wheel to ZIP_STORED for cross-OS identical bytes
           python - <<'PY'
-          import os, sys, zipfile, pathlib
+          import os, zipfile, pathlib
           from datetime import datetime, timezone
           dist = pathlib.Path("dist")
           wheels = sorted(dist.glob("*.whl"))
@@ -544,20 +546,21 @@ jobs:
           dt = datetime.fromtimestamp(sde, tz=timezone.utc)
           fixed = (dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second)
           with zipfile.ZipFile(src, "r") as zin, zipfile.ZipFile(
-              dst, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9
+              dst, "w", compression=zipfile.ZIP_STORED
           ) as zout:
               for name in sorted(zin.namelist()):
                   if name.endswith("/"):
                       zi = zipfile.ZipInfo(filename=name, date_time=fixed)
                       zi.create_system = 3
                       zi.external_attr = (0o755 & 0xFFFF) << 16
+                      zi.compress_type = zipfile.ZIP_STORED
                       zout.writestr(zi, b"")
                       continue
                   data = zin.read(name)
                   info = zin.getinfo(name)
                   zi = zipfile.ZipInfo(filename=name, date_time=fixed)
-                  zi.compress_type = zipfile.ZIP_DEFLATED
                   zi.create_system = 3
+                  zi.compress_type = zipfile.ZIP_STORED
                   mode = 0o644
                   orig_mode = (info.external_attr >> 16) & 0o7777
                   if (orig_mode & 0o111) or data.startswith(b"#!"):
@@ -565,9 +568,10 @@ jobs:
                   zi.external_attr = (mode & 0xFFFF) << 16
                   zout.writestr(zi, data)
           os.replace(dst, src)
-          print("Canonicalized wheel:", src)
+          print("Canonicalized wheel (stored):", src)
           PY
-          python -m twine check dist/*
+          # Check sdist with Twine; wheel validated separately below
+          python -m twine check dist/*.tar.gz
 
       - name: Upload artifacts to Release (sdist + wheel)
         if: ${{ github.event_name == 'release' }}
