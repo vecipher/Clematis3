@@ -39,6 +39,8 @@ Clematis is a deterministic, turn‑based scaffold for agential AI. It models ag
 - **Typed errors:** operator‑facing failures use `clematis.errors.*`. See [docs/m13/error_taxonomy.md](docs/m13/error_taxonomy.md).
 
 ## Quick start
+
+> 📘 **Operator Guide (single page):** see `docs/operator-guide.md`
 ```bash
 # install (editable)
 python -m pip install -e .
