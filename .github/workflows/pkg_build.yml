@@ -467,6 +467,84 @@ jobs:
       - name: Show downloaded
         run: |
           find _artifacts -type f -maxdepth 3 -print | sort
+
+      - name: Diagnose per-file differences (Windows vs POSIX wheels)
+        run: |
+          python - <<'PY'
+          import zipfile, pathlib, collections, hashlib, sys
+          root = pathlib.Path("_artifacts")
+          files = [p for p in root.rglob("*.whl") if p.is_file()]
+          groups = collections.defaultdict(list)
+          for p in files:
+              groups[p.name].append(p)
+
+          def classify(p: pathlib.Path) -> str:
+              s = str(p).lower()
+              if "windows-latest" in s: return "windows"
+              if "ubuntu-latest" in s: return "linux"
+              if "macos-latest" in s: return "macos"
+              return "other"
+
+          any_diff = False
+
+          for name, paths in sorted(groups.items()):
+              win = next((p for p in paths if classify(p) == "windows"), None)
+              posix = next((p for p in paths if classify(p) in {"linux", "macos"}), None)
+              if not (win and posix):
+                  continue
+
+              print(f"\n[inspect] {name}")
+              print("  windows:", win)
+              print("  posix  :", posix)
+
+              with zipfile.ZipFile(win) as zw, zipfile.ZipFile(posix) as zp:
+                  nw, np = set(zw.namelist()), set(zp.namelist())
+                  if nw != np:
+                      only_w = sorted(nw - np)
+                      only_p = sorted(np - nw)
+                      if only_w:
+                          print("  entries only in windows:", len(only_w))
+                          for e in only_w[:20]: print("    +", e)
+                      if only_p:
+                          print("  entries only in posix:", len(only_p))
+                          for e in only_p[:20]: print("    +", e)
+                      any_diff = True
+
+                  common = sorted(nw & np)
+                  def entry_info(zf, name):
+                      info = zf.getinfo(name)
+                      mode = (info.external_attr >> 16) & 0o7777
+                      data = b""
+                      if not name.endswith("/"):
+                          data = zf.read(name)
+                      return mode, data
+
+                  diffs = []
+                  for nm in common:
+                      if nm.endswith("/"):
+                          continue
+                      mw, dw = entry_info(zw, nm)
+                      mp, dp = entry_info(zp, nm)
+                      if hashlib.sha256(dw).digest() != hashlib.sha256(dp).digest():
+                          def crlf(b):
+                              return b"\r\n" in b and b"\n" in b
+                          diffs.append((nm, len(dw), len(dp), mw, mp,
+                                        crlf(dw), crlf(dp)))
+
+                  if diffs:
+                      any_diff = True
+                      print(f"  per-file differing entries: {len(diffs)} (showing up to 50)")
+                      for nm, lw, lp, mw, mp, cw, cp in diffs[:50]:
+                          tag = ""
+                          if ".dist-info/RECORD" in nm: tag = " [RECORD]"
+                          elif ".dist-info/METADATA" in nm: tag = " [METADATA]"
+                          elif ".dist-info/WHEEL" in nm: tag = " [WHEEL]"
+                          elif "man/" in nm or "/man/" in nm or "/share/man/" in nm: tag = " [manpage]"
+                          print(f"    - {nm}{tag}")
+                          print(f"        sizes: win={lw} posix={lp}  modes: win={oct(mw)} posix={oct(mp)}  CRLF? win={cw} posix={cp}")
+          if not any_diff:
+              print("No per-file differences detected between Windows and POSIX wheels (contents match).")
+          PY
       - name: Compare SHA256 across OS for identical wheel filenames
         run: |
           set -euo pipefail
