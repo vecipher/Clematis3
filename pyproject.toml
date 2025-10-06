@@ -5,7 +5,7 @@ description = "Clematis — deterministic mind-like simulation engine (M1–M8 b
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
 
-license = "MIT"
+license = "{file = "LICENSE" }
 license-files = ["LICENSE"]
 authors = [{ name = "vecipher" }]
 
@@ -16,6 +16,7 @@ dependencies = [
 ]
 
 classifiers = [
+  "License :: OSI Approved :: Apache Software License"
   "Programming Language :: Python :: 3 :: Only",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
