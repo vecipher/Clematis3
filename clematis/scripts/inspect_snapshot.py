@@ -3,11 +3,11 @@
 Inspect the latest snapshot.
 
 Usage:
-  python3 scripts/inspect_snapshot.py [--dir DIR] [--format pretty|json] [--no-strict]
+  python3 scripts/inspect_snapshot.py [--dir DIR] [--format pretty|json] [--strict]
 
 Exit codes:
-  0 => snapshot found and valid (or --no-strict used and printed with warning)
-  2 => no snapshot found / unreadable / schema invalid (strict)
+  0 => snapshot found (default warns on schema issues)
+  2 => no snapshot found / unreadable / schema invalid (when --strict)
 """
 
 import argparse
@@ -30,7 +30,7 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="Inspect the latest snapshot")
     ap.add_argument("--dir", default="./.data/snapshots", help="Snapshot directory")
     ap.add_argument("--format", choices=["pretty", "json"], default="pretty")
-    ap.add_argument("--no-strict", action="store_true", help="Print even if schema is missing/mismatched (warn instead of exit 2)")
+    ap.add_argument("--strict", action="store_true", help="Fail (exit 2) if schema_version is missing or mismatched")
     args = ap.parse_args(argv)
 
     info = get_latest_snapshot_info(args.dir)
@@ -42,16 +42,33 @@ def main(argv=None) -> int:
     try:
         with open(info["path"], "r", encoding="utf-8") as fh:
             payload = json.load(fh)
-
-            # Strict schema validation unless --no-strict
+            # If payload lacks schema_version, fall back to sidecar (path + ".meta")
+            if not isinstance(payload, dict):
+                payload = {}
+            if not payload.get("schema_version"):
+                meta_path = info["path"] + ".meta"
+                try:
+                    with open(meta_path, "r", encoding="utf-8") as mfh:
+                        meta = json.load(mfh)
+                    sv = meta.get("schema_version")
+                    if isinstance(sv, str) and sv:
+                        payload = dict(payload)
+                        payload["schema_version"] = sv
+                        # reflect into info so printed JSON includes it
+                        if not info.get("schema_version"):
+                            info["schema_version"] = sv
+                except Exception:
+                    pass
+            # Schema validation: warn by default; only fail with --strict
             try:
                 validate_snapshot_schema(payload, expected=SCHEMA_VERSION)
             except Exception as e:
-                if args.no_strict:
-                    print(f"[warn] {e}", file=sys.stdout, flush=True)
-                else:
-                    print(f"[error] {e}", file=sys.stdout, flush=True)
+                if args.strict:
+                    print(f"[error] {e}", file=sys.stderr, flush=True)
                     return 2
+                else:
+                    print(f"[warn] {e}", file=sys.stderr, flush=True)
+                    # non-strict: continue and print snapshot info
             # Ensure schema_version is reflected in info for printing
             sv = payload.get("schema_version")
             if sv is not None and not info.get("schema_version"):

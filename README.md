@@ -27,6 +27,7 @@ Clematis is a deterministic, turn‑based scaffold for agential AI. It models ag
   **GEL (M11):** optional field‑control substrate (co‑activation update + half‑life decay; merge/split/promotion available), **default OFF**. See **[docs/m11/overview.md](docs/m11/overview.md)**.
 - **Determinism:** golden logs, identity path when gates are OFF; shadow/quality traces never affect results.
 - **Config freeze:** v3 config schema is frozen at `version: "v1"`. Unknown top‑level keys are rejected. See [docs/m13/config_freeze.md](docs/m13/config_freeze.md).
+- **Snapshot freeze:** v3 snapshots carry a schema lock via a sidecar `<snapshot>.meta` with `schema_version: "v1"`; the inspector validates the schema (default warns to stderr; `--strict` fails). See [docs/m13/snapshot_freeze.md](docs/m13/snapshot_freeze.md).
 
 ## Quick start
 ```bash
@@ -286,5 +287,3 @@ LLM adapter + fixtures: **`docs/m3/llm_adapter.md`**.
 
 ---
 _Read the milestone docs under `docs/` for deeper details. This README stays lean and stable._
-
-(placeholder to make sure i pushed correctly and didnt fuck shit up)
