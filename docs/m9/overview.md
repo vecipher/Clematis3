@@ -439,7 +439,7 @@ perf:
 ### CI
 - New workflow: **identity-parallel** (see `.github/workflows/identity_parallel.yml`).
   - Matrix: Python **3.11–3.13**; modes `{off,on}`.
-  - Deterministic env: `SOURCE_DATE_EPOCH=0`, `PYTHONHASHSEED=0`, (optionally) `CLEMATIS_NETWORK_BAN=1`.
+  - Deterministic env: `SOURCE_DATE_EPOCH=315532800`, `PYTHONHASHSEED=0`, (optionally) `CLEMATIS_NETWORK_BAN=1`.
   - Runs identity + race/back‑pressure tests.
 
 ### Invariants
@@ -447,7 +447,7 @@ perf:
 - **Enabled path:** with fixed inputs and flags, artifacts are **byte‑identical** regardless of internal scheduling or stager back‑pressure.
 
 ### Troubleshooting
-- **Snapshot bytes differ?** Ensure your environment fixes the time source (`SOURCE_DATE_EPOCH=0`) or that snapshot writers are time‑independent for the tests. If snapshots are gated off in your environment, the suite compares logs only.
+- **Snapshot bytes differ?** Ensure your environment fixes the time source (`SOURCE_DATE_EPOCH=315532800`) or that snapshot writers are time‑independent for the tests. If snapshots are gated off in your environment, the suite compares logs only.
 - **Ordering drift in logs?** Verify PR71’s staging is active (parallel gate conditions hold) and that `_append_jsonl_unbuffered(...)` uses the same JSON serialization as `append_jsonl(...)`.
 
 ## PR73 — M9-11: Parallel smoke in CI (opt-in perf)
