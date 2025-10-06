@@ -1,0 +1,31 @@
+# .github/workflows/soak_smoke.yml
+name: soak_smoke
+on:
+  pull_request:
+  push:
+    branches: [ main ]
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      TZ: UTC
+      PYTHONUTF8: "1"
+      PYTHONHASHSEED: "0"
+      LC_ALL: C.UTF-8
+      SOURCE_DATE_EPOCH: "0"
+      CLEMATIS_NETWORK_BAN: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: |
+          python -m pip install --upgrade pip
+          python -m pip install . psutil
+      - run: |
+          python -u tests/soak/soak_runner.py --steps 400 --snapshot-every 100 \
+            --log-dir ".soak/logs" --snap-dir ".soak/snaps" --metrics ".soak/soak-metrics.json"
+          python -u tests/soak/soak_sanity.py \
+            --log-dir ".soak/logs" --snap-dir ".soak/snaps" --metrics ".soak/soak-metrics.json" \
+            --rss-threshold-mb 800 --rss-spike-mb 64 --schema-out ".soak/schema_keys.json"

@@ -1,0 +1,93 @@
+name: soak
+
+on:
+  schedule:
+    # 02:00 SGT daily (18:00 UTC)
+    - cron: "0 18 * * *"
+  workflow_dispatch:
+    inputs:
+      steps:
+        description: "Total steps"
+        required: false
+        default: "10000"
+      snapshot_every:
+        description: "Steps per snapshot"
+        required: false
+        default: "1000"
+      rss_threshold_mb:
+        description: "Max RSS (MiB)"
+        required: false
+        default: "1600"
+      rss_step_spike_mb:
+        description: "Max RSS spike between checkpoints (MiB)"
+        required: false
+        default: "64"
+
+concurrency:
+  group: soak-nightly
+  cancel-in-progress: false
+
+jobs:
+  soak:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      TZ: UTC
+      PYTHONUTF8: "1"
+      PYTHONHASHSEED: "0"
+      LC_ALL: C.UTF-8
+      SOURCE_DATE_EPOCH: "0"
+      CLEMATIS_NETWORK_BAN: "1"
+      STEPS: ${{ github.event.inputs.steps || '10000' }}
+      SNAPSHOT_EVERY: ${{ github.event.inputs.snapshot_every || '1000' }}
+      RSS_THRESH_MB: ${{ github.event.inputs.rss_threshold_mb || '1600' }}
+      RSS_SPIKE_MB: ${{ github.event.inputs.rss_step_spike_mb || '64' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install package and test deps (psutil only)
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install . psutil
+
+      - name: Run soak (long)
+        run: |
+          python -u tests/soak/soak_runner.py \
+            --steps "${STEPS}" \
+            --snapshot-every "${SNAPSHOT_EVERY}" \
+            --log-dir ".soak/logs" \
+            --snap-dir ".soak/snaps" \
+            --metrics ".soak/soak-metrics.json"
+
+      - name: Sanity & invariants
+        run: |
+          python -u tests/soak/soak_sanity.py \
+            --log-dir ".soak/logs" \
+            --snap-dir ".soak/snaps" \
+            --metrics ".soak/soak-metrics.json" \
+            --rss-threshold-mb "${RSS_THRESH_MB}" \
+            --rss-spike-mb "${RSS_SPIKE_MB}" \
+            --schema-out ".soak/schema_keys.json"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: soak-${{ github.run_id }}
+          path: .soak/
+
+      - name: Job summary
+        if: always()
+        run: |
+          echo "### Soak Metrics" >> $GITHUB_STEP_SUMMARY
+          jq -r '
+            ["Steps: \(.steps)",
+             "Duration (s): \(.duration_s)",
+             "RSS peak (MiB): \(.rss_peak_mb)",
+             "CPU mean (%): \(.cpu_mean_pct)",
+             "Checkpoints: \(.checkpoints)"] | .[]
+          ' .soak/soak-metrics.json >> $GITHUB_STEP_SUMMARY
