@@ -23,6 +23,7 @@ from __future__ import annotations
 import argparse
 import datetime
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -86,17 +87,62 @@ def _ensure_lf(text: str) -> str:
     return text.replace("\r\n", "\n").replace("\r", "\n")
 
 
+_USAGE_RE = re.compile(r"^(usage:\s*)(.*)$", re.IGNORECASE)
+
+def _stable_prog(cmd_name: str, module: str) -> str:
+    """Return a normalized program string for man SYNOPSIS/usage.
+    - root: 'clematis'
+    - subcommand: 'clematis foo bar' for cmd_name 'clematis-foo-bar'
+    """
+    if cmd_name == module:
+        return module
+    if cmd_name.startswith(module + "-"):
+        tail = cmd_name[len(module) + 1:].replace("-", " ")
+        return f"{module} {tail}"
+    # Fallback: replace dashes with spaces
+    return cmd_name.replace("-", " ")
+
+def _normalize_usage(help_text: str, module: str, cmd_name: str) -> str:
+    """Rewrite any 'usage:' lines to start with a stable program string.
+    This strips interpreter/path-specific prefixes like 'python -m clematis'.
+    """
+    prog = _stable_prog(cmd_name, module)
+    out_lines: List[str] = []
+    for ln in help_text.splitlines():
+        m = _USAGE_RE.match(ln.strip())
+        if not m:
+            out_lines.append(ln)
+            continue
+        rest = m.group(2)
+        # Tokenize and find the position of the module token if present.
+        parts = rest.split()
+        if parts:
+            idx = 0
+            for i, tok in enumerate(parts):
+                # Prefer the first token that mentions the module name.
+                if module.lower() in tok.lower():
+                    idx = i
+                    break
+            tail = " " + " ".join(parts[idx + 1:]) if len(parts) > idx + 1 else ""
+        else:
+            tail = ""
+        out_lines.append(m.group(1) + prog + tail)
+    return "\n".join(out_lines)
+
+
 def _emit_page(
     cmd_name: str, title: str, help_text: str, out_path: Path, section: str, module: str
 ) -> None:
     ver = _version(module)
     date = _date_str()
     help_text = _ensure_lf(help_text)
+    # Normalize any 'usage:' lines to a deterministic program string
+    help_text = _normalize_usage(help_text, module, cmd_name)
 
-    # SYNOPSIS: prefer the first line containing 'usage:'; fall back to a generic synopsis
+    # SYNOPSIS: take the first normalized 'usage:' line; else a generic fallback
     synopsis = next(
-        (ln.strip() for ln in help_text.splitlines() if ln.strip().startswith("usage:")),
-        f"{cmd_name} [options]",
+        (ln.strip() for ln in help_text.splitlines() if ln.strip().lower().startswith("usage:")),
+        f"usage: {_stable_prog(cmd_name, module)} [options]",
     )
 
     name_line = f"{cmd_name} \\- {title}"  # hyphen escaped for roff NAME section
