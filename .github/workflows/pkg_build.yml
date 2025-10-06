@@ -26,19 +26,29 @@ jobs:
       PYTHONHASHSEED: "0"
       TZ: "UTC"
       LC_ALL: "C.UTF-8"
+      PYTHONIOENCODING: "UTF-8"
+      PYTHONUTF8: "1"
       PIP_DISABLE_PIP_VERSION_CHECK: "1"
       CLEMATIS_NETWORK_BAN: "1"
     steps:
       - uses: actions/checkout@v4
+      - name: Ensure repro script is executable
+        run: chmod +x scripts/repro_check_local.sh
 
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: 'pip'
 
-      - name: Install build tooling
+      - name: Install build tooling (pinned)
         run: |
-          python -m pip install --upgrade pip build
+          python -m pip install -U pip
+          python -m pip install --no-deps \
+            build==1.2.1 \
+            wheel==0.45.1 \
+            setuptools==80.9.0 \
+            pyproject-hooks==1.1.0 \
+            packaging==24.1
 
       - name: Generate manpages (deterministic)
         run: |
@@ -51,10 +61,181 @@ jobs:
           python -m build
           ls -l dist
 
+      - name: Canonicalize sdist (deterministic tar+gz) #1
+        shell: bash
+        run: |
+          python - <<'PY'
+          import os, tarfile, gzip, io, pathlib
+          dist = pathlib.Path("dist")
+          sdists = sorted(dist.glob("*.tar.gz"))
+          assert sdists, "no sdist found in dist/"
+          src = sdists[0]
+          sde = int(os.environ.get("SOURCE_DATE_EPOCH","0"))
+          if sde < 0: sde = 0
+          raw = src.read_bytes()
+          with gzip.GzipFile(fileobj=io.BytesIO(raw), mode="rb") as gz:
+              tar_bytes = gz.read()
+          entries = []
+          with tarfile.open(fileobj=io.BytesIO(tar_bytes), mode="r:*") as tin:
+              for m in tin.getmembers():
+                  data = b""
+                  if m.isfile():
+                      f = tin.extractfile(m)
+                      data = f.read() if f else b""
+                  entries.append((m, data))
+          def _lf(b: bytes) -> bytes:
+              if b"\r" in b:
+                  b = b.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+              return b
+          def _normalize_bytes(name: str, data: bytes) -> bytes:
+              base = name.rsplit("/", 1)[-1]
+              text_names = {"PKG-INFO","SOURCES.txt","requires.txt","dependency_links.txt","top_level.txt","not-zip-safe"}
+              text_exts = (".txt",".rst",".md",".cfg",".toml",".ini",".json",".yml",".yaml",".py",".sh",".1",".5",".7",".8")
+              if base in text_names or name.endswith(text_exts):
+                  data = _lf(data)
+                  if base == "SOURCES.txt":
+                      data = data.replace(b"\\", b"/")
+              return data
+          out_tar = io.BytesIO()
+          with tarfile.open(fileobj=out_tar, mode="w", format=tarfile.PAX_FORMAT) as tout:
+              for m, data in sorted(entries, key=lambda x: x[0].name):
+                  data = _normalize_bytes(m.name, data)
+                  ti = tarfile.TarInfo(m.name)
+                  ti.type = m.type
+                  if m.isdir():
+                      ti.mode = 0o755
+                  elif m.isfile():
+                      execy = (m.mode & 0o111) != 0 or data.startswith(b"#!")
+                      ti.mode = 0o755 if execy else 0o644
+                  else:
+                      ti.mode = 0o644
+                  ti.uid = 0; ti.gid = 0; ti.uname = ""; ti.gname = ""
+                  ti.mtime = sde if sde else 0
+                  if m.issym():
+                      ti.type = tarfile.SYMTYPE; ti.linkname = m.linkname; ti.size = 0; data = b""
+                  elif m.islnk():
+                      ti.type = tarfile.LNKTYPE; ti.linkname = m.linkname; ti.size = 0; data = b""
+                  elif m.isfile():
+                      ti.size = len(data)
+                  else:
+                      ti.size = 0
+                  ti.pax_headers = {}
+                  tout.addfile(ti, io.BytesIO(data) if ti.size else None)
+          gz_buf = io.BytesIO()
+          with gzip.GzipFile(fileobj=gz_buf, mode="wb", mtime=0) as gz:
+              gz.write(out_tar.getvalue())
+          src.write_bytes(gz_buf.getvalue())
+          print("Canonicalized sdist:", src)
+          PY
+
+      - name: Canonicalize wheel (zip, stored) #1
+        run: |
+          python - <<'PY'
+          import os, zipfile, pathlib, hashlib, base64, io, csv
+          from datetime import datetime, timezone
+          dist = pathlib.Path("dist")
+          wheels = sorted(dist.glob("*.whl"))
+          assert wheels, "no wheel found in dist/"
+          src = wheels[0]
+          dst = src.with_suffix(".whl.tmp")
+          sde = int(os.environ.get("SOURCE_DATE_EPOCH", "0"))
+          if sde < 315532800:  # 1980-01-01 (ZIP min date)
+            sde = 315532800
+          dt = datetime.fromtimestamp(sde, tz=timezone.utc)
+          fixed = (dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second)
+
+          def exec_mode(data: bytes, orig_mode: int) -> int:
+              mode = 0o644
+              if (orig_mode & 0o111) or data.startswith(b"#!"):
+                  mode = 0o755
+              return mode
+
+          # Read all entries
+          with zipfile.ZipFile(src, "r") as zin:
+              entries = {}
+              record_path = None
+              for info in zin.infolist():
+                  name = info.filename
+                  data = b"" if name.endswith("/") else zin.read(name)
+                  entries[name] = (data, info)
+                  if name.endswith(".dist-info/RECORD"):
+                      record_path = name
+              assert record_path, "wheel missing .dist-info/RECORD"
+              # Normalize dist-info textual metadata to LF to avoid CRLF on Windows
+              meta_path = next((n for n in entries.keys() if n.endswith(".dist-info/METADATA")), None)
+              wheel_meta_path = next((n for n in entries.keys() if n.endswith(".dist-info/WHEEL")), None)
+              def _lf(b: bytes) -> bytes:
+                  return b.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+              for pth in (meta_path, wheel_meta_path):
+                  if pth:
+                      data, info = entries[pth]
+                      entries[pth] = (_lf(data), info)
+
+          # Build deterministic RECORD with LF + sorted rows; empty hash/size for RECORD row
+          rows = []
+          for name in sorted(n for n in entries.keys() if not n.endswith("/") and n != record_path):
+              data, _ = entries[name]
+              h = hashlib.sha256(data).digest()
+              b64 = base64.urlsafe_b64encode(h).decode("ascii").rstrip("=")
+              rows.append([name, f"sha256={b64}", str(len(data))])
+          rows.append([record_path, "", ""])
+          buf = io.StringIO()
+          csv.writer(buf, lineterminator="\n").writerows(rows)
+          record_bytes = buf.getvalue().encode("utf-8")
+
+          with zipfile.ZipFile(dst, "w", compression=zipfile.ZIP_STORED) as zout:
+              for name in sorted(entries.keys()):
+                  if name.endswith("/"):
+                      zi = zipfile.ZipInfo(filename=name, date_time=fixed)
+                      zi.create_system = 3
+                      zi.external_attr = (0o755 & 0xFFFF) << 16
+                      zi.compress_type = zipfile.ZIP_STORED
+                      zout.writestr(zi, b"")
+                      continue
+                  data, info = entries[name]
+                  if name == record_path:
+                      data = record_bytes
+                  zi = zipfile.ZipInfo(filename=name, date_time=fixed)
+                  zi.create_system = 3
+                  zi.compress_type = zipfile.ZIP_STORED
+                  mode = exec_mode(data, (info.external_attr >> 16) & 0o7777)
+                  zi.external_attr = (mode & 0xFFFF) << 16
+                  zout.writestr(zi, data)
+
+          os.replace(dst, src)
+          print("Canonicalized wheel with deterministic RECORD:", src)
+          PY
+
       - name: Twine check
         run: |
-          python -m pip install --upgrade twine
-          python -m twine check dist/*
+          python -m pip install -U pip
+          # Install Twine with its dependencies normally; reproducibility of artifacts
+          # does not depend on Twine's transitive versions.
+          python -m pip install twine==5.1.1
+          # Ensure parser supports Core Metadata 2.4+
+          python -m pip install -U "pkginfo>=1.12.1.2" "readme_renderer>=44.0"
+          python -m twine check dist/*.tar.gz
+
+      - name: Wheel metadata self-check (Name/Version)
+        run: |
+          python - <<'PY'
+          import zipfile, glob
+          wheels = sorted(glob.glob('dist/*.whl'))
+          assert wheels, "no wheel found in dist/"
+          w = wheels[0]
+          with zipfile.ZipFile(w) as z:
+              names = z.namelist()
+              meta = [n for n in names if n.endswith('.dist-info/METADATA')]
+              assert meta, "wheel missing .dist-info/METADATA"
+              data = z.read(meta[0]).decode('utf-8', 'replace')
+              lines = [ln.strip() for ln in data.splitlines() if ln.strip()]
+              has_name = any(ln.lower().startswith("name:") for ln in lines)
+              has_ver = any(ln.lower().startswith("version:") for ln in lines)
+              mv = next((ln.split(":",1)[1].strip() for ln in lines if ln.lower().startswith("metadata-version:")), "unknown")
+              if not (has_name and has_ver):
+                  raise SystemExit(f"wheel METADATA missing headers: Name={has_name}, Version={has_ver}")
+              print("OK: wheel METADATA contains Name and Version (Metadata-Version:", mv + ")")
+          PY
 
       - name: Upload manpages artifact
         if: always()
@@ -100,6 +281,151 @@ jobs:
           python -m build
           ls -l dist
 
+      - name: Canonicalize sdist (deterministic tar+gz) #2
+        shell: bash
+        run: |
+          python - <<'PY'
+          import os, tarfile, gzip, io, pathlib
+          dist = pathlib.Path("dist")
+          sdists = sorted(dist.glob("*.tar.gz"))
+          assert sdists, "no sdist found in dist/"
+          src = sdists[0]
+          sde = int(os.environ.get("SOURCE_DATE_EPOCH","0"))
+          if sde < 0: sde = 0
+          raw = src.read_bytes()
+          with gzip.GzipFile(fileobj=io.BytesIO(raw), mode="rb") as gz:
+              tar_bytes = gz.read()
+          entries = []
+          with tarfile.open(fileobj=io.BytesIO(tar_bytes), mode="r:*") as tin:
+              for m in tin.getmembers():
+                  data = b""
+                  if m.isfile():
+                      f = tin.extractfile(m)
+                      data = f.read() if f else b""
+                  entries.append((m, data))
+          def _lf(b: bytes) -> bytes:
+              if b"\r" in b:
+                  b = b.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+              return b
+          def _normalize_bytes(name: str, data: bytes) -> bytes:
+              base = name.rsplit("/", 1)[-1]
+              text_names = {"PKG-INFO","SOURCES.txt","requires.txt","dependency_links.txt","top_level.txt","not-zip-safe"}
+              text_exts = (".txt",".rst",".md",".cfg",".toml",".ini",".json",".yml",".yaml",".py",".sh",".1",".5",".7",".8")
+              if base in text_names or name.endswith(text_exts):
+                  data = _lf(data)
+                  if base == "SOURCES.txt":
+                      data = data.replace(b"\\", b"/")
+              return data
+          out_tar = io.BytesIO()
+          with tarfile.open(fileobj=out_tar, mode="w", format=tarfile.PAX_FORMAT) as tout:
+              for m, data in sorted(entries, key=lambda x: x[0].name):
+                  data = _normalize_bytes(m.name, data)
+                  ti = tarfile.TarInfo(m.name)
+                  ti.type = m.type
+                  if m.isdir():
+                      ti.mode = 0o755
+                  elif m.isfile():
+                      execy = (m.mode & 0o111) != 0 or data.startswith(b"#!")
+                      ti.mode = 0o755 if execy else 0o644
+                  else:
+                      ti.mode = 0o644
+                  ti.uid = 0; ti.gid = 0; ti.uname = ""; ti.gname = ""
+                  ti.mtime = sde if sde else 0
+                  if m.issym():
+                      ti.type = tarfile.SYMTYPE; ti.linkname = m.linkname; ti.size = 0; data = b""
+                  elif m.islnk():
+                      ti.type = tarfile.LNKTYPE; ti.linkname = m.linkname; ti.size = 0; data = b""
+                  elif m.isfile():
+                      ti.size = len(data)
+                  else:
+                      ti.size = 0
+                  ti.pax_headers = {}
+                  tout.addfile(ti, io.BytesIO(data) if ti.size else None)
+          gz_buf = io.BytesIO()
+          with gzip.GzipFile(fileobj=gz_buf, mode="wb", mtime=0) as gz:
+              gz.write(out_tar.getvalue())
+          src.write_bytes(gz_buf.getvalue())
+          print("Canonicalized sdist:", src)
+          PY
+
+      - name: Canonicalize wheel (zip, stored) #2
+        run: |
+          python - <<'PY'
+          import os, zipfile, pathlib, hashlib, base64, io, csv
+          from datetime import datetime, timezone
+          dist = pathlib.Path("dist")
+          wheels = sorted(dist.glob("*.whl"))
+          assert wheels, "no wheel found in dist/"
+          src = wheels[0]
+          dst = src.with_suffix(".whl.tmp")
+          sde = int(os.environ.get("SOURCE_DATE_EPOCH", "0"))
+          if sde < 315532800:  # 1980-01-01 (ZIP min date)
+            sde = 315532800
+          dt = datetime.fromtimestamp(sde, tz=timezone.utc)
+          fixed = (dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second)
+
+          def exec_mode(data: bytes, orig_mode: int) -> int:
+              mode = 0o644
+              if (orig_mode & 0o111) or data.startswith(b"#!"):
+                  mode = 0o755
+              return mode
+
+          # Read all entries
+          with zipfile.ZipFile(src, "r") as zin:
+              entries = {}
+              record_path = None
+              for info in zin.infolist():
+                  name = info.filename
+                  data = b"" if name.endswith("/") else zin.read(name)
+                  entries[name] = (data, info)
+                  if name.endswith(".dist-info/RECORD"):
+                      record_path = name
+              assert record_path, "wheel missing .dist-info/RECORD"
+              # Normalize dist-info textual metadata to LF to avoid CRLF on Windows
+              meta_path = next((n for n in entries.keys() if n.endswith(".dist-info/METADATA")), None)
+              wheel_meta_path = next((n for n in entries.keys() if n.endswith(".dist-info/WHEEL")), None)
+              def _lf(b: bytes) -> bytes:
+                  return b.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+              for pth in (meta_path, wheel_meta_path):
+                  if pth:
+                      data, info = entries[pth]
+                      entries[pth] = (_lf(data), info)
+
+          # Build deterministic RECORD with LF + sorted rows; empty hash/size for RECORD row
+          rows = []
+          for name in sorted(n for n in entries.keys() if not n.endswith("/") and n != record_path):
+              data, _ = entries[name]
+              h = hashlib.sha256(data).digest()
+              b64 = base64.urlsafe_b64encode(h).decode("ascii").rstrip("=")
+              rows.append([name, f"sha256={b64}", str(len(data))])
+          rows.append([record_path, "", ""])
+          buf = io.StringIO()
+          csv.writer(buf, lineterminator="\n").writerows(rows)
+          record_bytes = buf.getvalue().encode("utf-8")
+
+          with zipfile.ZipFile(dst, "w", compression=zipfile.ZIP_STORED) as zout:
+              for name in sorted(entries.keys()):
+                  if name.endswith("/"):
+                      zi = zipfile.ZipInfo(filename=name, date_time=fixed)
+                      zi.create_system = 3
+                      zi.external_attr = (0o755 & 0xFFFF) << 16
+                      zi.compress_type = zipfile.ZIP_STORED
+                      zout.writestr(zi, b"")
+                      continue
+                  data, info = entries[name]
+                  if name == record_path:
+                      data = record_bytes
+                  zi = zipfile.ZipInfo(filename=name, date_time=fixed)
+                  zi.create_system = 3
+                  zi.compress_type = zipfile.ZIP_STORED
+                  mode = exec_mode(data, (info.external_attr >> 16) & 0o7777)
+                  zi.external_attr = (mode & 0xFFFF) << 16
+                  zout.writestr(zi, data)
+
+          os.replace(dst, src)
+          print("Canonicalized wheel with deterministic RECORD:", src)
+          PY
+
       - name: Canonicalize & hash #2 and compare
         run: |
           set -euo pipefail
@@ -126,17 +452,36 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        python-version: ["3.11", "3.12"]
+        python-version: ["3.11", "3.12", "3.13"]
     env:
       PIP_DISABLE_PIP_VERSION_CHECK: "1"
       PYTHONUTF8: "1"
       PYTHONHASHSEED: "0"
       CLEMATIS_NETWORK_BAN: "1"
+      TZ: "UTC"
+      PYTHONIOENCODING: "UTF-8"
     steps:
+      - name: Configure Git EOL (Windows, before checkout)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          git config --global core.autocrlf false
+          git config --global core.eol lf
+
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
+
+      - name: Verify no CRLF in text files
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git grep -I -n $'\r' -- '*.py' '*.md' '*.txt' '*.toml' '*.yml' '*.yaml' '*.json' '*.ini' '*.cfg' '*.sh' >/dev/null; then
+            echo "CRLF detected in repository; normalize to LF for reproducible builds."
+            git grep -I -n $'\r' -- '*.py' '*.md' '*.txt' '*.toml' '*.yml' '*.yaml' '*.json' '*.ini' '*.cfg' '*.sh' || true
+            exit 1
+          fi
 
       - name: Setup Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
@@ -144,16 +489,201 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: 'pip'
 
+      - name: Deterministic env
+        shell: bash
+        run: |
+          set -euo pipefail
+          TS="$(git log -1 --pretty=%ct 2>/dev/null || echo 0)"
+          echo "SOURCE_DATE_EPOCH=${TS}" >> "$GITHUB_ENV"
+          echo "TZ=UTC" >> "$GITHUB_ENV"
+          echo "PYTHONIOENCODING=UTF-8" >> "$GITHUB_ENV"
+          echo "PYTHONUTF8=1" >> "$GITHUB_ENV"
+          echo "PYTHONHASHSEED=0" >> "$GITHUB_ENV"
+
       - name: Ensure long paths on Windows
         if: runner.os == 'Windows'
         run: git config --global core.longpaths true
         shell: pwsh
 
-      - name: Install build backend
-        run: python -m pip install --upgrade pip build
+      - name: Install build backend (pinned)
+        shell: bash
+        run: |
+          python -m pip install -U pip
+          python -m pip install --no-deps \
+            build==1.2.1 \
+            wheel==0.45.1 \
+            setuptools==80.9.0 \
+            pyproject-hooks==1.1.0 \
+            packaging==24.1
 
-      - name: Build wheel (axis-local)
-        run: python -m build --wheel
+      - name: Build sdist + wheel (axis-local)
+        run: python -m build --sdist --wheel
+
+      - name: Canonicalize sdist (axis-local)
+        shell: bash
+        run: |
+          python - <<'PY'
+          import os, tarfile, gzip, io, pathlib
+          dist = pathlib.Path("dist")
+          sdists = sorted(dist.glob("*.tar.gz"))
+          assert sdists, "no sdist found in dist/"
+          src = sdists[0]
+          sde = int(os.environ.get("SOURCE_DATE_EPOCH","0"))
+          if sde < 0: sde = 0
+          raw = src.read_bytes()
+          with gzip.GzipFile(fileobj=io.BytesIO(raw), mode="rb") as gz:
+              tar_bytes = gz.read()
+          entries = []
+          with tarfile.open(fileobj=io.BytesIO(tar_bytes), mode="r:*") as tin:
+              for m in tin.getmembers():
+                  data = b""
+                  if m.isfile():
+                      f = tin.extractfile(m)
+                      data = f.read() if f else b""
+                  entries.append((m, data))
+          def _lf(b: bytes) -> bytes:
+              if b"\r" in b:
+                  b = b.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+              return b
+          def _normalize_bytes(name: str, data: bytes) -> bytes:
+              base = name.rsplit("/", 1)[-1]
+              text_names = {"PKG-INFO","SOURCES.txt","requires.txt","dependency_links.txt","top_level.txt","not-zip-safe"}
+              text_exts = (".txt",".rst",".md",".cfg",".toml",".ini",".json",".yml",".yaml",".py",".sh",".1",".5",".7",".8")
+              if base in text_names or name.endswith(text_exts):
+                  data = _lf(data)
+                  if base == "SOURCES.txt":
+                      data = data.replace(b"\\", b"/")
+              return data
+          out_tar = io.BytesIO()
+          with tarfile.open(fileobj=out_tar, mode="w", format=tarfile.PAX_FORMAT) as tout:
+              for m, data in sorted(entries, key=lambda x: x[0].name):
+                  data = _normalize_bytes(m.name, data)
+                  ti = tarfile.TarInfo(m.name)
+                  ti.type = m.type
+                  if m.isdir():
+                      ti.mode = 0o755
+                  elif m.isfile():
+                      execy = (m.mode & 0o111) != 0 or data.startswith(b"#!")
+                      ti.mode = 0o755 if execy else 0o644
+                  else:
+                      ti.mode = 0o644
+                  ti.uid = 0; ti.gid = 0; ti.uname = ""; ti.gname = ""
+                  ti.mtime = sde if sde else 0
+                  if m.issym():
+                      ti.type = tarfile.SYMTYPE; ti.linkname = m.linkname; ti.size = 0; data = b""
+                  elif m.islnk():
+                      ti.type = tarfile.LNKTYPE; ti.linkname = m.linkname; ti.size = 0; data = b""
+                  elif m.isfile():
+                      ti.size = len(data)
+                  else:
+                      ti.size = 0
+                  ti.pax_headers = {}
+                  tout.addfile(ti, io.BytesIO(data) if ti.size else None)
+          gz_buf = io.BytesIO()
+          with gzip.GzipFile(fileobj=gz_buf, mode="wb", mtime=0) as gz:
+              gz.write(out_tar.getvalue())
+          src.write_bytes(gz_buf.getvalue())
+          print("Canonicalized sdist:", src)
+          PY
+
+      - name: Canonicalize wheel (axis-local, stored)
+        shell: bash
+        run: |
+          python - <<'PY'
+          import os, zipfile, pathlib, hashlib, base64, io, csv
+          from datetime import datetime, timezone
+          dist = pathlib.Path("dist")
+          wheels = sorted(dist.glob("*.whl"))
+          assert wheels, "no wheel found in dist/"
+          src = wheels[0]
+          dst = src.with_suffix(".whl.tmp")
+          sde = int(os.environ.get("SOURCE_DATE_EPOCH", "0"))
+          if sde < 315532800:  # 1980-01-01 (ZIP min date)
+            sde = 315532800
+          dt = datetime.fromtimestamp(sde, tz=timezone.utc)
+          fixed = (dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second)
+
+          def exec_mode(data: bytes, orig_mode: int) -> int:
+              mode = 0o644
+              if (orig_mode & 0o111) or data.startswith(b"#!"):
+                  mode = 0o755
+              return mode
+
+          # Read all entries
+          with zipfile.ZipFile(src, "r") as zin:
+              entries = {}
+              record_path = None
+              for info in zin.infolist():
+                  name = info.filename
+                  data = b"" if name.endswith("/") else zin.read(name)
+                  entries[name] = (data, info)
+                  if name.endswith(".dist-info/RECORD"):
+                      record_path = name
+              assert record_path, "wheel missing .dist-info/RECORD"
+              # Normalize dist-info textual metadata to LF to avoid CRLF on Windows
+              meta_path = next((n for n in entries.keys() if n.endswith(".dist-info/METADATA")), None)
+              wheel_meta_path = next((n for n in entries.keys() if n.endswith(".dist-info/WHEEL")), None)
+              def _lf(b: bytes) -> bytes:
+                  return b.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+              for pth in (meta_path, wheel_meta_path):
+                  if pth:
+                      data, info = entries[pth]
+                      entries[pth] = (_lf(data), info)
+
+          # Build deterministic RECORD with LF + sorted rows; empty hash/size for RECORD row
+          rows = []
+          for name in sorted(n for n in entries.keys() if not n.endswith("/") and n != record_path):
+              data, _ = entries[name]
+              h = hashlib.sha256(data).digest()
+              b64 = base64.urlsafe_b64encode(h).decode("ascii").rstrip("=")
+              rows.append([name, f"sha256={b64}", str(len(data))])
+          rows.append([record_path, "", ""])
+          buf = io.StringIO()
+          csv.writer(buf, lineterminator="\n").writerows(rows)
+          record_bytes = buf.getvalue().encode("utf-8")
+
+          with zipfile.ZipFile(dst, "w", compression=zipfile.ZIP_STORED) as zout:
+              for name in sorted(entries.keys()):
+                  if name.endswith("/"):
+                      zi = zipfile.ZipInfo(filename=name, date_time=fixed)
+                      zi.create_system = 3
+                      zi.external_attr = (0o755 & 0xFFFF) << 16
+                      zi.compress_type = zipfile.ZIP_STORED
+                      zout.writestr(zi, b"")
+                      continue
+                  data, info = entries[name]
+                  if name == record_path:
+                      data = record_bytes
+                  zi = zipfile.ZipInfo(filename=name, date_time=fixed)
+                  zi.create_system = 3
+                  zi.compress_type = zipfile.ZIP_STORED
+                  mode = exec_mode(data, (info.external_attr >> 16) & 0o7777)
+                  zi.external_attr = (mode & 0xFFFF) << 16
+                  zout.writestr(zi, data)
+
+          os.replace(dst, src)
+          print("Canonicalized wheel with deterministic RECORD:", src)
+          PY
+
+      - name: Assert no CRLF inside wheel entries
+        shell: bash
+        run: |
+          python - <<'PY'
+          import zipfile, glob, sys
+          w = sorted(glob.glob('dist/*.whl'))[0]
+          bad = []
+          with zipfile.ZipFile(w) as z:
+              for n in z.namelist():
+                  if n.endswith('/'):
+                      continue
+                  if b'\r\n' in z.read(n):
+                      bad.append(n)
+          if bad:
+              print("CRLF found in wheel entries:")
+              for n in bad: print("  -", n)
+              sys.exit(1)
+          print("OK: no CRLF in wheel entries")
+          PY
 
       - name: Smoke (posix)
         if: runner.os != 'Windows'
@@ -247,46 +777,155 @@ jobs:
           # 5) inspect-snapshot (json)
           .\.venv\Scripts\python -m clematis inspect-snapshot -- --format json
 
-      - name: Upload wheel (artifact per axis)
+      - name: Upload artifacts (wheel + sdist per axis)
         uses: actions/upload-artifact@v4
         with:
-          name: wheel-${{ matrix.os }}-py${{ matrix.python-version }}
-          path: dist/*.whl
+          name: pkg-${{ matrix.os }}-py${{ matrix.python-version }}
+          path: |
+            dist/*.whl
+            dist/*.tar.gz
 
-  cli-smokes-pr:
-    name: CLI smokes (pytest minimal) on push/PR
+  repro-compare:
+    name: Reproducibility compare (cross-OS wheels)
     if: ${{ (github.event_name == 'pull_request') || (github.event_name == 'push' && !startsWith(github.ref, 'refs/tags/')) }}
     runs-on: ubuntu-latest
-    env:
-      CLEMATIS_NETWORK_BAN: "1"
-      CI: "true"
-      PIP_DISABLE_PIP_VERSION_CHECK: "1"
-      PYTHONUTF8: "1"
-      PYTHONHASHSEED: "0"
+    needs: [pkg-smoke-matrix]
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - name: Download all wheel artifacts
+        uses: actions/download-artifact@v4
         with:
-          fetch-depth: 1
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-          cache: 'pip'
-
-      - name: Install package (editable) + pytest
+          path: _artifacts
+      - name: Show downloaded
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e . pytest
+          find _artifacts -type f -maxdepth 3 -print | sort
 
-      - name: CLI smoke — help matrix
+      - name: Diagnose per-file differences (Windows vs POSIX wheels)
         run: |
-          pytest -q tests/cli/test_help_matrix.py::test_each_sub_help
+          python - <<'PY'
+          import zipfile, pathlib, collections, hashlib, sys
+          root = pathlib.Path("_artifacts")
+          files = [p for p in root.rglob("*.whl") if p.is_file()]
+          groups = collections.defaultdict(list)
+          for p in files:
+              groups[p.name].append(p)
 
-      - name: CLI smoke — exit codes (quiet wrapper)
+          def classify(p: pathlib.Path) -> str:
+              s = str(p).lower()
+              if "windows-latest" in s: return "windows"
+              if "ubuntu-latest" in s: return "linux"
+              if "macos-latest" in s: return "macos"
+              return "other"
+
+          any_diff = False
+
+          for name, paths in sorted(groups.items()):
+              win = next((p for p in paths if classify(p) == "windows"), None)
+              posix = next((p for p in paths if classify(p) in {"linux", "macos"}), None)
+              if not (win and posix):
+                  continue
+
+              print(f"\n[inspect] {name}")
+              print("  windows:", win)
+              print("  posix  :", posix)
+
+              with zipfile.ZipFile(win) as zw, zipfile.ZipFile(posix) as zp:
+                  nw, np = set(zw.namelist()), set(zp.namelist())
+                  if nw != np:
+                      only_w = sorted(nw - np)
+                      only_p = sorted(np - nw)
+                      if only_w:
+                          print("  entries only in windows:", len(only_w))
+                          for e in only_w[:20]: print("    +", e)
+                      if only_p:
+                          print("  entries only in posix:", len(only_p))
+                          for e in only_p[:20]: print("    +", e)
+                      any_diff = True
+
+                  common = sorted(nw & np)
+                  def entry_info(zf, name):
+                      info = zf.getinfo(name)
+                      mode = (info.external_attr >> 16) & 0o7777
+                      data = b""
+                      if not name.endswith("/"):
+                          data = zf.read(name)
+                      return mode, data
+
+                  diffs = []
+                  for nm in common:
+                      if nm.endswith("/"):
+                          continue
+                      mw, dw = entry_info(zw, nm)
+                      mp, dp = entry_info(zp, nm)
+                      if hashlib.sha256(dw).digest() != hashlib.sha256(dp).digest():
+                          def crlf(b):
+                              return b"\r\n" in b and b"\n" in b
+                          diffs.append((nm, len(dw), len(dp), mw, mp,
+                                        crlf(dw), crlf(dp)))
+
+                  if diffs:
+                      any_diff = True
+                      print(f"  per-file differing entries: {len(diffs)} (showing up to 50)")
+                      for nm, lw, lp, mw, mp, cw, cp in diffs[:50]:
+                          tag = ""
+                          if ".dist-info/RECORD" in nm: tag = " [RECORD]"
+                          elif ".dist-info/METADATA" in nm: tag = " [METADATA]"
+                          elif ".dist-info/WHEEL" in nm: tag = " [WHEEL]"
+                          elif "man/" in nm or "/man/" in nm or "/share/man/" in nm: tag = " [manpage]"
+                          print(f"    - {nm}{tag}")
+                          print(f"        sizes: win={lw} posix={lp}  modes: win={oct(mw)} posix={oct(mp)}  CRLF? win={cw} posix={cp}")
+          if not any_diff:
+              print("No per-file differences detected between Windows and POSIX wheels (contents match).")
+          PY
+      - name: Compare SHA256 across OS for identical wheel filenames
         run: |
-          pytest -q tests/cli/test_exit_codes.py::test_quiet_suppresses_stderr_on_wrapper_errors
+          set -euo pipefail
+          python - <<'PY'
+          import hashlib, pathlib, collections
+          root = pathlib.Path("_artifacts")
+          files = [p for p in root.rglob("*.whl") if p.is_file()]
+          groups = collections.defaultdict(list)
+          for p in files:
+              groups[p.name].append(p)
+          bad = []
+          for name, paths in sorted(groups.items()):
+              digests = []
+              for p in sorted(paths):
+                  h = hashlib.sha256(p.read_bytes()).hexdigest()
+                  digests.append((h, p))
+              if len(set(h for h, _ in digests)) != 1:
+                  print(f"[DIFF] {name}")
+                  for h, p in digests:
+                      print(f"  {h}  {p}")
+                  bad.append(name)
+          if bad:
+              raise SystemExit(1)
+          print("Repro check passed: all wheels with the same filename are byte-identical.")
+          PY
+      - name: Compare SHA256 across OS for identical sdist filenames
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import hashlib, pathlib, collections
+          root = pathlib.Path("_artifacts")
+          files = [p for p in root.rglob("*.tar.gz") if p.is_file()]
+          groups = collections.defaultdict(list)
+          for p in files:
+              groups[p.name].append(p)
+          bad = []
+          for name, paths in sorted(groups.items()):
+              digests = []
+              for p in sorted(paths):
+                  h = hashlib.sha256(p.read_bytes()).hexdigest()
+                  digests.append((h, p))
+              if len(set(h for h, _ in digests)) != 1:
+                  print(f"[DIFF] {name}")
+                  for h, p in digests:
+                      print(f"  {h}  {p}")
+                  bad.append(name)
+          if bad:
+              raise SystemExit(1)
+          print("Repro check passed: all sdists with the same filename are byte-identical.")
+          PY
 
   tag-sbom-attest:
     name: "Tag: build → SBOM → attest"
@@ -309,10 +948,186 @@ jobs:
       - name: Build sdist + wheel (deterministic)
         env:
           SOURCE_DATE_EPOCH: "1704067200"
+          TZ: "UTC"
+          PYTHONHASHSEED: "0"
+          PYTHONUTF8: "1"
+          PYTHONIOENCODING: "UTF-8"
         run: |
-          python -m pip install --upgrade pip build twine
+          python -m pip install -U pip
+          python -m pip install --no-deps \
+            build==1.2.1 \
+            wheel==0.45.1 \
+            setuptools==80.9.0 \
+            pyproject-hooks==1.1.0 \
+            packaging==24.1
+          # Install Twine with dependencies (no --no-deps) for README/metadata checks
+          python -m pip install twine==5.1.1
           python -m build
-          python -m twine check dist/*
+          # Canonicalize sdist for deterministic tar+gz
+          python - <<'PY'
+          import os, tarfile, gzip, io, pathlib
+          dist = pathlib.Path("dist")
+          sdists = sorted(dist.glob("*.tar.gz"))
+          assert sdists, "no sdist found in dist/"
+          src = sdists[0]
+          sde = int(os.environ.get("SOURCE_DATE_EPOCH","0"))
+          if sde < 0: sde = 0
+          raw = src.read_bytes()
+          with gzip.GzipFile(fileobj=io.BytesIO(raw), mode="rb") as gz:
+              tar_bytes = gz.read()
+          entries = []
+          with tarfile.open(fileobj=io.BytesIO(tar_bytes), mode="r:*") as tin:
+              for m in tin.getmembers():
+                  data = b""
+                  if m.isfile():
+                      f = tin.extractfile(m)
+                      data = f.read() if f else b""
+                  entries.append((m, data))
+          def _lf(b: bytes) -> bytes:
+              if b"\r" in b:
+                  b = b.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+              return b
+          def _normalize_bytes(name: str, data: bytes) -> bytes:
+              base = name.rsplit("/", 1)[-1]
+              text_names = {"PKG-INFO","SOURCES.txt","requires.txt","dependency_links.txt","top_level.txt","not-zip-safe"}
+              text_exts = (".txt",".rst",".md",".cfg",".toml",".ini",".json",".yml",".yaml",".py",".sh",".1",".5",".7",".8")
+              if base in text_names or name.endswith(text_exts):
+                  data = _lf(data)
+                  if base == "SOURCES.txt":
+                      data = data.replace(b"\\", b"/")
+              return data
+          out_tar = io.BytesIO()
+          with tarfile.open(fileobj=out_tar, mode="w", format=tarfile.PAX_FORMAT) as tout:
+              for m, data in sorted(entries, key=lambda x: x[0].name):
+                  data = _normalize_bytes(m.name, data)
+                  ti = tarfile.TarInfo(m.name)
+                  ti.type = m.type
+                  if m.isdir():
+                      ti.mode = 0o755
+                  elif m.isfile():
+                      execy = (m.mode & 0o111) != 0 or data.startswith(b"#!")
+                      ti.mode = 0o755 if execy else 0o644
+                  else:
+                      ti.mode = 0o644
+                  ti.uid = 0; ti.gid = 0; ti.uname = ""; ti.gname = ""
+                  ti.mtime = sde if sde else 0
+                  if m.issym():
+                      ti.type = tarfile.SYMTYPE; ti.linkname = m.linkname; ti.size = 0; data = b""
+                  elif m.islnk():
+                      ti.type = tarfile.LNKTYPE; ti.linkname = m.linkname; ti.size = 0; data = b""
+                  elif m.isfile():
+                      ti.size = len(data)
+                  else:
+                      ti.size = 0
+                  ti.pax_headers = {}
+                  tout.addfile(ti, io.BytesIO(data) if ti.size else None)
+          gz_buf = io.BytesIO()
+          with gzip.GzipFile(fileobj=gz_buf, mode="wb", mtime=0) as gz:
+              gz.write(out_tar.getvalue())
+          src.write_bytes(gz_buf.getvalue())
+          print("Canonicalized sdist:", src)
+          PY
+          # Canonicalize wheel to ZIP_STORED for cross-OS identical bytes
+          python - <<'PY'
+          import os, zipfile, pathlib, hashlib, base64, io, csv
+          from datetime import datetime, timezone
+          dist = pathlib.Path("dist")
+          wheels = sorted(dist.glob("*.whl"))
+          assert wheels, "no wheel found in dist/"
+          src = wheels[0]
+          dst = src.with_suffix(".whl.tmp")
+          sde = int(os.environ.get("SOURCE_DATE_EPOCH", "0"))
+          if sde < 315532800:  # 1980-01-01 (ZIP min date)
+            sde = 315532800
+          dt = datetime.fromtimestamp(sde, tz=timezone.utc)
+          fixed = (dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second)
+
+          def exec_mode(data: bytes, orig_mode: int) -> int:
+              mode = 0o644
+              if (orig_mode & 0o111) or data.startswith(b"#!"):
+                  mode = 0o755
+              return mode
+
+          # Read all entries
+          with zipfile.ZipFile(src, "r") as zin:
+              entries = {}
+              record_path = None
+              for info in zin.infolist():
+                  name = info.filename
+                  data = b"" if name.endswith("/") else zin.read(name)
+                  entries[name] = (data, info)
+                  if name.endswith(".dist-info/RECORD"):
+                      record_path = name
+              assert record_path, "wheel missing .dist-info/RECORD"
+              # Normalize dist-info textual metadata to LF to avoid CRLF on Windows
+              meta_path = next((n for n in entries.keys() if n.endswith(".dist-info/METADATA")), None)
+              wheel_meta_path = next((n for n in entries.keys() if n.endswith(".dist-info/WHEEL")), None)
+              def _lf(b: bytes) -> bytes:
+                  return b.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+              for pth in (meta_path, wheel_meta_path):
+                  if pth:
+                      data, info = entries[pth]
+                      entries[pth] = (_lf(data), info)
+
+          # Build deterministic RECORD with LF + sorted rows; empty hash/size for RECORD row
+          rows = []
+          for name in sorted(n for n in entries.keys() if not n.endswith("/") and n != record_path):
+              data, _ = entries[name]
+              h = hashlib.sha256(data).digest()
+              b64 = base64.urlsafe_b64encode(h).decode("ascii").rstrip("=")
+              rows.append([name, f"sha256={b64}", str(len(data))])
+          rows.append([record_path, "", ""])
+          buf = io.StringIO()
+          csv.writer(buf, lineterminator="\n").writerows(rows)
+          record_bytes = buf.getvalue().encode("utf-8")
+
+          with zipfile.ZipFile(dst, "w", compression=zipfile.ZIP_STORED) as zout:
+              for name in sorted(entries.keys()):
+                  if name.endswith("/"):
+                      zi = zipfile.ZipInfo(filename=name, date_time=fixed)
+                      zi.create_system = 3
+                      zi.external_attr = (0o755 & 0xFFFF) << 16
+                      zi.compress_type = zipfile.ZIP_STORED
+                      zout.writestr(zi, b"")
+                      continue
+                  data, info = entries[name]
+                  if name == record_path:
+                      data = record_bytes
+                  zi = zipfile.ZipInfo(filename=name, date_time=fixed)
+                  zi.create_system = 3
+                  zi.compress_type = zipfile.ZIP_STORED
+                  mode = exec_mode(data, (info.external_attr >> 16) & 0o7777)
+                  zi.external_attr = (mode & 0xFFFF) << 16
+                  zout.writestr(zi, data)
+
+          os.replace(dst, src)
+          print("Canonicalized wheel with deterministic RECORD:", src)
+          PY
+          # Ensure parser supports Core Metadata 2.4+
+          python -m pip install -U "pkginfo>=1.12.1.2" "readme_renderer>=44.0"
+          # Check sdist with Twine; wheel validated separately below
+          python -m twine check dist/*.tar.gz
+
+      - name: Wheel metadata self-check (Name/Version)
+        run: |
+          python - <<'PY'
+          import zipfile, glob
+          wheels = sorted(glob.glob('dist/*.whl'))
+          assert wheels, "no wheel found in dist/"
+          w = wheels[0]
+          with zipfile.ZipFile(w) as z:
+              names = z.namelist()
+              meta = [n for n in names if n.endswith('.dist-info/METADATA')]
+              assert meta, "wheel missing .dist-info/METADATA"
+              data = z.read(meta[0]).decode('utf-8', 'replace')
+              lines = [ln.strip() for ln in data.splitlines() if ln.strip()]
+              has_name = any(ln.lower().startswith("name:") for ln in lines)
+              has_ver = any(ln.lower().startswith("version:") for ln in lines)
+              mv = next((ln.split(":",1)[1].strip() for ln in lines if ln.lower().startswith("metadata-version:")), "unknown")
+              if not (has_name and has_ver):
+                  raise SystemExit(f"wheel METADATA missing headers: Name={has_name}, Version={has_ver}")
+              print("OK: wheel METADATA contains Name and Version (Metadata-Version:", mv + ")")
+          PY
 
       - name: Upload artifacts to Release (sdist + wheel)
         if: ${{ github.event_name == 'release' }}

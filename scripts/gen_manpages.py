@@ -23,6 +23,7 @@ from __future__ import annotations
 import argparse
 import datetime
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -81,16 +82,91 @@ def _escape_roff_block(text: str) -> str:
     return "\n".join(_escape_roff_line(l) for l in text.splitlines())
 
 
+def _ensure_lf(text: str) -> str:
+    """Normalize any CRLF/CR to LF for reproducible bytes across OS."""
+    return text.replace("\r\n", "\n").replace("\r", "\n")
+
+
+# Scrub OS-specific absolute paths/env tokens so manpages are identical on Windows/POSIX
+_PATH_PATTERNS = [
+    re.compile(r"[A-Za-z]:\\[^ \t\r\n]+"),   # Windows drive path like C:\Users\foo
+    re.compile(r"\\\\[^ \t\r\n]+"),        # UNC \\server\share\path
+    re.compile(r"/(?:[^ \t\r\n]+/?)+"),       # Absolute POSIX path /a/b/c
+]
+_ENV_PATTERNS = [
+    re.compile(r"%(?:APPDATA|LOCALAPPDATA|USERPROFILE)%", re.IGNORECASE),
+    re.compile(r"\$(?:HOME|USERPROFILE)\b"),
+    re.compile(r"~[^ \t\r\n]*"),
+]
+
+def _scrub_platform_specifics(text: str) -> str:
+    """Replace obviously platform-specific absolute paths and env tokens with placeholders.
+    This keeps manpages OS-agnostic for reproducible builds.
+    """
+    for pat in _PATH_PATTERNS:
+        text = pat.sub("<PATH>", text)
+    for pat in _ENV_PATTERNS:
+        text = pat.sub("<HOME>", text)
+    return text
+
+
+_USAGE_RE = re.compile(r"^(usage:\s*)(.*)$", re.IGNORECASE)
+
+def _stable_prog(cmd_name: str, module: str) -> str:
+    """Return a normalized program string for man SYNOPSIS/usage.
+    - root: 'clematis'
+    - subcommand: 'clematis foo bar' for cmd_name 'clematis-foo-bar'
+    """
+    if cmd_name == module:
+        return module
+    if cmd_name.startswith(module + "-"):
+        tail = cmd_name[len(module) + 1:].replace("-", " ")
+        return f"{module} {tail}"
+    # Fallback: replace dashes with spaces
+    return cmd_name.replace("-", " ")
+
+def _normalize_usage(help_text: str, module: str, cmd_name: str) -> str:
+    """Rewrite any 'usage:' lines to start with a stable program string.
+    This strips interpreter/path-specific prefixes like 'python -m clematis'.
+    """
+    prog = _stable_prog(cmd_name, module)
+    out_lines: List[str] = []
+    for ln in help_text.splitlines():
+        m = _USAGE_RE.match(ln.strip())
+        if not m:
+            out_lines.append(ln)
+            continue
+        rest = m.group(2)
+        # Tokenize and find the position of the module token if present.
+        parts = rest.split()
+        if parts:
+            idx = 0
+            for i, tok in enumerate(parts):
+                # Prefer the first token that mentions the module name.
+                if module.lower() in tok.lower():
+                    idx = i
+                    break
+            tail = " " + " ".join(parts[idx + 1:]) if len(parts) > idx + 1 else ""
+        else:
+            tail = ""
+        out_lines.append(m.group(1) + prog + tail)
+    return "\n".join(out_lines)
+
+
 def _emit_page(
     cmd_name: str, title: str, help_text: str, out_path: Path, section: str, module: str
 ) -> None:
     ver = _version(module)
     date = _date_str()
+    help_text = _ensure_lf(help_text)
+    # Normalize any 'usage:' lines to a deterministic program string
+    help_text = _normalize_usage(help_text, module, cmd_name)
+    help_text = _scrub_platform_specifics(help_text)
 
-    # SYNOPSIS: prefer the first line containing 'usage:'; fall back to a generic synopsis
+    # SYNOPSIS: take the first normalized 'usage:' line; else a generic fallback
     synopsis = next(
-        (ln.strip() for ln in help_text.splitlines() if ln.strip().startswith("usage:")),
-        f"{cmd_name} [options]",
+        (ln.strip() for ln in help_text.splitlines() if ln.strip().lower().startswith("usage:")),
+        f"usage: {_stable_prog(cmd_name, module)} [options]",
     )
 
     name_line = f"{cmd_name} \\- {title}"  # hyphen escaped for roff NAME section
@@ -111,7 +187,9 @@ def _emit_page(
     roff.append(".fi")
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text("\n".join(roff) + "\n", encoding="utf-8")
+    # Force LF on all platforms for reproducible archives (avoid CRLF on Windows).
+    with open(out_path, "w", encoding="utf-8", newline="\n") as f:
+        f.write("\n".join(roff) + "\n")
     print(f"Wrote {out_path}")
 
 
