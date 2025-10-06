@@ -120,6 +120,13 @@ jobs:
           # Use the shared Python guard which generates logs, normalizes, and compares
           python3 scripts/ci_compare_golden.py
 
+      - name: Atomic IO tests (Windows only)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          set -euxo pipefail
+          pytest -q tests/io/test_atomic_writes.py
+
       - name: Upload artifacts on failure
         if: ${{ failure() }}
         uses: actions/upload-artifact@v4

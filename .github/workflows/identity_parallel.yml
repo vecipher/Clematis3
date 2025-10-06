@@ -1,5 +1,3 @@
-
-
 name: identity-parallel
 
 on:
@@ -73,3 +71,9 @@ jobs:
             pytest -q tests/integration/test_identity_parallel.py
             pytest -q tests/integration/test_race_regression.py
           fi
+
+      - name: Atomic IO tests (Windows only)
+        if: runner.os == 'Windows'
+        run: |
+          pytest -q tests/io/test_atomic_writes.py
+          pytest -q tests/snapshots/test_snapshot_writer_roundtrip.py

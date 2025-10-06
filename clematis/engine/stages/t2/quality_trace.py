@@ -129,7 +129,7 @@ def emit_trace(
     try:
         trace_dir = _derive_trace_dir(cfg)
         trace_dir.mkdir(parents=True, exist_ok=True)
-        with (trace_dir / "rq_traces.jsonl").open("a", encoding="utf-8") as f:
+        with (trace_dir / "rq_traces.jsonl").open("a", encoding="utf-8", newline="\n") as f:
             f.write(_stable_json(record) + "\n")
     except Exception:
         global __TRACE_WRITE_ERROR_WARNED

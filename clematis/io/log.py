@@ -1,3 +1,5 @@
+from typing import Iterable
+from .atomic import atomic_write_text
 import json
 import os
 from . import paths
@@ -15,7 +17,8 @@ def _append_jsonl_unbuffered(filename: str, record: dict) -> None:
     name = os.path.basename(filename)
     record = normalize_for_identity(name, record)
 
-    # Write deterministically across OS:
+    # Keep legacy formatting for identity stability; canonicalization is handled
+    # by maintenance paths (rewrite_jsonl) and will be finalized in PR123.
     # - Binary append avoids platform newline translation (e.g., CRLF on Windows).
     # - We always terminate records with a single LF to stabilize identity.
     line = (json.dumps(record, ensure_ascii=False) + "\n").encode("utf-8")
@@ -61,3 +64,28 @@ def append_jsonl(filename: str, record: dict, *, feature_guard: bool | None = No
             pass
 
     _append_jsonl_unbuffered(filename, record)
+
+
+def rewrite_jsonl(filename: str, records: Iterable[dict]) -> None:
+    """Rewrite a JSONL log atomically with canonical formatting and LF endings.
+
+    This is intended for compaction/maintenance steps. Each record is first
+    normalized via `normalize_for_identity` using the file's basename, then
+    serialized with sorted keys and compact separators, and finally written via
+    an atomic, LF-only text write.
+    """
+    base = paths.logs_dir()
+    os.makedirs(base, exist_ok=True)
+    path = os.path.join(base, filename)
+    name = os.path.basename(filename)
+
+    # Build the entire payload deterministically.
+    lines = []
+    for rec in records:
+        rec_norm = normalize_for_identity(name, rec)
+        lines.append(
+            json.dumps(rec_norm, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+            + "\n"
+        )
+    payload = "".join(lines)
+    atomic_write_text(path, payload, encoding="utf-8", newline="\n")

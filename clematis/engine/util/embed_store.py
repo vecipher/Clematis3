@@ -53,7 +53,7 @@ def write_shard(
 
     # Write ids.tsv deterministically
     ids_path = shard / "ids.tsv"
-    with ids_path.open("w", encoding="utf-8") as f:
+    with ids_path.open("w", encoding="utf-8", newline="\n") as f:
         for _id in ids:
             f.write(f"{_id}\n")
 
