@@ -81,11 +81,17 @@ def _escape_roff_block(text: str) -> str:
     return "\n".join(_escape_roff_line(l) for l in text.splitlines())
 
 
+def _ensure_lf(text: str) -> str:
+    """Normalize any CRLF/CR to LF for reproducible bytes across OS."""
+    return text.replace("\r\n", "\n").replace("\r", "\n")
+
+
 def _emit_page(
     cmd_name: str, title: str, help_text: str, out_path: Path, section: str, module: str
 ) -> None:
     ver = _version(module)
     date = _date_str()
+    help_text = _ensure_lf(help_text)
 
     # SYNOPSIS: prefer the first line containing 'usage:'; fall back to a generic synopsis
     synopsis = next(
@@ -111,7 +117,9 @@ def _emit_page(
     roff.append(".fi")
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text("\n".join(roff) + "\n", encoding="utf-8")
+    # Force LF on all platforms for reproducible archives (avoid CRLF on Windows).
+    with open(out_path, "w", encoding="utf-8", newline="\n") as f:
+        f.write("\n".join(roff) + "\n")
     print(f"Wrote {out_path}")
 
 
