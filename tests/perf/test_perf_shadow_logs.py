@@ -1,6 +1,9 @@
 # tests/perf/test_perf_shadow_logs.py
 from __future__ import annotations
-import json, sys, subprocess, os
+import json
+import sys
+import subprocess
+import os
 from pathlib import Path
 
 PY = sys.executable
