@@ -58,6 +58,9 @@ def _extract_subcommands(text: str) -> List[str]:
   """
   Parse the subcommands section produced by argparse.
   Looks for a 'subcommands:' heading added by the root parser.
+  Only collect real command tokens (e.g., `demo`, `inspect-snapshot`) and the
+  placeholder `<cmd>`. Ignore wrapped/continuation help lines such as
+  "Delegates to scripts/..." which argparse indents under the command.
   """
   m = re.search(r"(?ms)^subcommands:\n(?P<body>(?:^[ ]{2,}.+?\n)+)", text)
   if not m:
@@ -68,10 +71,14 @@ def _extract_subcommands(text: str) -> List[str]:
     line = line.strip()
     if not line:
       continue
-    # argparse typically formats: "<name>  <help...>"
+    # Expect lines like: "<name>  <help...>" for the first line of each command.
     parts = re.split(r"\s{2,}", line, maxsplit=1)
-    if parts:
-      cmds.append(parts[0])
+    if len(parts) < 2:
+      # Continuation lines (wrapped help) won't have a double-space split; skip them.
+      continue
+    name = parts[0]
+    if name == "<cmd>" or re.fullmatch(r"[a-z0-9][a-z0-9-]*", name):
+      cmds.append(name)
   return cmds
 
 

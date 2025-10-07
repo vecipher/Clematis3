@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import os
-import sys
 
 # Deterministic env defaults (no-ops if already set). Matches CI in PR115.
 os.environ.setdefault("TZ", "UTC")
