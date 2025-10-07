@@ -26,25 +26,29 @@ except Exception:  # PyYAML optional
     yaml = None  # type: ignore
 
 # Ensure the project root (parent of scripts/) is importable when run directly
-try:
-    from configs.validate import validate_config_verbose, validate_config  # type: ignore
-except ModuleNotFoundError:
-    HERE = os.path.abspath(os.path.dirname(__file__))
-    ROOT = os.path.abspath(os.path.join(HERE, ".."))
-    if ROOT not in sys.path:
-        sys.path.insert(0, ROOT)
+HERE = os.path.abspath(os.path.dirname(__file__))
+ROOT = os.path.abspath(os.path.join(HERE, ".."))
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)
+
+
+def _load_validator():
+    """Import the configs.validate module lazily to avoid circular imports.
+
+    Returns the imported module object which may or may not expose
+    validate_config_verbose.
+    """
+    # Import inside the function to avoid import-time side effects
+    from importlib import import_module
+
     try:
-        from configs.validate import validate_config_verbose, validate_config  # type: ignore
-    except ImportError:
-        # Older versions may not have the verbose API
-        from configs.validate import validate_config  # type: ignore
-
-        validate_config_verbose = None  # type: ignore
-except ImportError:
-    # Older versions may not have the verbose API
-    from configs.validate import validate_config  # type: ignore
-
-    validate_config_verbose = None  # type: ignore
+        mod = import_module("configs.validate")  # type: ignore
+    except ModuleNotFoundError as e:
+        # With ROOT on sys.path, this should not happen in a repo checkout
+        raise SystemExit(
+            "error: could not import configs.validate; run from repo root or ensure it is on PYTHONPATH"
+        ) from e
+    return mod
 
 
 def _eprint(*args: Any) -> None:
@@ -122,10 +126,14 @@ def main(argv: list[str]) -> int:
         return 2
 
     try:
-        if 'validate_config_verbose' in globals() and validate_config_verbose is not None:  # type: ignore
-            normalized, warnings = validate_config_verbose(cfg)  # type: ignore
+        vmod = _load_validator()
+        validate_config_func = getattr(vmod, "validate_config")
+        validate_config_verbose_func = getattr(vmod, "validate_config_verbose", None)
+
+        if callable(validate_config_verbose_func):
+            normalized, warnings = validate_config_verbose_func(cfg)  # type: ignore[call-arg]
         else:
-            normalized = validate_config(cfg)
+            normalized = validate_config_func(cfg)
             warnings = []
     except ValueError as ve:
         print("CONFIG INVALID\n" + str(ve))

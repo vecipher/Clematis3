@@ -1,6 +1,13 @@
 
 
+
 from __future__ import annotations
+
+"""Typed error taxonomy (public, frozen for v3).
+
+Only `clematis` and `clematis.errors` are public import roots. Everything else is internal.
+This module exposes the operator-facing error classes and a small helper `format_error`.
+"""
 
 __all__ = [
     "ClematisError",
@@ -75,3 +82,7 @@ def format_error(e: BaseException) -> str:
     name = e.__class__.__name__
     msg = str(e).strip()
     return f"{name}: {msg}" if msg else name
+
+
+# Keep star-export order deterministic for tests and tooling
+__all__ = sorted(__all__)

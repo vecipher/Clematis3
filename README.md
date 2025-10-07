@@ -4,6 +4,8 @@ Clematis is a deterministic, turn‑based scaffold for agential AI. It models ag
 
 > **Status:** **v0.9.0a2** (2025‑10‑06) — **M13 Hardening & Freeze (frozen)**. See **[docs/m13/overview.md](docs/m13/overview.md)**. **M12 skipped** for v3. **M11 complete** ✅ (HS1/GEL substrate). Defaults unchanged; all GEL paths are **gated and OFF by default**; identity path preserved. M10 remains complete; M9 deterministic parallelism remains flag‑gated and OFF by default.
 >
+> **License:** Apache‑2.0 — see [LICENSE](./LICENSE) & [NOTICE](./NOTICE).
+>
 > **M13 — Hardening & Freeze (v3):** See **[docs/m13/overview.md](docs/m13/overview.md)**.
 >
 > **M10 — Reflection (complete):** Deterministic, gated; defaults OFF. See **[docs/m10/reflection.md](docs/m10/reflection.md)**.
@@ -37,7 +39,8 @@ Clematis is a deterministic, turn‑based scaffold for agential AI. It models ag
 
 ## Quick start
 
-> 📘 **Operator Guide (single page):** see `docs/operator-guide.md`
+> **Operator Guide (single page):** see `docs/operator-guide.md`
+> **Public API (v3):** see `docs/api_reference.md`
 ```bash
 # install (editable)
 python -m pip install -e .
@@ -318,8 +321,8 @@ When `CI=true`, log writes route through `clematis/engine/orchestrator/logging.a
 
 ## License
 
-**MIT** — see [LICENSE](./LICENSE).
-© 2025 vecipher (also referred to as 'vkyfka')
+**Apache-2.0** — see [LICENSE](./LICENSE) and [NOTICE](./NOTICE).
+Copyright © 2025 vecipher
 
 Pre‑M8 hardening notes: **`Changelog/PreM8Hardening.txt`**.
 LLM adapter + fixtures: **`docs/m3/llm_adapter.md`**.
