@@ -24,7 +24,7 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: '3.13'
           check-latest: true
           cache: 'pip'
           cache-dependency-path: |
@@ -156,6 +156,7 @@ jobs:
           CLEMATIS_NETWORK_BAN: "1"
           CI: "true"
           PYTHONHASHSEED: "0"
+          COLUMNS: "80"
         run: |
           set -euo pipefail
           pytest -q -m "not manual"
@@ -204,6 +205,7 @@ jobs:
           CLEMATIS_NETWORK_BAN: "1"
           CI: "true"
           PYTHONHASHSEED: "0"
+          COLUMNS: "80"
         run: |
           pytest -q tests/cli/test_help_stability.py
 
@@ -217,7 +219,7 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: '3.13'
           check-latest: true
           cache: 'pip'
           cache-dependency-path: |

@@ -5,7 +5,12 @@ import subprocess
 import pytest
 
 from tests.cli._normalize import normalize_help, write_or_assert
+import sys, platform, pytest
 
+pytestmark = pytest.mark.skipif(
+    sys.version_info[:2] != (3, 13) or platform.system() != "Linux",
+    reason="CLI goldens enforced on CPython 3.13 Linux only",
+)
 
 def _discover_subs():
     """Prefer clematis.cli.main.SUBS; fall back to introspecting the parser."""

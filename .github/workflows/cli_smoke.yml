@@ -17,7 +17,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        python-version: [ "3.11" ]
+        python-version: [ "3.13" ]
 
     concurrency:
       group: cli-smoke-${{ github.ref }}-${{ matrix.os }}-${{ matrix.python-version }}
