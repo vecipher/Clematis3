@@ -316,6 +316,11 @@ When `CI=true`, log writes route through `clematis/engine/orchestrator/logging.a
 - **M10 (complete):** reflection sessions — PR77 (config surface), PR80–PR83 (deterministic writer + budgets + identity tests), PR84 (fixtures‑only LLM backend), PR85 (planner flag + wiring), PR86 (telemetry & trace), PR87 (microbench & examples), PR88 (optional smoke), PR89 (docs), PR90 (goldens/identity maintenance). Defaults keep reflection OFF; identity path preserved.
 - **M11 (complete):** HS1/GEL substrate — contracts + plumbing present; observe/update + decay enabled only when `graph.enabled=true`; merge/split/promotion documented but **OFF** by default; disabled path is byte‑identical. See **docs/m11/overview.md**.
 
+## License
+
+**MIT** — see [LICENSE](./LICENSE).
+© 2025 vecipher (also referred to as 'vkyfka')
+
 Pre‑M8 hardening notes: **`Changelog/PreM8Hardening.txt`**.
 LLM adapter + fixtures: **`docs/m3/llm_adapter.md`**.
 

@@ -22,7 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       # Repro knobs
-      SOURCE_DATE_EPOCH: "1704067200"   # 2024-01-01T00:00:00Z (example)
+      SOURCE_DATE_EPOCH: "315532800"   # 1980-01-01T00:00:00Z (ZIP min date; aligns with PR115)
       PYTHONHASHSEED: "0"
       TZ: "UTC"
       LC_ALL: "C.UTF-8"
@@ -235,6 +235,62 @@ jobs:
               if not (has_name and has_ver):
                   raise SystemExit(f"wheel METADATA missing headers: Name={has_name}, Version={has_ver}")
               print("OK: wheel METADATA contains Name and Version (Metadata-Version:", mv + ")")
+          PY
+
+      - name: Verify license expression is Apache-2.0
+        shell: bash
+        run: |
+          set -euo pipefail
+          WHEEL=$(ls dist/*.whl | head -n1)
+          python - <<'PY' "$WHEEL"
+          import sys, zipfile
+          wheel = sys.argv[1]
+          with zipfile.ZipFile(wheel) as z:
+              meta_path = next((n for n in z.namelist() if n.endswith('.dist-info/METADATA')), None)
+              assert meta_path, "wheel missing .dist-info/METADATA"
+              data = z.read(meta_path).decode('utf-8', 'replace')
+          expr = None
+          license_hdr = None
+          files = []
+          for line in data.splitlines():
+              if line.lower().startswith('license-expression:'):
+                  expr = line.split(':',1)[1].strip()
+              elif line.lower().startswith('license:'):
+                  license_hdr = line.split(':',1)[1].strip()
+              elif line.lower().startswith('license-file:'):
+                  files.append(line.split(':',1)[1].strip())
+          print("License-Expression:", expr)
+          print("License:", license_hdr)
+          print("License-File headers:", files)
+          val = expr or license_hdr
+          assert val and 'Apache-2.0' in val, "Apache-2.0 license expression missing"
+          PY
+
+      - name: Verify LICENSE/NOTICE included (sdist & wheel)
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDIST=$(ls dist/*.tar.gz | head -n1)
+          WHEEL=$(ls dist/*.whl | head -n1)
+          python - <<'PY' "$SDIST" "$WHEEL"
+          import tarfile, zipfile, sys
+          sdist = sys.argv[1]
+          wheel = sys.argv[2]
+          def has_notice_license_in_sdist(p):
+              with tarfile.open(p, 'r:gz') as t:
+                  bases = {m.name.rsplit('/',1)[-1] for m in t.getmembers()}
+                  return any(b in {"LICENSE","LICENSE.txt"} for b in bases) and any(b in {"NOTICE","NOTICE.txt"} for b in bases)
+          def has_notice_license_in_wheel(p):
+              with zipfile.ZipFile(p) as z:
+                  bases = {n.rsplit('/',1)[-1] for n in z.namelist() if not n.endswith('/')}
+                  return any(b in {"LICENSE","LICENSE.txt"} for b in bases) and any(b in {"NOTICE","NOTICE.txt"} for b in bases)
+          ok1 = has_notice_license_in_sdist(sdist)
+          ok2 = has_notice_license_in_wheel(wheel)
+          if not ok1:
+              raise SystemExit("sdist missing LICENSE and/or NOTICE")
+          if not ok2:
+              raise SystemExit("wheel missing LICENSE and/or NOTICE")
+          print("OK: LICENSE and NOTICE present in both sdist and wheel")
           PY
 
       - name: Upload manpages artifact
@@ -947,7 +1003,7 @@ jobs:
 
       - name: Build sdist + wheel (deterministic)
         env:
-          SOURCE_DATE_EPOCH: "1704067200"
+          SOURCE_DATE_EPOCH: "315532800"
           TZ: "UTC"
           PYTHONHASHSEED: "0"
           PYTHONUTF8: "1"
@@ -1127,6 +1183,62 @@ jobs:
               if not (has_name and has_ver):
                   raise SystemExit(f"wheel METADATA missing headers: Name={has_name}, Version={has_ver}")
               print("OK: wheel METADATA contains Name and Version (Metadata-Version:", mv + ")")
+          PY
+
+      - name: Verify license expression is Apache-2.0 (Release)
+        shell: bash
+        run: |
+          set -euo pipefail
+          WHEEL=$(ls dist/*.whl | head -n1)
+          python - <<'PY' "$WHEEL"
+          import sys, zipfile
+          wheel = sys.argv[1]
+          with zipfile.ZipFile(wheel) as z:
+              meta_path = next((n for n in z.namelist() if n.endswith('.dist-info/METADATA')), None)
+              assert meta_path, "wheel missing .dist-info/METADATA"
+              data = z.read(meta_path).decode('utf-8', 'replace')
+          expr = None
+          license_hdr = None
+          files = []
+          for line in data.splitlines():
+              if line.lower().startswith('license-expression:'):
+                  expr = line.split(':',1)[1].strip()
+              elif line.lower().startswith('license:'):
+                  license_hdr = line.split(':',1)[1].strip()
+              elif line.lower().startswith('license-file:'):
+                  files.append(line.split(':',1)[1].strip())
+          print("License-Expression:", expr)
+          print("License:", license_hdr)
+          print("License-File headers:", files)
+          val = expr or license_hdr
+          assert val and 'Apache-2.0' in val, "Apache-2.0 license expression missing"
+          PY
+
+      - name: Verify LICENSE/NOTICE included in artifacts (Release)
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDIST=$(ls dist/*.tar.gz | head -n1)
+          WHEEL=$(ls dist/*.whl | head -n1)
+          python - <<'PY' "$SDIST" "$WHEEL"
+          import tarfile, zipfile, sys
+          sdist = sys.argv[1]
+          wheel = sys.argv[2]
+          def has_notice_license_in_sdist(p):
+              with tarfile.open(p, 'r:gz') as t:
+                  bases = {m.name.rsplit('/',1)[-1] for m in t.getmembers()}
+                  return any(b in {"LICENSE","LICENSE.txt"} for b in bases) and any(b in {"NOTICE","NOTICE.txt"} for b in bases)
+          def has_notice_license_in_wheel(p):
+              with zipfile.ZipFile(p) as z:
+                  bases = {n.rsplit('/',1)[-1] for n in z.namelist() if not n.endswith('/')}
+                  return any(b in {"LICENSE","LICENSE.txt"} for b in bases) and any(b in {"NOTICE","NOTICE.txt"} for b in bases)
+          ok1 = has_notice_license_in_sdist(sdist)
+          ok2 = has_notice_license_in_wheel(wheel)
+          if not ok1:
+              raise SystemExit("sdist missing LICENSE and/or NOTICE")
+          if not ok2:
+              raise SystemExit("wheel missing LICENSE and/or NOTICE")
+          print("OK: LICENSE and NOTICE present in both sdist and wheel")
           PY
 
       - name: Upload artifacts to Release (sdist + wheel)
