@@ -3,9 +3,10 @@ import sys
 import pathlib
 import subprocess
 import pytest
+import platform
 
-from tests.cli._normalize import normalize_help, write_or_assert
-import sys, platform, pytest
+from tests.cli._normalize import normalize_help
+from tests.cli._normalize import write_or_assert
 
 pytestmark = pytest.mark.skipif(
     sys.version_info[:2] != (3, 13) or platform.system() != "Linux",

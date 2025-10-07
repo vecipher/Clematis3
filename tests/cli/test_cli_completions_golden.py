@@ -1,6 +1,8 @@
 import os
 import pathlib
 import pytest
+import sys
+import platform
 
 try:
     import shtab  # type: ignore
@@ -9,8 +11,9 @@ except Exception:  # pragma: no cover
 
 
 from clematis.cli.main import build_parser  # type: ignore
-from tests.cli._normalize import normalize_completion, write_or_assert
-import sys, platform, pytest
+from tests.cli._normalize import normalize_completion
+from tests.cli._normalize import write_or_assert
+
 pytestmark = pytest.mark.skipif(
     sys.version_info[:2] != (3, 13) or platform.system() != "Linux",
     reason="CLI goldens enforced on CPython 3.13 Linux only",
