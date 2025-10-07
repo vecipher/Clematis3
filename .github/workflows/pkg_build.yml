@@ -272,7 +272,7 @@ jobs:
           set -euo pipefail
           SDIST=$(ls dist/*.tar.gz | head -n1)
           WHEEL=$(ls dist/*.whl | head -n1)
-          python - <<'PY'
+          python - <<'PY' "$SDIST" "$WHEEL"
           import tarfile, zipfile, sys
           sdist = sys.argv[1]
           wheel = sys.argv[2]
@@ -291,8 +291,6 @@ jobs:
           if not ok2:
               raise SystemExit("wheel missing LICENSE and/or NOTICE")
           print("OK: LICENSE and NOTICE present in both sdist and wheel")
-          PY
-          python - <<'PY' "$SDIST" "$WHEEL"
           PY
 
       - name: Upload manpages artifact
@@ -1222,7 +1220,7 @@ jobs:
           set -euo pipefail
           SDIST=$(ls dist/*.tar.gz | head -n1)
           WHEEL=$(ls dist/*.whl | head -n1)
-          python - <<'PY'
+          python - <<'PY' "$SDIST" "$WHEEL"
           import tarfile, zipfile, sys
           sdist = sys.argv[1]
           wheel = sys.argv[2]
@@ -1241,8 +1239,6 @@ jobs:
           if not ok2:
               raise SystemExit("wheel missing LICENSE and/or NOTICE")
           print("OK: LICENSE and NOTICE present in both sdist and wheel")
-          PY
-          python - <<'PY' "$SDIST" "$WHEEL"
           PY
 
       - name: Upload artifacts to Release (sdist + wheel)
