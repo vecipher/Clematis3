@@ -2,28 +2,27 @@
 .SH NAME
 clematis \\\- umbrella CLI for Clematis
 .SH SYNOPSIS
-usage: clematis [\-h] [\-\-version]
+usage: clematis [\-h] [\-\-version] <cmd> ...
 .SH DESCRIPTION
 umbrella CLI for Clematis
 .SH OPTIONS
 .nf
-usage: clematis [\-h] [\-\-version]
-                {rotate\-logs,inspect\-snapshot,bench\-t4,seed\-lance\-demo,validate,demo} ...
+usage: clematis [\-h] [\-\-version] <cmd> ...
 
-Clematis umbrella CLI
-
-positional arguments:
-  {rotate\-logs,inspect\-snapshot,bench\-t4,seed\-lance\-demo,validate,demo}
-    rotate\-logs         Delegates to scripts<PATH>
-    inspect\-snapshot    Delegates to scripts<PATH>
-    bench\-t4            Delegates to scripts<PATH>
-    seed\-lance\-demo     Delegates to scripts<PATH>
-    validate            Delegates to scripts/
-    demo                Delegates to scripts/
+Clematis umbrella CLI (v0.9.0a2)
 
 options:
-  \-h, \-\-help            show this help message and exit
-  \-\-version             show program's version number and exit
+  \-h, \-\-help          show this help message and exit
+  \-\-version           show program's version number and exit
+
+subcommands:
+  <cmd>
+    bench\-t4          Delegates to scripts<PATH>
+    demo              Delegates to scripts/
+    inspect\-snapshot  Delegates to scripts<PATH>
+    rotate\-logs       Delegates to scripts<PATH>
+    seed\-lance\-demo   Delegates to scripts<PATH>
+    validate          Delegates to scripts/
 
 See Operator Guide: docs<PATH>
 .fi

@@ -22,53 +22,53 @@ _shtab_clematis_options=(
 
 _shtab_clematis_bench_t4_options=(
   "(- : *)"{-h,--help}"[show this help message and exit]"
-  "--json[JSON output (stable, machine-readable)]"
-  "--table[Plain table output (no color)]"
-  "--quiet[suppress non-essential stderr]"
-  "--verbose[increase stderr verbosity]"
+  "--json[JSON output (stable, machine-readable) (default\: False)]"
+  "--table[Plain table output (no color) (default\: False)]"
+  "--quiet[suppress non-essential stderr (default\: False)]"
+  "--verbose[increase stderr verbosity (default\: False)]"
   "(-)*:Pass-through arguments for scripts\/bench_t4.py.:"
 )
 
 _shtab_clematis_demo_options=(
-  "--json[JSON output (stable, machine-readable)]"
-  "--table[Plain table output (no color)]"
-  "--quiet[suppress non-essential stderr]"
-  "--verbose[increase stderr verbosity]"
+  "--json[JSON output (stable, machine-readable) (default\: False)]"
+  "--table[Plain table output (no color) (default\: False)]"
+  "--quiet[suppress non-essential stderr (default\: False)]"
+  "--verbose[increase stderr verbosity (default\: False)]"
   "(- : *)"{-h,--help}"[show this help message and exit]"
 )
 
 _shtab_clematis_inspect_snapshot_options=(
   "(- : *)"{-h,--help}"[show this help message and exit]"
-  "--json[JSON output (stable, machine-readable)]"
-  "--table[Plain table output (no color)]"
-  "--quiet[suppress non-essential stderr]"
-  "--verbose[increase stderr verbosity]"
+  "--json[JSON output (stable, machine-readable) (default\: False)]"
+  "--table[Plain table output (no color) (default\: False)]"
+  "--quiet[suppress non-essential stderr (default\: False)]"
+  "--verbose[increase stderr verbosity (default\: False)]"
   "(-)*:Pass-through arguments for scripts\/inspect_snapshot.py.:"
 )
 
 _shtab_clematis_rotate_logs_options=(
   "(- : *)"{-h,--help}"[show this help message and exit]"
-  "--json[JSON output (stable, machine-readable)]"
-  "--table[Plain table output (no color)]"
-  "--quiet[suppress non-essential stderr]"
-  "--verbose[increase stderr verbosity]"
+  "--json[JSON output (stable, machine-readable) (default\: False)]"
+  "--table[Plain table output (no color) (default\: False)]"
+  "--quiet[suppress non-essential stderr (default\: False)]"
+  "--verbose[increase stderr verbosity (default\: False)]"
   "(-)*:args:"
 )
 
 _shtab_clematis_seed_lance_demo_options=(
   "(- : *)"{-h,--help}"[show this help message and exit]"
-  "--json[JSON output (stable, machine-readable)]"
-  "--table[Plain table output (no color)]"
-  "--quiet[suppress non-essential stderr]"
-  "--verbose[increase stderr verbosity]"
+  "--json[JSON output (stable, machine-readable) (default\: False)]"
+  "--table[Plain table output (no color) (default\: False)]"
+  "--quiet[suppress non-essential stderr (default\: False)]"
+  "--verbose[increase stderr verbosity (default\: False)]"
   "(-)*:Pass-through arguments for scripts\/seed_lance_demo.py.:"
 )
 
 _shtab_clematis_validate_options=(
-  "--json[JSON output (stable, machine-readable)]"
-  "--table[Plain table output (no color)]"
-  "--quiet[suppress non-essential stderr]"
-  "--verbose[increase stderr verbosity]"
+  "--json[JSON output (stable, machine-readable) (default\: False)]"
+  "--table[Plain table output (no color) (default\: False)]"
+  "--quiet[suppress non-essential stderr (default\: False)]"
+  "--verbose[increase stderr verbosity (default\: False)]"
   "(- : *)"{-h,--help}"[show this help message and exit]"
 )
 
