@@ -237,16 +237,33 @@ jobs:
               print("OK: wheel METADATA contains Name and Version (Metadata-Version:", mv + ")")
           PY
 
-      - name: Verify license classifier is Apache-2.0
+      - name: Verify license expression is Apache-2.0
+        shell: bash
         run: |
-          python - <<'PY'
-          from importlib.metadata import distribution
-          # Replace with canonical install name if different
-          dist = distribution("clematis")
-          classifiers = [c for c in dist.metadata.get_all("Classifier", []) if c.startswith("License ::")]
-          print("License classifiers:", classifiers)
-          assert any("Apache Software License" in c for c in classifiers), "Apache-2.0 classifier missing"
-          print("OK: Apache-2.0 classifier present")
+          set -euo pipefail
+          WHEEL=$(ls dist/*.whl | head -n1)
+          python - <<'PY' "$WHEEL"
+          import sys, zipfile
+          wheel = sys.argv[1]
+          with zipfile.ZipFile(wheel) as z:
+              meta_path = next((n for n in z.namelist() if n.endswith('.dist-info/METADATA')), None)
+              assert meta_path, "wheel missing .dist-info/METADATA"
+              data = z.read(meta_path).decode('utf-8', 'replace')
+          expr = None
+          license_hdr = None
+          files = []
+          for line in data.splitlines():
+              if line.lower().startswith('license-expression:'):
+                  expr = line.split(':',1)[1].strip()
+              elif line.lower().startswith('license:'):
+                  license_hdr = line.split(':',1)[1].strip()
+              elif line.lower().startswith('license-file:'):
+                  files.append(line.split(':',1)[1].strip())
+          print("License-Expression:", expr)
+          print("License:", license_hdr)
+          print("License-File headers:", files)
+          val = expr or license_hdr
+          assert val and 'Apache-2.0' in val, "Apache-2.0 license expression missing"
           PY
 
       - name: Verify LICENSE/NOTICE included (sdist & wheel)
@@ -1170,15 +1187,33 @@ jobs:
               print("OK: wheel METADATA contains Name and Version (Metadata-Version:", mv + ")")
           PY
 
-      - name: Verify license classifier is Apache-2.0 (Release)
+      - name: Verify license expression is Apache-2.0 (Release)
+        shell: bash
         run: |
-          python - <<'PY'
-          from importlib.metadata import distribution
-          dist = distribution("clematis")
-          classifiers = [c for c in dist.metadata.get_all("Classifier", []) if c.startswith("License ::")]
-          print("License classifiers:", classifiers)
-          assert any("Apache Software License" in c for c in classifiers), "Apache-2.0 classifier missing"
-          print("OK: Apache-2.0 classifier present")
+          set -euo pipefail
+          WHEEL=$(ls dist/*.whl | head -n1)
+          python - <<'PY' "$WHEEL"
+          import sys, zipfile
+          wheel = sys.argv[1]
+          with zipfile.ZipFile(wheel) as z:
+              meta_path = next((n for n in z.namelist() if n.endswith('.dist-info/METADATA')), None)
+              assert meta_path, "wheel missing .dist-info/METADATA"
+              data = z.read(meta_path).decode('utf-8', 'replace')
+          expr = None
+          license_hdr = None
+          files = []
+          for line in data.splitlines():
+              if line.lower().startswith('license-expression:'):
+                  expr = line.split(':',1)[1].strip()
+              elif line.lower().startswith('license:'):
+                  license_hdr = line.split(':',1)[1].strip()
+              elif line.lower().startswith('license-file:'):
+                  files.append(line.split(':',1)[1].strip())
+          print("License-Expression:", expr)
+          print("License:", license_hdr)
+          print("License-File headers:", files)
+          val = expr or license_hdr
+          assert val and 'Apache-2.0' in val, "Apache-2.0 license expression missing"
           PY
 
       - name: Verify LICENSE/NOTICE included in artifacts (Release)
