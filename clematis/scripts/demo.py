@@ -168,9 +168,10 @@ def main():
     demo_ctx = DemoCtx(now_ms)
     policy = args.policy or _get_path(cfg, ["scheduler", "policy"], "round_robin")
     fairness = _get_path(cfg, ["scheduler", "fairness"], {}) or {}
+    ldir = logs_dir()
 
     print(f"Demo: policy={policy}, agents={agents}, steps={args.steps}")
-    print(f"Logs dir: {logs_dir()}")
+    print(f"Logs dir: {ldir}")
     print("---")
     # NOTE: In CI, identity workflow relies on deterministic now_ms for stable logs.
 
@@ -245,9 +246,8 @@ def main():
         else:
             print(f"[{step}] NO-YIELD agent={agent_id} pick={pick_reason}  | utter={line!r}")
 
-    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
     print("---")
-    print("Logs written to:", os.path.join(repo_root, ".logs"))
+    print("Logs written to:", ldir)
 
 
 if __name__ == "__main__":

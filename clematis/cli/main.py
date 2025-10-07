@@ -5,22 +5,30 @@ import sys
 from pathlib import Path
 from typing import List
 
+from clematis.cli_utils import (
+    DeterministicHelpFormatter,
+    HELP_EPILOG,
+    reorder_subparsers_alphabetically,
+)
+
 from . import bench_t4, demo, inspect_snapshot, rotate_logs, seed_lance_demo, validate
 from ._config import discover_config_path, maybe_log_selected
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        prog="clematis",
-        description="Clematis umbrella CLI",
-        epilog="See Operator Guide: docs/operator-guide.md",
-        allow_abbrev=False,
-    )
-    # Top-level version flag (kept for help determinism/tests)
+    # Resolve version lazily (avoid import side-effects)
     try:
-        from clematis import __version__ as _VER  # lazy import to avoid side effects
+        from clematis import __version__ as _VER  # noqa: WPS433
     except Exception:
         _VER = "unknown"
+    parser = argparse.ArgumentParser(
+        prog="clematis",
+        description=f"Clematis umbrella CLI (v{_VER})",
+        epilog=HELP_EPILOG,
+        allow_abbrev=False,
+        formatter_class=DeterministicHelpFormatter,
+    )
+    # Top-level version flag (kept for help determinism/tests)
     parser.add_argument(
         "--version",
         action="version",
@@ -39,7 +47,7 @@ def build_parser() -> argparse.ArgumentParser:
         dest="config",
         help=argparse.SUPPRESS,
     )
-    subparsers = parser.add_subparsers(dest="command")
+    subparsers = parser.add_subparsers(dest="command", title="subcommands", metavar="<cmd>")
 
     # Register wrappers (pass-through pattern)
     rotate_logs.register(subparsers)
@@ -49,6 +57,7 @@ def build_parser() -> argparse.ArgumentParser:
     validate.register(subparsers)
     demo.register(subparsers)
 
+    reorder_subparsers_alphabetically(parser)
     return parser
 
 

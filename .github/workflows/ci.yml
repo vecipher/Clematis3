@@ -24,7 +24,7 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: '3.13'
           check-latest: true
           cache: 'pip'
           cache-dependency-path: |
@@ -156,6 +156,7 @@ jobs:
           CLEMATIS_NETWORK_BAN: "1"
           CI: "true"
           PYTHONHASHSEED: "0"
+          COLUMNS: "80"
         run: |
           set -euo pipefail
           pytest -q -m "not manual"
@@ -169,9 +170,48 @@ jobs:
           python scripts/examples_smoke.py --examples examples/gel/disabled.yaml
           python scripts/examples_smoke.py --examples examples/gel/enabled.yaml
 
+  cli_help_stability:
+    name: CLI help stability (cross-OS)
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ['3.11', '3.12', '3.13']
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          check-latest: true
+          cache: 'pip'
+          cache-dependency-path: |
+            pyproject.toml
+
+      - name: Upgrade pip
+        run: python -m pip install --upgrade pip
+
+      - name: Install package + test deps
+        run: |
+          python -m pip install -U pip
+          pip install -e ".[test,dev]"
+          # Fallback in case extras not defined on forks
+          pip install pytest || true
+
+      - name: Run CLI help stability tests
+        env:
+          CLEMATIS_NETWORK_BAN: "1"
+          CI: "true"
+          PYTHONHASHSEED: "0"
+          COLUMNS: "80"
+        run: |
+          pytest -q tests/cli/test_help_stability.py
+
   reproducible_build:
     name: Reproducible build (wheel + sdist)
-    needs: test
+    needs: [test, cli_help_stability]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -179,7 +219,7 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: '3.13'
           check-latest: true
           cache: 'pip'
           cache-dependency-path: |
