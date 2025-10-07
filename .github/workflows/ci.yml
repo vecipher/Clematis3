@@ -209,9 +209,49 @@ jobs:
         run: |
           pytest -q tests/cli/test_help_stability.py
 
+  perf_flags_identity_off:
+    name: Perf flags identity OFF (canonical)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      COLUMNS: 80
+      TZ: UTC
+      PYTHONHASHSEED: "0"
+      SOURCE_DATE_EPOCH: "315532800"
+      LC_ALL: C.UTF-8
+      CLEMATIS_NETWORK_BAN: "1"
+      CI: "true"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          check-latest: true
+          cache: 'pip'
+          cache-dependency-path: |
+            pyproject.toml
+
+      - name: Upgrade pip
+        run: python -m pip install --upgrade pip
+
+      - name: Install deps (dev+test)
+        run: |
+          python -m pip install -U pip
+          pip install -e .[dev,test]
+
+      - name: Run perf guard tests (canonical)
+        run: |
+          set -euo pipefail
+          pytest -q \
+            tests/perf/test_perf_flags_identity_off.py::test_t2_hybrid_params_do_not_matter_when_disabled \
+            tests/perf/test_perf_flags_identity_off.py::test_gel_params_do_not_matter_when_disabled \
+            tests/perf/test_perf_flags_identity_off.py::test_native_t1_params_do_not_matter_when_disabled \
+            tests/perf/test_perf_shadow_logs.py
+
   reproducible_build:
     name: Reproducible build (wheel + sdist)
-    needs: [test, cli_help_stability]
+    needs: [test, cli_help_stability, perf_flags_identity_off]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:

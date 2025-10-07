@@ -10,6 +10,41 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added (PR121 — CLI help stability & determinism)
+- **Deterministic help:** `cli_utils.py` provides a fixed‑width formatter; constant epilog (`"See Operator Guide: docs/operator-guide.md"`); subcommands listed **alphabetically**.
+- **CLI main:** `clematis/cli/main.py` surfaces the version in the description, sets `allow_abbrev=False`, sorts subcommands, and uses the deterministic formatter.
+- **Trampoline:** `__main__.py` cleans delegation with `__future__` imports positioned deterministically.
+- **Demo polish:** `scripts/demo.py` prints the exact log directory it writes to.
+
+### Tests (PR121)
+- `tests/cli/test_help_stability.py` asserts width invariance (60/80/120 columns), constant epilog, and stable subcommand ordering (extractor tolerates wrapped “Delegates to …” lines).
+- Goldens refreshed for top‑level help text to reflect the new ordering; shell completions remained stable.
+
+### CI/Workflows (PR121)
+- Golden/help jobs pinned to **Python 3.13** with `COLUMNS=80` for canonical rendering.
+- `.github/workflows/ci.yml`: help‑stability job added; `reproducible_build` runs on 3.13 and depends on help stability.
+- `pkg_build.yml`: manpage generation runs on Python 3.13 with `COLUMNS=80` (canonical).
+
+### Tooling (PR121)
+- `pyproject.toml`: dev pins `ruff==0.13.3`; `ruff` `target-version="py311"` to match the lowest supported Python; `requires-python >=3.11,<3.14`.
+
+### Added (PR122 — Perf/quality flag guards; shadow logs segregation)
+- **Identity exclusion:** `tests/helpers/identity.py` now **ignores** any file ending with `-perf.jsonl` and anything under `logs/perf/` (cross‑OS path normalization).
+- **Perf writer helper:** new `clematis/engine/observability_perf.py` with `write_perf_jsonl` / `write_perf_jsonl_many` writes non‑canonical diagnostics to `logs/perf/{name}.jsonl`. Canonical logs (e.g., `t1.jsonl`, `t2.jsonl`, `t4.jsonl`, `apply.jsonl`) remain untouched.
+- **Demo breadcrumb:** `scripts/demo.py` emits `logs/perf/t2_hybrid.jsonl` **only** when `t2.hybrid.enabled=true`. Also adds `--config-overrides <file.json>` to apply nested JSON overrides without editing configs.
+
+### Tests (PR122)
+- `tests/perf/test_perf_flags_identity_off.py`: with top‑level flags **OFF**, mutating internal knobs yields **byte‑identical** canonical logs; asserts that **no** `*-perf.jsonl` files or `logs/perf/` dir are produced.
+- `tests/perf/test_perf_shadow_logs.py`: when hybrid is **ON**, asserts a perf log is produced; identity helpers ignore it.
+
+### CI (PR122)
+- `.github/workflows/ci.yml`: adds required job **perf_flags_identity_off** (Linux, Python **3.13**, `COLUMNS=80`, deterministic env). **reproducible_build** now depends on this job.
+
+### Docs (PR122)
+- `docs/m13/overview.md`: TL;DR and Identity sections now document `logs/perf/` segregation and deterministic CLI help environment.
+- `README.md`: new “Perf/diagnostic logs (non‑canonical)” section and `--config-overrides` quickstart; status block notes deterministic CLI help (Linux + Python 3.13, `COLUMNS=80`).
+
+
 ### Added (PR109 — M13-01: Snapshot schema v1 header; inspector/loader)
 - **Snapshot schema v1 freeze:** all snapshots now include a **header** with `schema_version: "v1"` and `created_at` (UTC ISO). `created_at` honors `SOURCE_DATE_EPOCH` for determinism.
 - **Inspector:** **strict by default** — exits **2** on schema errors (missing/mismatch). `--no-strict` prints a warning to **stderr** and still emits JSON to **stdout**.

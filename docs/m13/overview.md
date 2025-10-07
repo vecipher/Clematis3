@@ -2,7 +2,7 @@
 
 **Status:** Frozen on **2025-10-06 SGT**. v3 is a stable, reproducible baseline. No breaking changes will be made to the v1 configuration or snapshot schemas before v4.
 
-> TL;DR: Config **v1** and Snapshot **v1** are locked. Identity is cross-OS. Builds are reproducible. Windows file I/O is atomic. Errors are typed. Everything else is conservative and default-OFF.
+> TL;DR: Config **v1** and Snapshot **v1** are locked. Identity is cross-OS. Builds are reproducible. Windows file I/O is atomic. Errors are typed. Shadow/perf diagnostics are segregated under `logs/perf/` and excluded from identity. Everything else is conservative and default-OFF.
 
 ---
 
@@ -27,7 +27,8 @@
     LC_ALL=C.UTF-8
     SOURCE_DATE_EPOCH=315532800
     ```
-  - Canonicalization: LF newlines on all text; forward-slash path separators in logs; canonical JSON (`sort_keys=True`, compact separators).
+  - **Canonicalization:** LF newlines on all text; forward-slash path separators in logs; canonical JSON (`sort_keys=True`, compact separators).
+  - **Shadow diagnostics segregation:** anything under `logs/perf/` or files ending with `-perf.jsonl` are ignored by identity comparisons; canonical logs remain the stage logs (`t1.jsonl`, `t2.jsonl`, `t4.jsonl`, `apply.jsonl`, `turn.jsonl`; `scheduler.jsonl` where applicable).
   - Goldens normalized once post-M13; thereafter byte-stable across OS.
 
 - **Reproducible builds.**
@@ -66,7 +67,7 @@
 
 - **Compatibility promise (v3.x):**
   - No changes to **Config v1** and **Snapshot v1** semantics.
-  - Public CLI and error contracts remain stable (deterministic help text will be locked in a dedicated PR).
+  - Public CLI and error contracts remain stable (**deterministic help text is locked**; goldens are recorded on Linux + Python 3.13 with `COLUMNS=80`).
   - Any optional features must default to **OFF** and must not change identity when OFF.
 
 - **EOL policy for v3:**
@@ -89,6 +90,7 @@
 
 - If you have goldens recorded before M13’s newline/path normalization, re-record once using the provided normalization script; lock after that.
 - Ensure CI uses the **deterministic env** block above (notably `SOURCE_DATE_EPOCH=315532800`).
+- If you enable perf/quality flags, expect extra logs under `logs/perf/`. These are non-canonical diagnostics and are excluded from identity gates.
 
 ---
 

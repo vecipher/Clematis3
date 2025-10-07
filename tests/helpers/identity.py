@@ -15,6 +15,7 @@ _DROP_KEYS = {
     "version_etag",
     "tier_sequence",  # added to stabilize disabled-path identity
     "ms",             # plain 'ms' timing field
+    "created_at",     # drop real-time timestamp for identity comparisons
 }
 # Suffixes/prefixes for volatile timing keys
 _DROP_SUFFIXES = ("_ms",)       # e.g., duration_ms, total_ms
@@ -25,6 +26,70 @@ _PATH_KEY_NAMES = {
     "dir", "directory", "logs_dir", "log_file"
 }
 _PATH_KEY_SUFFIXES = ("_path", "_file", "_dir", "_directory")
+
+# Perf/quality shadow logs: ignore from identity comparisons
+_PERF_SUFFIX = "-perf.jsonl"
+_PERF_DIRNAME = "perf"
+
+def _is_perf_relpath(rel: str) -> bool:
+    """
+    Return True if the relative path should be excluded from identity
+    comparisons as a perf/diagnostic log:
+      - Any file ending with "-perf.jsonl"
+      - Any file located under a directory named "perf" (e.g., "perf/foo.jsonl"
+        or "logs/perf/bar.jsonl", regardless of OS separators)
+    """
+    # Normalize separators to forward slashes for robust matching
+    rp = rel.replace("\\", "/")
+    if rp.endswith(_PERF_SUFFIX):
+        return True
+    parts = rp.split("/")
+    return _PERF_DIRNAME in parts
+
+CANONICAL_LOGS: tuple[str, ...] = (
+    "t1.jsonl",
+    "t2.jsonl",
+    "t4.jsonl",
+    "apply.jsonl",
+    "turn.jsonl",
+)
+
+def _choose_log_root(root: str | Path) -> Path:
+    """
+    Prefer <root> if canonical logs are present there; otherwise use <root>/logs if it exists.
+    This tolerates runners that write to either the output dir or a 'logs' subdir.
+    """
+    r = Path(root)
+    # If any canonical file exists at root, use it.
+    for name in CANONICAL_LOGS:
+        if (r / name).exists():
+            return r
+    # Else prefer a 'logs' subdir when present.
+    logs = r / "logs"
+    if logs.exists():
+        return logs
+    return r
+
+def read_logs(root: str | Path) -> dict[str, list[str]]:
+    """
+    Read canonical JSONL logs from a run directory, ignoring perf/diagnostic logs.
+    Returns a mapping {filename: [lines...]} with stable JSON normalization.
+    """
+    base = _choose_log_root(root)
+    out: dict[str, list[str]] = {}
+    for name in CANONICAL_LOGS:
+        p = base / name
+        if not p.exists():
+            continue
+        # Skip any accidental perf/diagnostic paths by name convention
+        if _is_perf_relpath(str(name)):
+            continue
+        # Normalize newline styles first (CRLF/CR -> LF) for stable splits
+        text = p.read_text(encoding="utf-8").replace("\r\n", "\n").replace("\r", "\n")
+        lines = text.splitlines()
+        # Canonicalize each line (drops _DROP_KEYS incl. created_at; stable sort/sep)
+        out[name] = normalize_json_lines(lines)
+    return out
 
 
 def _normalize(obj: Any) -> Any:
@@ -86,7 +151,7 @@ def normalize_json_lines(lines: list[str]) -> list[str]:
     return [normalize_json_line(ln) for ln in lines if ln.strip()]
 
 
-def normalize_logs_dir(p: str, base: str | None = None) -> str:
+def normalize_logs_dir(p: str | None = None, base: str | None = None) -> str:
     """
     Normalize a logs directory path deterministically for comparisons:
     - Expand ~ and environment vars
@@ -108,6 +173,8 @@ def normalize_log_bytes_for_identity(file_map: dict[str, bytes]) -> dict[str, by
     """
     Normalize a map of log files ({relative_path: bytes}) for disabled-path identity comparisons.
     Rules:
+        - Ignore perf/diagnostic logs: skip any entry whose relative path ends with "-perf.jsonl"
+          or that resides under a "perf" directory (e.g., "perf/*.jsonl" or "logs/perf/*.jsonl").
       - For any *.jsonl file, decode UTF-8 lines and apply `normalize_json_line` to each non-empty line,
         which drops keys in _DROP_KEYS and any keys ending with suffixes in _DROP_SUFFIXES or starting with prefixes in _DROP_PREFIXES.
       - Preserve the presence/absence of a trailing newline to avoid accidental diffs.
@@ -116,6 +183,9 @@ def normalize_log_bytes_for_identity(file_map: dict[str, bytes]) -> dict[str, by
     """
     out: dict[str, bytes] = {}
     for rel, blob in file_map.items():
+        # Exclude perf/diagnostic shadow logs from identity comparisons
+        if _is_perf_relpath(rel):
+            continue
         if rel.endswith(".jsonl"):
             try:
                 text = blob.decode("utf-8", errors="strict")
@@ -144,6 +214,7 @@ __all__ = [
     "normalize_logs_dir",
     "normalize_log_bytes_for_identity",
     "route_logs",
+    "read_logs",
     "read_lines",
     "hash_file",
     "collect_snapshots_from_apply",

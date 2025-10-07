@@ -2,7 +2,9 @@ import os
 import sys
 import time
 import argparse
+import json
 from typing import Any, List, Dict
+from pathlib import Path
 
 # Ensure the project root is importable before loading clematis modules.
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -11,7 +13,7 @@ if REPO_ROOT not in sys.path:
 
 from clematis.io.config import load_config
 from clematis.io.log import append_jsonl
-from clematis.io.paths import logs_dir
+import clematis.io.paths as _paths
 from clematis.world.scenario import run_one_turn
 from clematis.scheduler import init_scheduler_state, next_turn, on_yield
 
@@ -51,6 +53,35 @@ def _get_path(root: Any, path: List[str], default: Any = None) -> Any:
         else:
             cur = getattr(cur, k, None)
     return default if cur is None else cur
+
+
+def _set_field(target: Any, key: str, value: Any) -> None:
+    """Set key on dict or attribute on object; tolerate non-slot objects."""
+    if value is None:
+        return
+    if isinstance(target, dict):
+        target[key] = value
+    else:
+        try:
+            setattr(target, key, value)
+        except Exception:
+            d = getattr(target, "__dict__", None)
+            if isinstance(d, dict):
+                d[key] = value
+                return
+
+def _apply_overrides(cfg: Any, overrides: Dict[str, Any]) -> Any:
+    """
+    Recursively apply nested dict overrides onto a mixed dict/object config.
+    Creates intermediate dicts via _ensure_child when needed.
+    """
+    for k, v in overrides.items():
+        if isinstance(v, dict):
+            child = _ensure_child(cfg, k)
+            _apply_overrides(child, v)
+        else:
+            _set_field(cfg, k, v)
+    return cfg
 
 
 def _maybe_override_cfg_inplace(cfg: Any, args: Any) -> Any:
@@ -147,6 +178,18 @@ def _parse_args() -> argparse.Namespace:
         default=13371337,
         help="Deterministic now_ms base when --wall-clock is not set (default: 13371337)",
     )
+    p.add_argument(
+        "--config-overrides",
+        type=str,
+        default=None,
+        help="Path to a JSON file with nested config overrides (applied after --policy/--t*-* flags).",
+    )
+    p.add_argument(
+        "--out",
+        type=str,
+        default=None,
+        help="Directory to write logs to."
+    )
     return p.parse_args()
 
 
@@ -154,6 +197,22 @@ def main():
     args = _parse_args()
     cfg = load_config(args.config)
     cfg = _maybe_override_cfg_inplace(cfg, args)
+
+    # Apply generic nested overrides from a JSON file, if provided
+    if getattr(args, "config_overrides", None):
+        with open(args.config_overrides, "r", encoding="utf-8") as f:
+            try:
+                overrides = json.load(f)
+            except json.JSONDecodeError as e:
+                print(f"Invalid JSON in --config-overrides: {e}", file=sys.stderr)
+                sys.exit(2)
+        _apply_overrides(cfg, overrides)
+
+    # If --out is provided, override the logs_dir() function to point there (before any logging).
+    if getattr(args, "out", None):
+        out_dir = os.path.abspath(str(args.out))
+        os.makedirs(out_dir, exist_ok=True)
+        _paths.logs_dir = lambda: out_dir  # type: ignore[assignment]
 
     agents = sorted([a.strip() for a in args.agents.split(",") if a.strip()])
     if not agents:
@@ -168,7 +227,29 @@ def main():
     demo_ctx = DemoCtx(now_ms)
     policy = args.policy or _get_path(cfg, ["scheduler", "policy"], "round_robin")
     fairness = _get_path(cfg, ["scheduler", "fairness"], {}) or {}
-    ldir = logs_dir()
+    ldir = _paths.logs_dir()
+
+    # Emit a non-canonical perf record up-front if the hybrid reranker is enabled.
+    # This satisfies PR122 shadow-log segregation and does not touch canonical logs.
+    try:
+        from clematis.engine.observability_perf import write_perf_jsonl
+    except Exception:
+        write_perf_jsonl = None  # pragma: no cover
+
+    if write_perf_jsonl is not None:
+        hybrid_enabled = bool(_get_path(cfg, ["t2", "hybrid", "enabled"], False))
+        if hybrid_enabled:
+            write_perf_jsonl(
+                Path(ldir),
+                "t2_hybrid",
+                {
+                    "hybrid_used": True,
+                    "lambda_graph": _get_path(cfg, ["t2", "hybrid", "lambda_graph"], None),
+                    "anchor_top_m": _get_path(cfg, ["t2", "hybrid", "anchor_top_m"], None),
+                    "walk_hops": _get_path(cfg, ["t2", "hybrid", "walk_hops"], None),
+                    "degree_norm": _get_path(cfg, ["t2", "hybrid", "degree_norm"], None),
+                },
+            )
 
     print(f"Demo: policy={policy}, agents={agents}, steps={args.steps}")
     print(f"Logs dir: {ldir}")

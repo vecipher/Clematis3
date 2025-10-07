@@ -11,6 +11,8 @@ Clematis is a deterministic, turn‑based scaffold for agential AI. It models ag
 > **M10 — Reflection (complete):** Deterministic, gated; defaults OFF. See **[docs/m10/reflection.md](docs/m10/reflection.md)**.
 >
 > **M11 — HS1/GEL (complete):** Substrate landed; defaults OFF; identity preserved. See **[docs/m11/overview.md](docs/m11/overview.md)**.
+>
+> **Identity & perf:** Shadow/perf diagnostics are written under `logs/perf/` and are ignored by identity; canonical logs remain `t1.jsonl`, `t2.jsonl`, `t4.jsonl`, `apply.jsonl`, `turn.jsonl` (and `scheduler.jsonl` where applicable). CLI help text is deterministic (Linux + Python 3.13, `COLUMNS=80`).
 
 ---
 
@@ -29,7 +31,7 @@ Clematis is a deterministic, turn‑based scaffold for agential AI. It models ag
   T1 keyword/seeded propagation → T2 semantic retrieval (+ residual) → T3 bounded policy (rule‑based by default; fixtures‑only LLM backend available) → T4 meta‑filter & apply/persist.
   **Reflection (M10):** gated and deterministic. Default OFF; when enabled it runs post‑Apply, never mutates T1/T2/T4/apply artifacts for the current turn. Rule‑based backend is pure/deterministic; LLM backend is **fixtures‑only** for determinism.
   **GEL (M11):** optional field‑control substrate (co‑activation update + half‑life decay; merge/split/promotion available), **default OFF**. See **[docs/m11/overview.md](docs/m11/overview.md)**.
-- **Determinism:** golden logs, identity path when gates are OFF; shadow/quality traces never affect results.
+- **Determinism:** golden logs, identity path when gates are OFF; shadow/quality traces never affect results. Shadow/perf diagnostics are written under `logs/perf/` and ignored by identity.
 - **Config freeze:** v3 config schema is frozen at `version: "v1"`. Unknown top‑level keys are rejected. See [docs/m13/config_freeze.md](docs/m13/config_freeze.md).
 - **Snapshot freeze:** v3 snapshots include a header field `schema_version: "v1"`; the inspector validates the header and **fails by default** (exit 2). Use `--no-strict` to only warn. See [docs/m13/snapshot_freeze.md](docs/m13/snapshot_freeze.md).
 - **Typed errors:** operator‑facing failures use `clematis.errors.*`. See [docs/m13/error_taxonomy.md](docs/m13/error_taxonomy.md).
@@ -86,6 +88,23 @@ scripts/repro_check_local.sh --twice    # build twice and assert byte‑identica
 
 CI also enforces cross‑OS reproducibility; see `.github/workflows/pkg_build.yml`.
 
+
+### Perf/diagnostic logs (non‑canonical)
+
+- Non‑canonical diagnostics are routed to `logs/perf/` (or files ending with `-perf.jsonl`).
+- Identity/golden comparisons **ignore** these files.
+- Example: enabling the hybrid reranker in T2 may emit `logs/perf/t2_hybrid.jsonl`.
+- To toggle features locally without editing configs, you can supply a JSON overrides file:
+
+```bash
+python -m clematis.scripts.demo --config examples/perf/parallel_on.yaml --config-overrides overrides.json
+```
+
+Where `overrides.json` could be:
+
+```json
+{"t2": {"hybrid": {"enabled": true}}}
+```
 
 ### GEL (HS1) examples
 
@@ -276,6 +295,7 @@ See **docs/m9/overview.md** for determinism rules, identity guarantees, and trou
 - `clematis/engine/util/parallel.py` — deterministic thread-pool helper (`run_parallel`), unit tests only.
 - `clematis/engine/util/logmux.py` — ctx‑aware buffered logging (PR70 driver capture & deterministic flush).
 - `clematis/engine/util/io_logging.py` — deterministic log staging and ordered flush (PR71).
+- `clematis/engine/observability_perf.py` — non‑canonical diagnostics writer (`logs/perf/*.jsonl`).
 - `clematis/engine/stages/state_clone.py` — read‑only state snapshot utilities for the compute phase.
 - `clematis/engine/stages/t2/` — T2 retrieval stack (post‑PR76 refactor):
   - `core.py` — lean orchestrator (retrieval + calls quality/metrics)
