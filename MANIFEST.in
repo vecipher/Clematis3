@@ -2,6 +2,7 @@
 include pyproject.toml
 include README.md
 include LICENSE
+include NOTICE
 include clematis/VERSION
 
 # Package sources and data (only real file types present)
