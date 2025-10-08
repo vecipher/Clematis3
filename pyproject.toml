@@ -34,12 +34,12 @@ Changelog = "https://github.com/vecipher/Clematis3/blob/main/CHANGELOG.MD"
 dev = [
   "build>=1.2.1,<2",
   "wheel>=0.43,<1",
-  "pytest>=8,<9",
+  "pytest==8.3.2",
   "hypothesis>=6,<7",
   "ruff==0.13.3",
-  "mypy>=1.11,<2",
-  "types-PyYAML>=6.0.12.20240808,<7",
-  "pre-commit>=3.8,<4",
+  "mypy==1.11.2",
+  "types-PyYAML==6.0.12.20240808",
+  "pre-commit==3.7.1",
   'numpy>=1.26,<2; python_version < "3.13"',
   'numpy>=2.1; python_version >= "3.13"',
   "shtab==1.7.1",
@@ -161,9 +161,9 @@ ignore_missing_imports = true
 follow_imports = "skip"
 show_error_codes = true
 pretty = true
-exclude = "(?x)(^tests/|^scripts/|^man/|^build/|^dist/)"
-files = ["configs"]
-# Helpful, not painful at this stage
+# CI scope: check CLI only (engine typing tracked separately)
+files = ["clematis/cli"]
+# Keep helpful warnings but don't require annotations everywhere in CLI yet
 disallow_untyped_defs = false
 check_untyped_defs = false
 allow_redefinition = true
