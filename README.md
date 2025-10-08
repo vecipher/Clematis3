@@ -2,9 +2,11 @@
 
 Clematis is a deterministic, turn‑based scaffold for agential AI. It models agents with concept graphs and tiered reasoning (T1→T4), uses small LLMs where needed, and keeps runtime behavior reproducible (no hidden network calls in tests/CI).
 
-> **Status:** **v0.10.0** (2025‑10‑06) — **M13 Hardening & Freeze (frozen)**. See **[docs/m13/overview.md](docs/m13/overview.md)**. **M12 skipped** for v3. **M11 complete** ✅ (HS1/GEL substrate). Defaults unchanged; all GEL paths are **gated and OFF by default**; identity path preserved. M10 remains complete; M9 deterministic parallelism remains flag‑gated and OFF by default.
+> **Status:** **v0.10.0** (2025‑10‑08) — **M13 Hardening & Freeze (frozen)**. See **[docs/m13/overview.md](docs/m13/overview.md)**. **M12 skipped** for v3. **M11 complete** ✅ (HS1/GEL substrate). Defaults unchanged; all GEL paths are **gated and OFF by default**; identity path preserved. M10 remains complete; M9 deterministic parallelism remains flag‑gated and OFF by default.
 >
 > **License:** Apache‑2.0 — see [LICENSE](./LICENSE) & [NOTICE](./NOTICE).
+> **Support matrix:** Python **3.11–3.13**; Ubuntu, macOS, Windows. Cross‑OS identity and reproducible builds (SBOM/SLSA) enforced in CI.
+> **Changelog:** see [CHANGELOG.md](CHANGELOG.md) for **v0.10.0**.
 >
 > **M13 — Hardening & Freeze (v3):** See **[docs/m13/overview.md](docs/m13/overview.md)**.
 >
@@ -36,13 +38,13 @@ Clematis is a deterministic, turn‑based scaffold for agential AI. It models ag
 - **Snapshot freeze:** v3 snapshots include a header field `schema_version: "v1"`; the inspector validates the header and **fails by default** (exit 2). Use `--no-strict` to only warn. See [docs/m13/snapshot_freeze.md](docs/m13/snapshot_freeze.md).
 - **Typed errors:** operator‑facing failures use `clematis.errors.*`. See [docs/m13/error_taxonomy.md](docs/m13/error_taxonomy.md).
 
-> 🔒 **M13 – Hardening & Freeze (v3):** v3 is frozen as of 2025‑10‑06 SGT.
+> 🔒 **M13 – Hardening & Freeze (v3):** v3 is frozen as of 2025‑10‑08 SGT.
 > See **[docs/m13/overview.md](docs/m13/overview.md)** for what’s locked (Config v1, Snapshot v1), identity guarantees, support matrix, and EOL stance.
 
 ## Quick start
 
-> **Operator Guide (single page):** see `docs/operator-guide.md`
-> **Public API (v3):** see `docs/api_reference.md`
+> **Operator Guide (single page):** see [docs/operator-guide.md](docs/operator-guide.md)
+> **Public API (v3):** see [docs/api_reference.md](docs/api_reference.md)
 ```bash
 # install (editable)
 python -m pip install -e .
@@ -55,7 +57,7 @@ python -m clematis rotate-logs -- --dir ./.logs --dry-run
 # or
 python -m clematis --dir ./.logs rotate-logs -- --dry-run
 
-# Some scripts need optional extras. See docs/m8/packaging_cli.md (e.g., pip install "clematis[zstd]" or "clematis[lancedb]").
+# Some scripts need optional extras. See [docs/m8/packaging_cli.md](docs/m8/packaging_cli.md) (e.g., pip install "clematis[zstd]" or "clematis[lancedb]").
 ```
 
 
@@ -87,6 +89,7 @@ scripts/repro_check_local.sh --twice    # build twice and assert byte‑identica
 ```
 
 CI also enforces cross‑OS reproducibility; see `.github/workflows/pkg_build.yml`.
+For SBOM and **SLSA provenance** verification, see [docs/m8/packaging_cli.md#supply-chain-sbom--provenance](docs/m8/packaging_cli.md#supply-chain-sbom--provenance).
 
 
 ### Perf/diagnostic logs (non‑canonical)
@@ -189,46 +192,25 @@ Optional CI workflow: `.github/workflows/reflection_smoke.yml`.
 - To auto‑run on pushes temporarily, set `RUN_REFLECTION_SMOKE: "true"` in that workflow’s top‑level `env:` and revert before merging.
 
 ### M9: deterministic parallelism (flag‑gated)
-The PR63 surface adds a validated config for deterministic parallelism. Defaults keep behavior identical to previous milestones. As of PR66, T1 can fan‑out **per active graph** via the deterministic runner, with stable merge ordering; as of PR67, minimal observability metrics are available when enabled. As of **PR68**, T2 can fan‑out across **in‑memory** shards with a deterministic, tier‑ordered merge (score‑desc, id‑asc; de‑dupe by id); as of **PR69**, T2 can also fan‑out across **LanceDB** partitions behind the same gate; OFF path remains byte‑identical. As of **PR70**, an **agent‑level parallel driver** allows multiple agents’ turns to compute concurrently while preserving deterministic logs; it is gated separately via `perf.parallel.agents`.
-As of **PR71**, log staging guarantees deterministic on‑disk JSONL order under parallel execution; the disabled path remains byte‑identical.
-As of **PR72**, a dedicated identity & race test suite proves byte‑identical artifacts (t1/t2/t4/apply/turn/scheduler) between sequential and parallel runs and under contention/back‑pressure; CI runs this across Python 3.11–3.13 (see `.github/workflows/identity_parallel.yml`).
 
-As of **PR73**, an **opt‑in CI parallel smoke** exists (not required for branch protection). Trigger via workflow dispatch or environment `RUN_PERF=1`; it prints a simple “parallel smoke OK”.
+Deterministic parallelism is available for **T1**, **T2** (in‑memory or LanceDB), and **agent‑level compute**. Defaults keep parallelism **OFF**; the disabled path is byte‑identical to sequential. See **[docs/m9/overview.md](docs/m9/overview.md)** for design, invariants, and troubleshooting.
 
-As of **PR74**, **microbench scripts & docs** are shipped for T1/T2. They emit stable one‑line JSON and are for local comparison only (no CI gating). See **[docs/m9/benchmarks.md](docs/m9/benchmarks.md)**.
-
+**Quick enable (pick one or more):**
 ```yaml
 perf:
   parallel:
     enabled: true
-    max_workers: 4   # >1 to enable parallel path
-    t1: true
+    max_workers: 4
+    t1: true       # or t2: true / agents: true
 ```
 
-**Enable T2 fan‑out (in‑memory or LanceDB backend):**
-
+LanceDB backend (optional):
 ```yaml
-perf:
-  parallel:
-    enabled: true
-    max_workers: 4   # >1 to enable parallel path
-    t2: true
 t2:
-  backend: inmemory  # or "lancedb" (requires extras)
+  backend: lancedb
 ```
 
-**Enable agent‑level parallel driver (agents):**
-
-```yaml
-perf:
-  parallel:
-    enabled: true
-    max_workers: 4   # >1 to enable parallel path
-    agents: true
-```
-
-**Observability (optional):** To see minimal parallel metrics (`task_count`, `parallel_workers`) in T1 outputs and in the microbench, also set:
-
+Optional metrics in JSON logs require:
 ```yaml
 perf:
   enabled: true
@@ -236,59 +218,7 @@ perf:
     report_memory: true
 ```
 
-When enabled, T2 emits `t2.task_count` and `t2.parallel_workers`; on Lance it also emits `t2.partition_count` (number of partitions).
-When the agent driver is enabled, the system may also emit `driver.agents_parallel_batch_size` under the same metrics gate.
-
-**Microbenches:**
-
-See **[docs/m9/benchmarks.md](docs/m9/benchmarks.md)** for usage, flags, and output shapes.
-
-```bash
-# T1 microbench
-python -m clematis.scripts.bench_t1 --graphs 32 --iters 3 --workers 8 --parallel --json
-
-# T2 microbench (in‑memory)
-python -m clematis.scripts.bench_t2 --iters 3 --workers 4 --backend inmemory --parallel --json
-
-# T2 microbench (LanceDB; falls back if extras missing)
-python -m clematis.scripts.bench_t2 --iters 3 --workers 4 --backend lancedb --parallel --json
-```
-
-#### M9 knobs — quick reference
-
-Use these example configs to toggle deterministic parallelism. With all knobs **OFF**, outputs are byte‑identical to sequential.
-
-```yaml
-# examples/perf/parallel_off.yaml  (sequential baseline)
-perf:
-  parallel:
-    enabled: false
-    max_workers: 1
-    t1: false
-    t2: false
-    agents: false
-  metrics:
-    enabled: false
-    report_memory: false
-```
-
-```yaml
-# examples/perf/parallel_on.yaml  (opt‑in parallel)
-perf:
-  parallel:
-    enabled: true
-    max_workers: 2
-    t1: true
-    t2: true
-    agents: true
-  metrics:
-    enabled: true
-    report_memory: true
-```
-
-See **docs/m9/overview.md** for determinism rules, identity guarantees, and troubleshooting.
-
-*Cache safety:* PR65 adds thread-safe wrappers for shared caches and an optional isolate+merge strategy. See **[docs/m9/cache_safety.md](docs/m9/cache_safety.md)**.
+Microbenches and the optional CI smoke are documented in **[docs/m9/benchmarks.md](docs/m9/benchmarks.md)**.
 
 ## Repository layout (brief)
 - `clematis/engine/` — core stages (T1–T4), scheduler stubs, persistence, logs.
@@ -325,7 +255,7 @@ See **docs/m9/overview.md** for determinism rules, identity guarantees, and trou
 When `CI=true`, log writes route through `clematis/engine/orchestrator/logging.append_jsonl`, which applies `clematis/engine/util/io_logging.normalize_for_identity`. Identity logs keep their existing rules (e.g., drop `now`, clamp times) to ensure byte identity. For the reflection stream `t3_reflection.jsonl`, only the `ms` field is normalized to `0.0`; this stream is **not** part of the identity set.
 
 ## Milestones snapshot
-- **M13 (active):** Hardening & Freeze — cross‑OS identity (PR106), LF/CRLF & path normalization (PR107), config v1 lock (PR108), snapshot v1 header + strict inspector (PR109), reproducible builds (PR110). **M12 skipped** for v3.
+- **M13 (complete; frozen 2025‑10‑08):** Hardening & Freeze — cross‑OS identity (PR106), LF/CRLF & path normalization (PR107), config v1 lock (PR108), snapshot v1 header + strict inspector (PR109), reproducible builds (PR110). **M12 skipped** for v3.
 - **M1–M4:** core stages + apply/persist + logs.
 - **M5:** scheduler config and groundwork (feature‑gated; identity path when disabled).
 - **M6:** memory/perf scaffolding; caches and snapshot hygiene (default‑off quality toggles).
