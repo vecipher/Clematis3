@@ -7,6 +7,7 @@ _shtab_clematis_commands() {
   local _commands=(
     "bench-t4:Delegates to scripts\/bench_t4.py"
     "demo:Delegates to scripts\/run_demo.py"
+    "export-logs:Export logs \+ latest snapshot into a JSON bundle (delegates to scripts\/)"
     "inspect-snapshot:Delegates to scripts\/inspect_snapshot.py"
     "rotate-logs:Delegates to scripts\/rotate_logs.py"
     "seed-lance-demo:Delegates to scripts\/seed_lance_demo.py"
@@ -34,6 +35,10 @@ _shtab_clematis_demo_options=(
   "--table[Plain table output (no color) (default\: False)]"
   "--quiet[suppress non-essential stderr (default\: False)]"
   "--verbose[increase stderr verbosity (default\: False)]"
+  "(- : *)"{-h,--help}"[show this help message and exit]"
+)
+
+_shtab_clematis_export_logs_options=(
   "(- : *)"{-h,--help}"[show this help message and exit]"
 )
 
@@ -89,6 +94,7 @@ _shtab_clematis() {
       case $line[1] in
         bench-t4) _arguments -C -s $_shtab_clematis_bench_t4_options ;;
         demo) _arguments -C -s $_shtab_clematis_demo_options ;;
+        export-logs) _arguments -C -s $_shtab_clematis_export_logs_options ;;
         inspect-snapshot) _arguments -C -s $_shtab_clematis_inspect_snapshot_options ;;
         rotate-logs) _arguments -C -s $_shtab_clematis_rotate_logs_options ;;
         seed-lance-demo) _arguments -C -s $_shtab_clematis_seed_lance_demo_options ;;
