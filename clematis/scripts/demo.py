@@ -70,13 +70,31 @@ def _set_field(target: Any, key: str, value: Any) -> None:
                 d[key] = value
                 return
 
+def _maybe_get_child(target: Any, key: str) -> Any | None:
+    """Best-effort read of a child (dict or object-attr) without creating it."""
+    if isinstance(target, dict):
+        return target.get(key)
+    try:
+        return getattr(target, key)
+    except Exception:
+        return None
+
 def _apply_overrides(cfg: Any, overrides: Dict[str, Any]) -> Any:
     """
     Recursively apply nested dict overrides onto a mixed dict/object config.
-    Creates intermediate dicts via _ensure_child when needed.
+
+    Important: if an overrides subtree explicitly sets {"enabled": False},
+    we DO NOT materialize or update any other nested keys in that subtree.
+    This guarantees disabled features remain inert for identity.
     """
     for k, v in overrides.items():
         if isinstance(v, dict):
+            # If explicitly disabled, do not create/populate the subtree.
+            if v.get("enabled") is False:
+                child = _maybe_get_child(cfg, k)
+                if child is not None:
+                    _set_field(child, "enabled", False)  # only flip enabled if present
+                continue  # skip all other keys under this disabled subtree
             child = _ensure_child(cfg, k)
             _apply_overrides(child, v)
         else:
