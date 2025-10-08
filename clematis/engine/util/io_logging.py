@@ -76,10 +76,18 @@ def normalize_for_identity(name: str, rec: Dict[str, Any]) -> Dict[str, Any]:
             durations = out.get("durations_ms")
             if isinstance(durations, dict):
                 out["durations_ms"] = {k: 0.0 for k in durations.keys()}
-            # Preserve scheduling context fields introduced in PR27 when a yield
-            # actually occurred, but strip them in the steady path so legacy
-            # identity baselines remain byte-identical.
-            if name == "turn.jsonl":
+            # Preserve scheduling context only when a yield actually occurred;
+            # otherwise strip volatile fields to keep identity baselines stable.
+            yielded = bool(out.get("yielded"))
+            if yielded:
+                if "slice_idx" in out:
+                    try:
+                        out["slice_idx"] = int(out["slice_idx"])
+                    except Exception:
+                        out["slice_idx"] = 0
+                out["yielded"] = True  # normalize truthy to True
+                # keep yield_reason as-is if present
+            else:
                 for _k in _TURN_DROP_KEYS:
                     out.pop(_k, None)
         return out
