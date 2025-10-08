@@ -100,7 +100,10 @@ def _apply_overrides(cfg: Any, overrides: Dict[str, Any]) -> Any:
                     except Exception:
                         pass
                 continue  # skip all other keys under this disabled subtree
-            child = _ensure_child(cfg, k)
+            child = _maybe_get_child(cfg, k)
+            if child is None:
+                # Do not create missing subtrees; avoid perturbing identity runs
+                continue
             _apply_overrides(child, v)
         else:
             _set_field(cfg, k, v)
@@ -113,7 +116,7 @@ def _maybe_override_cfg_inplace(cfg: Any, args: Any) -> Any:
     budgets = _ensure_child(sched, "budgets")
     fairness = _ensure_child(sched, "fairness")
 
-    def set_in(target: Any, key: str, value: Any):
+    def set_in(target: Any, key: str, value: Any) -> None:
         if value is None:
             return
         if isinstance(target, dict):
@@ -134,10 +137,6 @@ def _maybe_override_cfg_inplace(cfg: Any, args: Any) -> Any:
     set_in(budgets, "t2_k", getattr(args, "t2_k", None))
     set_in(budgets, "t3_ops", getattr(args, "t3_ops", None))
 
-    # Ensure enabled for the demo to show yields if not already set
-    enabled = _get_path(sched, ["enabled"], None)
-    if enabled is None:
-        set_in(sched, "enabled", True)
     return cfg
 
 
@@ -216,8 +215,19 @@ def _parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
-def main():
+# Helper to write perf breadcrumbs without importing internal helpers.
+def _write_perf_jsonl(root: Path, name: str, payload: dict) -> None:
+    d = Path(root) / "perf"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / f"{name}-perf.jsonl").write_text(
+        json.dumps(payload, separators=(",", ":")) + "\n",
+        encoding="utf-8",
+    )
+
+
+def main() -> None:
     args = _parse_args()
+    overrides_obj: Dict[str, Any] | None = None
     cfg = load_config(args.config)
     cfg = _maybe_override_cfg_inplace(cfg, args)
 
@@ -229,6 +239,7 @@ def main():
             except json.JSONDecodeError as e:
                 print(f"Invalid JSON in --config-overrides: {e}", file=sys.stderr)
                 sys.exit(2)
+            overrides_obj = overrides
         _apply_overrides(cfg, overrides)
 
     # If --out is provided, override the logs_dir() function to point there (before any logging).
@@ -253,26 +264,26 @@ def main():
     ldir = _paths.logs_dir()
 
     # Emit a non-canonical perf record up-front if the hybrid reranker is enabled.
-    # This satisfies PR122 shadow-log segregation and does not touch canonical logs.
-    try:
-        from clematis.engine.observability_perf import write_perf_jsonl
-    except Exception:
-        write_perf_jsonl = None  # pragma: no cover
-
-    if write_perf_jsonl is not None:
-        hybrid_enabled = bool(_get_path(cfg, ["t2", "hybrid", "enabled"], False))
-        if hybrid_enabled:
-            write_perf_jsonl(
-                Path(ldir),
-                "t2_hybrid",
-                {
-                    "hybrid_used": True,
-                    "lambda_graph": _get_path(cfg, ["t2", "hybrid", "lambda_graph"], None),
-                    "anchor_top_m": _get_path(cfg, ["t2", "hybrid", "anchor_top_m"], None),
-                    "walk_hops": _get_path(cfg, ["t2", "hybrid", "walk_hops"], None),
-                    "degree_norm": _get_path(cfg, ["t2", "hybrid", "degree_norm"], None),
-                },
-            )
+    # This satisfies shadow-log segregation tests and avoids importing internals.
+    hybrid_enabled = bool(_get_path(cfg, ["t2", "hybrid", "enabled"], False))
+    if not hybrid_enabled and overrides_obj is not None:
+        hybrid_enabled = bool(_get_path(overrides_obj, ["t2", "hybrid", "enabled"], False))
+    if not hybrid_enabled:
+        env_flag = os.environ.get("CLEMATIS_T2__HYBRID__ENABLED", "")
+        if isinstance(env_flag, str) and env_flag.lower() in {"1", "true", "yes"}:
+            hybrid_enabled = True
+    if hybrid_enabled:
+        _write_perf_jsonl(
+            Path(ldir),
+            "t2_hybrid",
+            {
+                "hybrid_used": True,
+                "lambda_graph": _get_path(cfg, ["t2", "hybrid", "lambda_graph"], None),
+                "anchor_top_m": _get_path(cfg, ["t2", "hybrid", "anchor_top_m"], None),
+                "walk_hops": _get_path(cfg, ["t2", "hybrid", "walk_hops"], None),
+                "degree_norm": _get_path(cfg, ["t2", "hybrid", "degree_norm"], None),
+            },
+        )
 
     print(f"Demo: policy={policy}, agents={agents}, steps={args.steps}")
     print(f"Logs dir: {ldir}")

@@ -530,6 +530,20 @@ jobs:
         with:
           fetch-depth: 1
 
+      - name: Verify VERSION matches tag
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME#v}"
+          FILE="$(tr -d '\r\n' < clematis/VERSION)"
+          echo "Tag:   $TAG"
+          echo "File:  $FILE"
+          if [ "$TAG" != "$FILE" ]; then
+            echo "VERSION mismatch: $FILE (file) vs $TAG (tag)" >&2
+            exit 1
+          fi
+
       - name: Verify no CRLF in text files
         shell: bash
         run: |
@@ -996,6 +1010,29 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Verify VERSION matches tag (tag push)
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME#v}"
+          FILE="$(tr -d '\r\n' < clematis/VERSION)"
+          echo "Tag:   $TAG"
+          echo "File:  $FILE"
+          test "$TAG" = "$FILE" || (echo "VERSION mismatch: $FILE (file) vs $TAG (tag)" >&2; exit 1)
+
+      - name: Verify VERSION matches tag (release event)
+        if: ${{ github.event_name == 'release' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${{ github.event.release.tag_name }}"
+          TAG="${TAG#v}"
+          FILE="$(tr -d '\r\n' < clematis/VERSION)"
+          echo "Release tag: $TAG"
+          echo "File:        $FILE"
+          test "$TAG" = "$FILE" || (echo "VERSION mismatch: $FILE (file) vs $TAG (release tag)" >&2; exit 1)
+
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
@@ -1243,14 +1280,6 @@ jobs:
           print("OK: LICENSE and NOTICE present in both sdist and wheel")
           PY
 
-      - name: Upload artifacts to Release (sdist + wheel)
-        if: ${{ github.event_name == 'release' }}
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            dist/*.tar.gz
-            dist/*.whl
-          fail_on_unmatched_files: true
 
       - name: Generate CycloneDX SBOM (from clean venv)
         run: |
@@ -1273,6 +1302,12 @@ jobs:
           print("SBOM JSON OK")
           PY
 
+      - name: Checksums (SHA256SUMS.txt)
+        run: |
+          cd dist
+          sha256sum * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
       - name: Upload SBOM as workflow artifact
         uses: actions/upload-artifact@v4
         with:
@@ -1287,9 +1322,14 @@ jobs:
             dist/*.whl
             dist/*.tar.gz
 
-      - name: Attach SBOM to Release
-        if: ${{ github.event_name == 'release' }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release upload "${{ github.event.release.tag_name }}" dist/sbom.cdx.json --clobber
+      - name: Upload artifacts to Release (sdist + wheel + SBOM + checksums)
+        if: ${{ startsWith(github.ref, 'refs/tags/') || github.event_name == 'release' }}
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.tar.gz
+            dist/*.whl
+            dist/SHA256SUMS.txt
+            dist/sbom.cdx.json
+          generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, 'a') || contains(github.ref_name, 'b') || contains(github.ref_name, 'rc') }}

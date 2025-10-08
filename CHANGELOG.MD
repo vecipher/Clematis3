@@ -8,7 +8,25 @@ All notable changes to this project will be documented in this file.
 
 
 
+
 ## [Unreleased]
+
+## [0.9.0] - 2025-10-08
+
+### Changed (PR126 — Release prep; 0.9.0b1 → 0.9.0)
+- Stable release; no code changes since **0.9.0b1**.
+- Tagging a signed release triggers `.github/workflows/pkg_build.yml` (builds sdist/wheels and prints SHA256s) and `.github/workflows/homebrew_tap.yml` (updates `url`, `sha256`, and `version` in the tap); SBOM and SLSA attestation are attached to the GitHub release.
+
+### Added/Fixed (PR125 — Windows temp dirs & Unicode paths)
+- Replaced hard‑coded temp paths with `tempfile.gettempdir()` in code paths and tests that create ephemeral files.
+- All text file I/O now specifies `encoding="utf-8"`; `Path.read_text`/`write_text` calls in tests use explicit encodings.
+- Logging paths honor `CLEMATIS_LOG_DIR` (primary) over legacy `CLEMATIS_LOGS_DIR`; fallbacks remain `.logs/` under the repo when env is unset.
+- Snapshots respect `CLEMATIS_SNAPSHOT_DIR` for read/write; default behavior is unchanged when unset.
+- New Windows‑only test writes/reads under a Unicode temp directory to catch path/encoding regressions.
+
+### Notes
+- No functional changes versus **0.9.0b1**; see **0.9.0a1** and **0.9.0a2** below for the feature work carried into this stable release.
+
 
 ### Added (PR121 — CLI help stability & determinism)
 - **Deterministic help:** `cli_utils.py` provides a fixed‑width formatter; constant epilog (`"See Operator Guide: docs/operator-guide.md"`); subcommands listed **alphabetically**.

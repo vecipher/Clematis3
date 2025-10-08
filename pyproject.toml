@@ -1,6 +1,6 @@
 [project]
 name = "clematis"
-version = "0.9.0a2"
+version = "0.10.0"
 description = "Clematis — deterministic mind-like simulation engine (M1–M8 baseline)"
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
