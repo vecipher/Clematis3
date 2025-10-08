@@ -24,10 +24,10 @@ def main():
         rel = norm_path(os.path.relpath(path, root)).encode("utf-8")
         with open(path, "rb") as f:
             data = f.read().replace(b"\r\n", b"\n")  # normalize newlines for cross-OS stability
-        h.update(b"PATH\0");
-        h.update(rel);
-        h.update(b"\0DATA\0");
-        h.update(data);
+        h.update(b"PATH\0")
+        h.update(rel)
+        h.update(b"\0DATA\0")
+        h.update(data)
         h.update(b"\0")
     print(h.hexdigest())
 
