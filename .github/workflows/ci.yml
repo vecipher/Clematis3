@@ -277,7 +277,7 @@ jobs:
 
       - name: Check goldens normalization
         run: |
-          python -m clematis.scripts.golden_normalize tests/golden tests/goldens
+          python -m clematis.scripts.normalize_goldens tests/golden tests/goldens
 
   reproducible_build:
     name: Reproducible build (wheel + sdist)
