@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-import hashlib, os, shutil
+import os
+import shutil
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 FRONT = os.path.join(ROOT, "frontend")
@@ -12,14 +13,17 @@ ASSETS = os.path.join(DIST, "assets")
 def ensure_dir(p): os.makedirs(p, exist_ok=True)
 
 def copy_text_lf(src, dst):
-    with open(src, "rb") as f: data = f.read()
+    with open(src, "rb") as f:
+        data = f.read()
     # Normalize CRLF -> LF for determinism across OS
     data = data.replace(b"\r\n", b"\n")
     os.makedirs(os.path.dirname(dst), exist_ok=True)
-    with open(dst, "wb") as w: w.write(data)
+    with open(dst, "wb") as w:
+        w.write(data)
 
 def copy_tree_text_lf(src_dir, dst_dir):
-    if not os.path.isdir(src_dir): return
+    if not os.path.isdir(src_dir):
+        return
     for root, _, files in os.walk(src_dir):
         rel = os.path.relpath(root, src_dir)
         for fn in files:

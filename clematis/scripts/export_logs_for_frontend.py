@@ -13,7 +13,12 @@ Exit codes:
 """
 
 from __future__ import annotations
-import argparse, json, os, sys, hashlib, glob
+import argparse
+import json
+import os
+import sys
+import hashlib
+import glob
 
 # --- tolerant import of engine utilities (works under package or repo) ---
 try:
