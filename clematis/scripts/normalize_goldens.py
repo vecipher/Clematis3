@@ -2,13 +2,14 @@
 Golden fixtures normalizer (newline + path + JSON presentation).
 
 Usage:
-    python -m clematis.scripts.golden_normalize [PATH ...]
+    python -m clematis.scripts.normalize_goldens [PATH ...]
 
 - By default runs in CHECK mode (prints what would change, exits 1 if drift).
 - Use --write to update files in-place.
 - Use --eol-only to normalize only newlines (CRLF/CR -> LF) for non‑JSONL or all files.
 - Designed to be stable across OS (Windows/macOS/Linux) and Python versions.
 
+Empty golden files remain zero-bytes (no trailing newline).
 This tool does NOT depend on test helpers to avoid import order coupling.
 """
 
@@ -166,6 +167,9 @@ def _iter_files(paths: list[Path]) -> Iterator[Path]:
 def _normalize_file(path: Path, *, eol_only: bool) -> bytes:
     raw = path.read_bytes()
     text = lf_eol(raw.decode("utf-8", errors="replace"))
+    # If file is truly empty, keep it empty regardless of flags.
+    if text == "":
+        return b""
     # Only JSONL gets structural normalization unless --eol-only
     if eol_only or path.suffix.lower() != JSONL_EXT:
         return ensure_single_trailing_lf(text).encode("utf-8")
@@ -175,6 +179,9 @@ def _normalize_file(path: Path, *, eol_only: bool) -> bytes:
         norm = normalize_json_line(line)
         if norm != "":
             lines_out.append(norm)
+    # If there are no JSON lines after normalization, keep file empty.
+    if not lines_out:
+        return b""
     out_text = "\n".join(lines_out)
     out_text = ensure_single_trailing_lf(out_text)
     return out_text.encode("utf-8")
