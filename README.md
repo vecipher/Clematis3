@@ -2,9 +2,11 @@
 
 Clematis is a deterministic, turn‑based scaffold for agential AI. It models agents with concept graphs and tiered reasoning (T1→T4), uses small LLMs where needed, and keeps runtime behavior reproducible (no hidden network calls in tests/CI).
 
-> **Status:** **v0.10.0** (2025‑10‑06) — **M13 Hardening & Freeze (frozen)**. See **[docs/m13/overview.md](docs/m13/overview.md)**. **M12 skipped** for v3. **M11 complete** ✅ (HS1/GEL substrate). Defaults unchanged; all GEL paths are **gated and OFF by default**; identity path preserved. M10 remains complete; M9 deterministic parallelism remains flag‑gated and OFF by default.
+> **Status:** **v0.10.0** (2025‑10‑08) — **M13 Hardening & Freeze (frozen)**. See **[docs/m13/overview.md](docs/m13/overview.md)**. **M12 skipped** for v3. **M11 complete** ✅ (HS1/GEL substrate). Defaults unchanged; all GEL paths are **gated and OFF by default**; identity path preserved. M10 remains complete; M9 deterministic parallelism remains flag‑gated and OFF by default.
 >
 > **License:** Apache‑2.0 — see [LICENSE](./LICENSE) & [NOTICE](./NOTICE).
+> **Support matrix:** Python **3.11–3.13**; Ubuntu, macOS, Windows. Cross‑OS identity and reproducible builds (SBOM/SLSA) enforced in CI.
+> **Changelog:** see [CHANGELOG.md](CHANGELOG.md) for **v0.10.0**.
 >
 > **M13 — Hardening & Freeze (v3):** See **[docs/m13/overview.md](docs/m13/overview.md)**.
 >
@@ -36,7 +38,7 @@ Clematis is a deterministic, turn‑based scaffold for agential AI. It models ag
 - **Snapshot freeze:** v3 snapshots include a header field `schema_version: "v1"`; the inspector validates the header and **fails by default** (exit 2). Use `--no-strict` to only warn. See [docs/m13/snapshot_freeze.md](docs/m13/snapshot_freeze.md).
 - **Typed errors:** operator‑facing failures use `clematis.errors.*`. See [docs/m13/error_taxonomy.md](docs/m13/error_taxonomy.md).
 
-> 🔒 **M13 – Hardening & Freeze (v3):** v3 is frozen as of 2025‑10‑06 SGT.
+> 🔒 **M13 – Hardening & Freeze (v3):** v3 is frozen as of 2025‑10‑08 SGT.
 > See **[docs/m13/overview.md](docs/m13/overview.md)** for what’s locked (Config v1, Snapshot v1), identity guarantees, support matrix, and EOL stance.
 
 ## Quick start
@@ -325,7 +327,7 @@ See **docs/m9/overview.md** for determinism rules, identity guarantees, and trou
 When `CI=true`, log writes route through `clematis/engine/orchestrator/logging.append_jsonl`, which applies `clematis/engine/util/io_logging.normalize_for_identity`. Identity logs keep their existing rules (e.g., drop `now`, clamp times) to ensure byte identity. For the reflection stream `t3_reflection.jsonl`, only the `ms` field is normalized to `0.0`; this stream is **not** part of the identity set.
 
 ## Milestones snapshot
-- **M13 (active):** Hardening & Freeze — cross‑OS identity (PR106), LF/CRLF & path normalization (PR107), config v1 lock (PR108), snapshot v1 header + strict inspector (PR109), reproducible builds (PR110). **M12 skipped** for v3.
+- **M13 (complete; frozen 2025‑10‑08):** Hardening & Freeze — cross‑OS identity (PR106), LF/CRLF & path normalization (PR107), config v1 lock (PR108), snapshot v1 header + strict inspector (PR109), reproducible builds (PR110). **M12 skipped** for v3.
 - **M1–M4:** core stages + apply/persist + logs.
 - **M5:** scheduler config and groundwork (feature‑gated; identity path when disabled).
 - **M6:** memory/perf scaffolding; caches and snapshot hygiene (default‑off quality toggles).

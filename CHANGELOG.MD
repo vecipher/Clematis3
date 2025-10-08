@@ -9,245 +9,50 @@ All notable changes to this project will be documented in this file.
 
 
 
+
 ## [Unreleased]
 
+## [0.10.0] - 2025-10-08
+
+### Highlights — Clematis v3 backend finished (M13 Hardening & Freeze)
+- **v3 is stable and frozen.** Configuration **v1** and Snapshot Schema **v1** are locked; goldens and identity guarantees are declared stable.
+- **Cross‑OS identity**: byte‑identical identity logs across Ubuntu, macOS, and Windows on **Python 3.11–3.13**.
+- **Reproducible builds**: pinned toolchain; identical wheels/sdists across OS; SBOM + SLSA provenance are attached to tagged releases. Homebrew tap autoupdates on tags.
+- **Reflection subsystem** (M10) shipped: deterministic, **gated & identity‑safe**; optional fixtures‑only LLM path; telemetry in `t3_reflection.jsonl` (normalized under CI).
+- **GEL substrate contracts** (HS1) landed behind `graph.enabled=false` by default; disabled‑path identity proven. Nudge planner deferred to v4.
+- **Perf & quality diagnostics** are segregated to `logs/perf/` (and `*-perf.jsonl`) and are **excluded** from identity comparisons.
+- **CLI polish**: deterministic help output, uniform error taxonomy (`ClematisError` + typed subclasses), stable exit codes; Windows path/Unicode hardening.
+
+### Compatibility
+- **Python**: `>=3.11,<3.14`.
+- **Imports**: The T2 package layout introduced in 0.8.x remains (e.g., `clematis.engine.stages.t2.quality_mmr`). If upgrading from ≤0.7, update direct imports to the new paths.
+
+### Upgrade notes
+- `CLEMATIS_LOG_DIR` supersedes `CLEMATIS_LOGS_DIR` (fallback kept). Identity tooling ignores `logs/perf/` and `*-perf.jsonl`.
+- Reflection is **OFF by default** and requires `t3.allow_reflection=true`; the LLM path is fixtures‑only. Reflection never alters identity logs.
+- GEL remains **OFF by default**; contracts and examples are available without runtime behavior changes.
+
+### Acknowledgements
+Consolidates work across PR63–PR96 (M9–M11), PR109–PR116 (M13), PR121–PR126 and related follow‑ups. See prior entries for detailed per‑PR notes.
+
 ## [0.9.0] - 2025-10-08
+### Summary
+Stable release; no code changes from 0.9.0b1. Tagging triggers packaging workflows (sdist/wheels + SBOM + SLSA; Homebrew tap updates).
 
-### Changed (PR126 — Release prep; 0.9.0b1 → 0.9.0)
-- Stable release; no code changes since **0.9.0b1**.
-- Tagging a signed release triggers `.github/workflows/pkg_build.yml` (builds sdist/wheels and prints SHA256s) and `.github/workflows/homebrew_tap.yml` (updates `url`, `sha256`, and `version` in the tap); SBOM and SLSA attestation are attached to the GitHub release.
-
-### Added/Fixed (PR125 — Windows temp dirs & Unicode paths)
-- Replaced hard‑coded temp paths with `tempfile.gettempdir()` in code paths and tests that create ephemeral files.
-- All text file I/O now specifies `encoding="utf-8"`; `Path.read_text`/`write_text` calls in tests use explicit encodings.
-- Logging paths honor `CLEMATIS_LOG_DIR` (primary) over legacy `CLEMATIS_LOGS_DIR`; fallbacks remain `.logs/` under the repo when env is unset.
-- Snapshots respect `CLEMATIS_SNAPSHOT_DIR` for read/write; default behavior is unchanged when unset.
-- New Windows‑only test writes/reads under a Unicode temp directory to catch path/encoding regressions.
-
-### Notes
-- No functional changes versus **0.9.0b1**; see **0.9.0a1** and **0.9.0a2** below for the feature work carried into this stable release.
-
-
-### Added (PR121 — CLI help stability & determinism)
-- **Deterministic help:** `cli_utils.py` provides a fixed‑width formatter; constant epilog (`"See Operator Guide: docs/operator-guide.md"`); subcommands listed **alphabetically**.
-- **CLI main:** `clematis/cli/main.py` surfaces the version in the description, sets `allow_abbrev=False`, sorts subcommands, and uses the deterministic formatter.
-- **Trampoline:** `__main__.py` cleans delegation with `__future__` imports positioned deterministically.
-- **Demo polish:** `scripts/demo.py` prints the exact log directory it writes to.
-
-### Tests (PR121)
-- `tests/cli/test_help_stability.py` asserts width invariance (60/80/120 columns), constant epilog, and stable subcommand ordering (extractor tolerates wrapped “Delegates to …” lines).
-- Goldens refreshed for top‑level help text to reflect the new ordering; shell completions remained stable.
-
-### CI/Workflows (PR121)
-- Golden/help jobs pinned to **Python 3.13** with `COLUMNS=80` for canonical rendering.
-- `.github/workflows/ci.yml`: help‑stability job added; `reproducible_build` runs on 3.13 and depends on help stability.
-- `pkg_build.yml`: manpage generation runs on Python 3.13 with `COLUMNS=80` (canonical).
-
-### Tooling (PR121)
-- `pyproject.toml`: dev pins `ruff==0.13.3`; `ruff` `target-version="py311"` to match the lowest supported Python; `requires-python >=3.11,<3.14`.
-
-### Added (PR122 — Perf/quality flag guards; shadow logs segregation)
-- **Identity exclusion:** `tests/helpers/identity.py` now **ignores** any file ending with `-perf.jsonl` and anything under `logs/perf/` (cross‑OS path normalization).
-- **Perf writer helper:** new `clematis/engine/observability_perf.py` with `write_perf_jsonl` / `write_perf_jsonl_many` writes non‑canonical diagnostics to `logs/perf/{name}.jsonl`. Canonical logs (e.g., `t1.jsonl`, `t2.jsonl`, `t4.jsonl`, `apply.jsonl`) remain untouched.
-- **Demo breadcrumb:** `scripts/demo.py` emits `logs/perf/t2_hybrid.jsonl` **only** when `t2.hybrid.enabled=true`. Also adds `--config-overrides <file.json>` to apply nested JSON overrides without editing configs.
-
-### Tests (PR122)
-- `tests/perf/test_perf_flags_identity_off.py`: with top‑level flags **OFF**, mutating internal knobs yields **byte‑identical** canonical logs; asserts that **no** `*-perf.jsonl` files or `logs/perf/` dir are produced.
-- `tests/perf/test_perf_shadow_logs.py`: when hybrid is **ON**, asserts a perf log is produced; identity helpers ignore it.
-
-### CI (PR122)
-- `.github/workflows/ci.yml`: adds required job **perf_flags_identity_off** (Linux, Python **3.13**, `COLUMNS=80`, deterministic env). **reproducible_build** now depends on this job.
-
-### Docs (PR122)
-- `docs/m13/overview.md`: TL;DR and Identity sections now document `logs/perf/` segregation and deterministic CLI help environment.
-- `README.md`: new “Perf/diagnostic logs (non‑canonical)” section and `--config-overrides` quickstart; status block notes deterministic CLI help (Linux + Python 3.13, `COLUMNS=80`).
-
-
-### Added (PR109 — M13-01: Snapshot schema v1 header; inspector/loader)
-- **Snapshot schema v1 freeze:** all snapshots now include a **header** with `schema_version: "v1"` and `created_at` (UTC ISO). `created_at` honors `SOURCE_DATE_EPOCH` for determinism.
-- **Inspector:** **strict by default** — exits **2** on schema errors (missing/mismatch). `--no-strict` prints a warning to **stderr** and still emits JSON to **stdout**.
-- **Loader:** understands PR34 full/delta and legacy bodies, reconstructs from baseline for deltas, and extracts `version_etag` from body or header. Latest‑snapshot discovery is unchanged (no sidecars involved).
-
-### Changed (PR109 — inspector strict default; discovery unchanged; CLI polish)
-- Default behavior flipped to **strict**: `inspect-snapshot` fails with exit **2** on schema errors; `--no-strict` opts into warn‑and‑print.
-- `inspect-snapshot` keeps warnings/errors on **stderr**; **stdout** remains pure JSON in `--format json` mode.
-- Latest‑snapshot discovery behavior unchanged (no sidecar files to filter).
-
-### Tests (PR109)
-- Added `tests/test_snapshot_schema_lock.py` to validate header presence and `--no-strict` behavior; rejects wrong/missing schema.
-- CLI tests assert exit **2** on strict failure and warn‑and‑print with `--no-strict`.
-- GEL and loader paths validated: `test_gel_snapshot_roundtrip` and `tests/test_snapshot_loader.py::*` cover graph schema tag and PR34 delta reconstruction.
-- Removed references to sidecar discovery; tests now assert correct latest‑snapshot selection without sidecar filtering.
-### Packaging/CI (PR110 — M13-02: Reproducible builds)
-- **Pinned toolchain:** `build==1.2.1`, `wheel==0.45.1`, `setuptools==80.9.0`, `twine==5.1.1` in CI jobs.
-- **Deterministic env:** `TZ=UTC`, `PYTHONHASHSEED=0`, `PYTHONUTF8=1`, `PYTHONIOENCODING=UTF-8`, `SOURCE_DATE_EPOCH` from last git commit. Windows: `core.autocrlf=false`, `core.eol=lf`.
-- **Cross‑OS matrix:** Ubuntu/macOS/Windows; Python **3.11–3.13**. Build **sdist + wheel** on each axis.
-- **Repro compare job:** downloads artifacts and asserts identical **SHA256** for same‑named wheels **and** sdists across OSes; fails on mismatch.
-- **Local script:** `scripts/repro_check_local.sh` builds with the pinned toolchain and prints hashes; `--twice` compares two builds; `--sde` overrides the epoch. Workflow marks it executable.
-
-### Docs (PR109)
-- Added `docs/m13/snapshot_freeze.md` (freeze rationale, inspector/loader semantics, operator notes).
-- **README:** added a “Snapshot freeze” bullet linking to the doc.
-
-
-### Added (PR111 — M13-03: Typed error taxonomy & CLI uniform errors)
-- **Central taxonomy:** new `clematis/errors.py` with:
-  `ClematisError` (base), `ConfigError`, `SnapshotError`, `IdentityError`, `QualityShadowError`, `ReflectionError`, `CLIError`; re‑exports `ParallelError` for a consistent import path.
-- **Uniform formatting:** `format_error(e)` helper yields short, class‑prefixed messages suitable for CLIs/logs.
-- **Docs:** `docs/m13/error_taxonomy.md` and README additions (operator‑facing errors block).
-
-### Changed (PR111 — validator/snapshot/CLI; back‑compat kept for v3)
-- **Validator:** public error paths now raise `ConfigError` (typed). **Back‑compat:** for v3, `ConfigError` also inherits from `ValueError` so legacy callers/tests that catch `ValueError` still work. **TODO (v4):** drop the `ValueError` parent.
-- **Snapshot:** header validation now raises `SnapshotError` (typed). `SnapshotSchemaError` remains as a **deprecated alias** subclassing `SnapshotError` for compatibility. **Back‑compat:** `SnapshotError` also inherits from `ValueError` in v3; plan to drop in v4.
-- **Parallel:** `clematis.engine.util.parallel.ParallelError` now subclasses `ClematisError` (taxonomy‑consistent), message remains aggregated/deterministic.
-- **CLI (validate):** on invalid configs, prints a **single typed line to stdout** (e.g., `ConfigError: …`) and exits **2** (tests assert on STDOUT).
-- **CLI (inspect‑snapshot):** errors/warnings use `format_error(...)` for consistency; strict‑by‑default behavior unchanged, and `--no-strict` continues to warn on **stderr** while emitting JSON to **stdout**.
-
-### Tests (PR111)
-- `tests/test_errors_typing.py` covers taxonomy hierarchy, `format_error`, config/version lock using typed errors, and snapshot header validation using typed errors. Parallel error construction updated to use a fake record (no API change).
-- CLI tests that inspect validator output assert on **stdout**; wiring updated accordingly.
-
-### Added (PR80 — M10-04: Reflection write path; deterministic)
-- **Writer module:** `clematis/engine/orchestrator/reflection.py` with `write_reflection_entries(ctx, state, cfg_root, result) -> WriteReport`.
-- **Determinism:** fixed `ts_iso` from `ctx.now_iso`; stable episode IDs `refl-<turn>-<agent>-<slot>-<sha12>`.
-- **Schema clamp:** `{id, owner, ts, kind, tags, text[, vec_full]}`; double-enforces `ops_reflection` cap.
-- **Fail‑soft:** index missing/add‑error logs `memory_write_error` and never crash the turn.
-- **Hook:** orchestrator sets `ctx.now_iso` once and stashes `ctx._reflection_write_report` after writes.
-- **Tests:** `tests/reflection/test_reflection_write_path.py` — determinism (IDs/ts), ops‑cap reporting, error resilience.
-
-### Added (PR81 — M10-05: Log staging & ordering for reflection)
-- **Staging:** `engine/util/io_logging.py` adds `STAGE_ORD["t3_reflection.jsonl"] = 10` without renumbering prior ordinals.
-- **Identity:** `_IDENTITY_LOGS` unchanged (reflection logs are **not** part of identity).
-- **Test:** `tests/reflection/test_reflection_stage_ord.py` asserts ordinal and identity exclusion.
-
-### Added (PR82 — M10-06: Disabled‑path identity for reflection)
-- **Test:** `tests/reflection/test_reflection_disabled_identity.py` runs a demo twice with reflection OFF; byte‑compares `t1.jsonl`, `t2.jsonl`, `t4.jsonl`, `apply.jsonl`, `turn.jsonl`; asserts **absence** of `t3_reflection.jsonl`.
-- **Invariant:** M9 identity remains intact when `t3.allow_reflection=false`.
-
-### Added (PR83 — M10-07: Reflection determinism, budget, ops cap)
-- **Determinism:** identical inputs ⇒ byte‑identical `ReflectionResult`, memory rows (id/ts/text/tags/vec), and `WriteReport`.
-- **Budgets:** wall‑clock timeout (`time_ms_reflection`) sets `metrics.reason="reflection_timeout"`; produces **no writes**.
-- **Ops cap:** writer enforces `ops_reflection` cap even if the backend returns more entries.
-- **Tests:** `tests/reflection/test_reflection_determinism.py`, `..._budget_timeout.py`, `..._ops_cap.py`.
-
-### Added (PR84 — M10-08: LLM backend (fixtures‑only); default OFF)
-- **Backend switch:** `t3/reflect.py` keeps rule‑based path unchanged and adds an `llm` path via `FixtureLLMAdapter`.
-- **Canonical prompt:** JSON with sorted keys and whitespace‑collapsed fields; `fixture_key = sha256(prompt_json)[:12]`.
-- **Determinism:** `generate(..., temperature=0.0)`; output clamped via existing token truncator; deterministic embeddings when `embed=true`.
-- **Validation:** enabling `backend=llm` **requires** fixtures; validator rejects empty/missing `t3.llm.fixtures.path`.
-- **Exports:** `FixtureMissingError` re‑exported from `t3/__init__.py`; orchestrator wraps failures as `metrics.reason="reflect_error:<Type>"`.
-- **Tests:** `tests/reflection/test_reflection_llm_*.py` — fixture determinism and missing‑fixture error.
-
-
-### Added (PR85 — M10-09: Policy glue — planner flag & schema wiring)
-- **Schema:** `engine/policy/json_schemas.py` allows top‑level `reflection: boolean` (default `false`), `additionalProperties=false` preserved.
-- **Sanitizer:** `engine/policy/sanitize.py` coerces boolean‑likes (`"true"/"false"`, `1/0`); `sanitize_plan(...)` validates `ops` and returns normalized `{"reflection": bool}` for tests.
-- **Planner prompt:** `t3/policy.py` requires `reflection` in the JSON and **stashes** the LLM planner’s flag on `state._planner_reflection_flag` (keeps return shape stable).
-- **Orchestrator:** `core._run_reflection_if_enabled(...)` honors `Plan.reflection` **or** `state._planner_reflection_flag` for gate/log/dry‑run.
-- **Tests:** `tests/policy/test_reflection_flag.py` and `tests/reflection/test_reflection_gate_plumbing.py` cover coercion and gate plumbing.
-
-### Added (PR86 — M10-10: Reflection telemetry & trace; identity-safe)
-- **New stream:** `t3_reflection.jsonl` with stable schema
-  `{turn, agent, summary_len, ops_written, embed, backend, ms, reason[, fixture_key]}`.
-  Ordering is staged with `STAGE_ORD["t3_reflection.jsonl"]=10`; **not** part of identity logs.
-- **Normalization (CI-only):** `engine/util/io_logging.normalize_for_identity(...)` zeroes `"ms"` for this stream when `CI=true`. No other fields are touched; identity logs remain unchanged.
-- **Orchestrator helper:** `engine/orchestrator/logging.log_t3_reflection(...)`
-  Emits exactly one record per reflected turn; fail-soft. Picks `ops_written` from the write report when present, falls back to entry count. Propagates `backend`, `embed`, `reason`, and (LLM fixtures) `fixture_key`. `summary_len` is computed as whitespace-token count.
-- **Core wiring:** `engine/orchestrator/core.py` calls the helper after the deterministic write path (PR80), only when the reflection gate is open. Reflection never alters T1/T2/T4/Apply outputs.
-- **Writer:** `engine/orchestrator/logging.append_jsonl(...)` now applies identity normalization before delegating to the unbuffered writer. **On-disk serialization remains unchanged** for identity logs; we did **not** change `io/log.py` formatting to preserve Gate A goldens.
-- **Utility:** Added `stable_json_dumps(obj)` (sorted keys, compact) in `engine/util/io_logging.py`. Used for deterministic CLI JSON in `clematis/cli/_io.py` (polish; unrelated to identity logs).
-
-#### Tests
-- `tests/reflection/test_reflection_logging_shape.py` — rule-based path: CI normalizes `ms` to `0.0`; schema stable; deterministic payload across runs.
-- `tests/reflection/test_reflection_logging_llm_fixture_extra.py` — LLM fixtures path includes `fixture_key`; deterministic under CI normalization.
-- `tests/reflection/test_reflection_logging_timeout_reason.py` — `reason="reflection_timeout"` propagated; CI normalizes `ms`.
-
-#### Notes / invariants
-- Default OFF path unchanged; `t3_reflection.jsonl` is written **only** when reflection runs.
-- Reflection logs are **not** in `_IDENTITY_LOGS`; Gate A identity remains byte-for-byte.
-- CI normalization targets **only** this stream; identity streams are unaffected.
-
-#### Heads‑up (compat shim)
-- A thin compatibility shim still exists at `clematis/engine/util/io_logging.py::write_jsonl(...)`. It is **not** used by production call sites (which call `engine/orchestrator/logging.append_jsonl`).
-  If you want to remove it later, search for usages with:
-  ```
-  grep -R "io_logging.write_jsonl" -n
-  ```
-
-  and delete the function/export once no references remain.
-
-### Added (PR87 — M10-11: Reflection microbench & examples; deterministic, identity‑safe)
-- **Script:** `clematis/scripts/bench_reflection.py` — runs the reflection unit in isolation and prints one stable JSON object (sorted keys, compact separators). When `CI=true`, the microbench normalizes `"ms": 0.0` to eliminate flakes.
-- **Examples:** `examples/reflection/enabled.yaml` (rule‑based, deterministic) and `examples/reflection/llm_fixture.yaml` (fixtures‑only LLM backend; no network).
-- **Fixtures:** `tests/fixtures/reflection_llm.jsonl` — SHA256‑based `prompt_hash → completion` mapping; deterministic; used only by the fixtures path.
-- **Tests:** `tests/test_bench_reflection.py` — zero‑flake: forces CI‑style timing via `monkeypatch`; asserts stable fields; optional fixtures test runs only when the fixture file is present.
-- **Invariants:** Does **not** write identity logs; default path unchanged when reflection is disabled; embeddings remain deterministic when `embed=true`.
-
-### CI (PR88 — M10-12: Optional Reflection Smoke; non‑required)
-- **Workflow:** `.github/workflows/reflection_smoke.yml` — **opt‑in** CI that validates the microbench paths without touching identity logs.
-  - Trigger via **workflow_dispatch** (set `run=true`) or temporarily set `RUN_REFLECTION_SMOKE: "true"` in the workflow `env:` while iterating.
-  - Uses a small `gate` job to compute an `enabled` output (robust to context access rules); `smoke` runs only when enabled.
-- **What it runs:**
-  - Microbench (rule‑based) and microbench (LLM fixtures) — each validated with tiny Python assertions.
-  - `pytest -q tests/test_bench_reflection.py` only.
-  - Uploads `bench_rule.json` and `bench_llm.json` as artifacts.
-- **Determinism:** Sets `CI=true` and `CLEMATIS_NETWORK_BAN=1`; no network; `"ms"` normalized to `0.0`; identity logs untouched.
-
-#### Updates (polish)
-- **Action summary:** bench JSON is appended to the GitHub job summary via `$GITHUB_STEP_SUMMARY` for quick inspection (no artifact download required).
-- **Fixtures guard:** the LLM fixtures step is conditional on `hashFiles('tests/fixtures/reflection_llm.jsonl')`; when absent, a friendly skipped step is shown and summarized.
-
-### Docs
-- **README:** M10 status updated; added “Reflection sessions (deterministic, gated)” quick‑start (rule‑based & fixtures‑only).
-- **docs/m10/reflection.md:** gate conditions, LLM fixtures example, `ReflectionResult`/metrics schema, fixture key notes, troubleshooting.
-- **README (PR87/PR88):** adds a “Reflection Microbench (PR87)” quick‑start (commands for rule‑based & fixtures) and links to the optional “Reflection Smoke (optional)” workflow.
-- **docs/m10/reflection.md (PR87/PR88):** adds §12 “Microbench (PR87)” and §13 “Optional CI Smoke (PR88)”, and corrects the fixtures path to `tests/fixtures/reflection_llm.jsonl`.
-
-
-### Docs (PR89 — M10-13: Reflection docs finalize & cross-links)
-- **docs/m10/reflection.md:** finalized with (a) explicit dry‑run gate in the conditions, (b) §3.1 **Configuration reference** table (keys, types, defaults), (c) telemetry schema now documents optional `fixture_key` for the LLM fixtures path, (d) **fixture key helper** snippet to recompute the SHA‑256 prompt hash, (e) enablement requires the **planner** to set `reflection: true`, plus links to `examples/reflection/{enabled.yaml,llm_fixture.yaml}`.
-- **README:** tightened M10 status line; corrected CI logging path to `engine/orchestrator/logging.append_jsonl`; clarified that the orchestrator honors either the plan flag or the stashed policy flag; added “no dry‑run” as a gate condition.
-- **docs/m9/overview.md:** short banner pointing forward to M10 dossier.
-
-### Changed
-- **.gitignore:** deduplicated entries; clarified JSONL ignore patterns for local logs while keeping identity goldens intact.
-
-
+### Notables (from 0.9.0 prereleases)
+- Windows path/Unicode hardening; tempdir handling; respect `CLEMATIS_LOG_DIR`.
+- Deterministic CLI help; help stability tests; `--config-overrides` for demo.
+- Perf/quality logs segregated under `logs/perf/` and excluded from identity.
+- Snapshot Schema v1 header + strict inspector.
+- Reproducible builds across OS/Python with pinned toolchain, SHA256 parity checks.
+- Typed error taxonomy and uniform CLI error formatting.
 ## [0.9.0a2] - 2025-10-04
+### Summary
+HS1 GEL substrate **contracts only** (default OFF) with disabled‑path identity proven, examples/docs, and packaging/CI polish.
 
-### M11 — Field‑Control GEL (HS1): contracts + safe plumbing (no planner)
-
-#### Added (PR91 — M11-01: Docs overview)
-- **Docs:** `docs/m11/overview.md` — what GEL is in v3 (contracts + optional ops), what it is not (no nudge planner), call sites & gates, algorithm summaries (update/decay/merge/split/promotion), determinism, defaults.
-- **README:** short pointer under Architecture/Examples (GEL substrate).
-
-#### Added (PR92 — M11-02: Disabled‑path identity for graph.*)
-- **Helpers:** `tests/helpers/identity.py` — `_strip_perf_and_quality(...)`, `_strip_perf_and_quality_and_graph(...)`; shared normalizers consolidated here.
-- **Engine test hook:** `clematis/engine/orchestrator/core.py` adds `run_smoke_turn(cfg, log_dir=None, input_text="")` (stable smoke entrypoint; no behavior change).
-- **Tests:** `tests/test_identity_disabled_path.py` — config round‑trip equality with `graph.enabled=false` (inert subtree); runtime smoke asserts **no `gel.jsonl`** and **byte‑identical logs** vs baseline.
-
-#### Added (PR93 — M11-03: Runtime identity + snapshots)
-- **Tests:** `tests/test_gel_disabled_path_runtime.py` — repeats smoke run; asserts log identity and **snapshot parity** (same files; identical content hashes when present).
-
-#### Added (PR94 — M11-04: Examples + doc polish)
-- **Examples:** `examples/gel/enabled.yaml` (observe+decay only; ops OFF) and `examples/gel/disabled.yaml` (full subtree, inert with `enabled:false`).
-- **Script:** `scripts/examples_smoke.py` — includes the two GEL examples in the default set; help text mentions HS1/GEL.
-- **Docs:** `docs/m11/overview.md` — Examples section and status updated; **README.md** adds a “GEL (HS1) examples” block with run commands.
-
-#### Packaging / CI (PR94)
-- **Packaging:** `MANIFEST.in` allow‑lists `examples/gel/*.yaml` into sdists; `pyproject.toml` adds `data-files` entry (`share/examples/clematis/gel`) so wheels ship the examples; registers `pytest` mark `identity`.
-- **CI:** `.github/workflows/ci.yml` runs the GEL example smoke (offline) and verifies examples are present in both sdist and wheel (robust path patterns).
-
-#### Docs (PR95 — M11-05: CLI inspector note)
-- **Docs:** `docs/m11/overview.md` — “Inspecting GEL state (CLI)” shows `clematis cli inspect-snapshot` usage and `jq` one‑liners for `state.graph.{meta,nodes,edges}`.
-
-#### Milestone (PR96 — M11-06: Close)
-- **Footer:** `docs/m11/overview.md` adds a milestone note: **v3 HS1 (GEL substrate) complete; nudge planner deferred to v4**.
-
-#### Invariants
-- Defaults keep `graph.enabled=false`; disabled‑path identity stays **byte‑identical**; **no GEL files** when disabled.
-- Hybrid reranker remains OFF by default (shadow‑only hook present).
-- CI green across suites; no runtime behavior changes outside explicitly enabled examples.
+- Docs: HS1 overview + CLI inspector note.
+- Identity: asserts byte‑identical logs & snapshots when `graph.enabled=false`.
+- Examples/CI: runnable GEL configs; examples shipped in sdists/wheels.
 
 ## [0.9.0a1] - 2025-10-03
 
@@ -965,6 +770,8 @@ jobs:
           head -n1 err.txt | grep "direct script is deprecated"
       - name: CLI tests
         run: pytest -q tests/cli
+
+```
 
 ### PR54 — Man pages & packaging
 - Add `scripts/gen_manpages.py` (stdlib-only, deterministic via `SOURCE_DATE_EPOCH`)
