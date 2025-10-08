@@ -100,7 +100,10 @@ def _apply_overrides(cfg: Any, overrides: Dict[str, Any]) -> Any:
                     except Exception:
                         pass
                 continue  # skip all other keys under this disabled subtree
-            child = _ensure_child(cfg, k)
+            child = _maybe_get_child(cfg, k)
+            if child is None:
+                # Do not create missing subtrees; avoid perturbing identity runs
+                continue
             _apply_overrides(child, v)
         else:
             _set_field(cfg, k, v)
@@ -113,7 +116,7 @@ def _maybe_override_cfg_inplace(cfg: Any, args: Any) -> Any:
     budgets = _ensure_child(sched, "budgets")
     fairness = _ensure_child(sched, "fairness")
 
-    def set_in(target: Any, key: str, value: Any):
+    def set_in(target: Any, key: str, value: Any) -> None:
         if value is None:
             return
         if isinstance(target, dict):
@@ -134,10 +137,6 @@ def _maybe_override_cfg_inplace(cfg: Any, args: Any) -> Any:
     set_in(budgets, "t2_k", getattr(args, "t2_k", None))
     set_in(budgets, "t3_ops", getattr(args, "t3_ops", None))
 
-    # Ensure enabled for the demo to show yields if not already set
-    enabled = _get_path(sched, ["enabled"], None)
-    if enabled is None:
-        set_in(sched, "enabled", True)
     return cfg
 
 
@@ -216,7 +215,7 @@ def _parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
-def main():
+def main() -> None:
     args = _parse_args()
     cfg = load_config(args.config)
     cfg = _maybe_override_cfg_inplace(cfg, args)

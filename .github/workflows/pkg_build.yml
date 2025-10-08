@@ -531,6 +531,7 @@ jobs:
           fetch-depth: 1
 
       - name: Verify VERSION matches tag
+        if: startsWith(github.ref, 'refs/tags/')
         shell: bash
         run: |
           set -euo pipefail
@@ -1008,6 +1009,29 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Verify VERSION matches tag (tag push)
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME#v}"
+          FILE="$(tr -d '\r\n' < clematis/VERSION)"
+          echo "Tag:   $TAG"
+          echo "File:  $FILE"
+          test "$TAG" = "$FILE" || (echo "VERSION mismatch: $FILE (file) vs $TAG (tag)" >&2; exit 1)
+
+      - name: Verify VERSION matches tag (release event)
+        if: ${{ github.event_name == 'release' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${{ github.event.release.tag_name }}"
+          TAG="${TAG#v}"
+          FILE="$(tr -d '\r\n' < clematis/VERSION)"
+          echo "Release tag: $TAG"
+          echo "File:        $FILE"
+          test "$TAG" = "$FILE" || (echo "VERSION mismatch: $FILE (file) vs $TAG (release tag)" >&2; exit 1)
 
       - name: Setup Python
         uses: actions/setup-python@v5
