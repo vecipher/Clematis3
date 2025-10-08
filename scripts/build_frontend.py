@@ -32,7 +32,8 @@ def copy_tree_text_lf(src_dir, dst_dir):
             copy_text_lf(s, d)
 
 def copy_js_tree(src_dir, dst_dir):
-    if not os.path.isdir(src_dir): return
+    if not os.path.isdir(src_dir):
+        return
     for root, _, files in os.walk(src_dir):
         for fn in files:
             if not fn.endswith(".js"):  # only JS modules
