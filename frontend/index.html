@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8"/>
+    <meta http-equiv="x-ua-compatible" content="ie=edge"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1"/>
+    <title>Clematis v3 – Viewer (M14)</title>
+    <link rel="stylesheet" href="./styles/main.css"/>
+  </head>
+  <body>
+    <header class="topbar">
+      <h1>Clematis v3 — Viewer (M14)</h1>
+      <div class="status" id="status">offline • static</div>
+    </header>
+
+    <main class="container">
+      <nav class="tabs" id="tabs">
+        <button data-tab="runs" class="tab active">Runs</button>
+        <button data-tab="snapshots" class="tab">Snapshots</button>
+        <button data-tab="logs" class="tab">Logs</button>
+      </nav>
+
+      <!-- Runs -->
+      <section class="panel tabpanel active" data-panel="runs">
+        <h2>Runs</h2>
+        <p>Load one or more <code>run_bundle.json</code> files:</p>
+        <div class="loader">
+          <input id="fileInput" type="file" accept=".json" multiple />
+          <button id="btnClear" type="button">Clear</button>
+        </div>
+        <div class="runs-list" id="runsList"></div>
+      </section>
+
+      <!-- Snapshots -->
+      <section class="panel tabpanel" data-panel="snapshots">
+        <h2>Snapshot summary</h2>
+        <div class="controls">
+          <select id="runSelect"></select>
+          <button id="btnCopySnapshot" type="button">Copy JSON</button>
+        </div>
+        <pre id="snapshot" class="prebox">—</pre>
+      </section>
+
+      <!-- Logs -->
+      <section class="panel tabpanel" data-panel="logs">
+        <h2>Logs</h2>
+        <div class="controls">
+          <select id="logRunSelect"></select>
+          <label>
+            <input id="togglePerf" type="checkbox"/>
+            Show perf logs (experimental)
+          </label>
+          <input id="logSearch" type="search" placeholder="Search (key:value or text)"/>
+        </div>
+
+        <div class="log-tabs">
+          <button class="stagetab active" data-stage="t1">T1</button>
+          <button class="stagetab" data-stage="t2">T2</button>
+          <button class="stagetab" data-stage="t4">T4</button>
+          <button class="stagetab" data-stage="apply">Apply</button>
+          <button class="stagetab" data-stage="turn">Turn</button>
+        </div>
+
+        <div class="log-counts" id="logCounts"></div>
+        <div id="logList" class="loglist"></div>
+      </section>
+    </main>
+
+    <!-- ES modules, offline -->
+    <script type="module" src="./assets/app.js"></script>
+  </body>
+</html>

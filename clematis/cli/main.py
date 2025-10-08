@@ -11,7 +11,15 @@ from clematis.cli_utils import (
     reorder_subparsers_alphabetically,
 )
 
-from . import bench_t4, demo, inspect_snapshot, rotate_logs, seed_lance_demo, validate
+from . import (
+    bench_t4,
+    demo,
+    inspect_snapshot,
+    rotate_logs,
+    seed_lance_demo,
+    validate,
+    export_logs_for_frontend,
+)
 from ._config import discover_config_path, maybe_log_selected
 
 
@@ -56,6 +64,7 @@ def build_parser() -> argparse.ArgumentParser:
     seed_lance_demo.register(subparsers)
     validate.register(subparsers)
     demo.register(subparsers)
+    export_logs_for_frontend.register(subparsers)
 
     reorder_subparsers_alphabetically(parser)
     return parser

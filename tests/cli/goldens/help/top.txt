@@ -10,6 +10,8 @@ subcommands:
   <cmd>
   bench-t4 Delegates to scripts/bench_t4.py
   demo Delegates to scripts/
+  export-logs Export logs + latest snapshot into a JSON bundle
+  (delegates to scripts/)
   inspect-snapshot Delegates to scripts/inspect_snapshot.py
   rotate-logs Delegates to scripts/rotate_logs.py
   seed-lance-demo Delegates to scripts/seed_lance_demo.py

@@ -1,0 +1,12 @@
+{
+  "name": "clematis-frontend",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "engines": {
+    "node": "20.11.1"
+  },
+  "scripts": {
+    "build": "echo 'No-op build (PR127 uses vanilla ES modules)'"
+  }
+}
