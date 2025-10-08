@@ -1,6 +1,6 @@
-{"turn": "demo-1", "agent": "AgentA", "tokens": 6, "truncated": false, "style_prefix_used": false, "snippet_count": 0, "ms": 0.023, "backend": "rulebased", "now": "2025-09-21T06:42:45.289588+00:00"}
-{"turn": "demo-1", "agent": "AgentA", "tokens": 6, "truncated": false, "style_prefix_used": false, "snippet_count": 0, "ms": 0.019, "backend": "rulebased", "now": "2025-09-21T06:42:45.291623+00:00"}
-{"turn": "demo-1", "agent": "AgentA", "tokens": 6, "truncated": false, "style_prefix_used": false, "snippet_count": 0, "ms": 0.015, "backend": "rulebased", "now": "2025-09-21T06:42:45.292340+00:00"}
-{"turn": "demo-1", "agent": "AgentA", "tokens": 6, "truncated": false, "style_prefix_used": false, "snippet_count": 0, "ms": 0.018, "backend": "rulebased", "now": "2025-09-21T06:42:45.292984+00:00"}
-{"turn": "demo-1", "agent": "AgentA", "tokens": 6, "truncated": false, "style_prefix_used": false, "snippet_count": 0, "ms": 0.017, "backend": "rulebased", "now": "2025-09-21T06:42:45.293890+00:00"}
-{"turn": "demo-1", "agent": "AgentA", "tokens": 6, "truncated": false, "style_prefix_used": false, "snippet_count": 0, "ms": 0.016, "backend": "rulebased", "now": "2025-09-21T06:42:45.294512+00:00"}
+{"turn":"demo-1","agent":"AgentA","tokens":6,"truncated":false,"style_prefix_used":false,"snippet_count":0,"ms":0.023,"backend":"rulebased","now":"2025-09-21T06:42:45.289588+00:00"}
+{"turn":"demo-1","agent":"AgentA","tokens":6,"truncated":false,"style_prefix_used":false,"snippet_count":0,"ms":0.019,"backend":"rulebased","now":"2025-09-21T06:42:45.291623+00:00"}
+{"turn":"demo-1","agent":"AgentA","tokens":6,"truncated":false,"style_prefix_used":false,"snippet_count":0,"ms":0.015,"backend":"rulebased","now":"2025-09-21T06:42:45.292340+00:00"}
+{"turn":"demo-1","agent":"AgentA","tokens":6,"truncated":false,"style_prefix_used":false,"snippet_count":0,"ms":0.018,"backend":"rulebased","now":"2025-09-21T06:42:45.292984+00:00"}
+{"turn":"demo-1","agent":"AgentA","tokens":6,"truncated":false,"style_prefix_used":false,"snippet_count":0,"ms":0.017,"backend":"rulebased","now":"2025-09-21T06:42:45.293890+00:00"}
+{"turn":"demo-1","agent":"AgentA","tokens":6,"truncated":false,"style_prefix_used":false,"snippet_count":0,"ms":0.016,"backend":"rulebased","now":"2025-09-21T06:42:45.294512+00:00"}
