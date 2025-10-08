@@ -91,9 +91,14 @@ def _apply_overrides(cfg: Any, overrides: Dict[str, Any]) -> Any:
         if isinstance(v, dict):
             # If explicitly disabled, do not create/populate the subtree.
             if v.get("enabled") is False:
-                child = _maybe_get_child(cfg, k)
-                if child is not None:
-                    _set_field(child, "enabled", False)  # only flip enabled if present
+                # Treat as inert: remove the subtree if present so mere presence doesn't change behavior.
+                if isinstance(cfg, dict):
+                    cfg.pop(k, None)
+                else:
+                    try:
+                        delattr(cfg, k)
+                    except Exception:
+                        pass
                 continue  # skip all other keys under this disabled subtree
             child = _ensure_child(cfg, k)
             _apply_overrides(child, v)
@@ -232,7 +237,7 @@ def main():
         os.makedirs(out_dir, exist_ok=True)
         _paths.logs_dir = lambda: out_dir  # type: ignore[assignment]
 
-    agents = sorted([a.strip() for a in args.agents.split(",") if a.strip()])
+    agents = [a.strip() for a in args.agents.split(",") if a.strip()]
     if not agents:
         print("No agents provided. Exiting.")
         return
@@ -350,6 +355,4 @@ def main():
 
 
 if __name__ == "__main__":
-    # Add repo root to sys.path to simplify running without install
-    sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
     main()
