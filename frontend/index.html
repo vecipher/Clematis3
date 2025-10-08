@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8"/>
+    <meta http-equiv="x-ua-compatible" content="ie=edge"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1"/>
+    <title>Clematis v3 – Viewer (M14)</title>
+    <link rel="stylesheet" href="./styles/main.css"/>
+  </head>
+  <body>
+    <header class="topbar">
+      <h1>Clematis v3 — Minimal Viewer (M14)</h1>
+      <div class="status" id="status">offline • static</div>
+    </header>
+
+    <main class="container">
+      <section class="panel">
+        <h2>Load bundle</h2>
+        <p>
+          Load a <code>run_bundle.json</code> exported by the CLI, or pass
+          <code>?bundle=./path/run_bundle.json</code> when serving via a local HTTP server.
+        </p>
+        <div class="loader">
+          <input id="fileInput" type="file" accept=".json" />
+          <button id="btnClear" type="button">Clear</button>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Snapshot summary</h2>
+        <pre id="snapshot" class="prebox">—</pre>
+      </section>
+
+      <section class="panel">
+        <h2>Logs (counts)</h2>
+        <ul id="logCounts" class="list"></ul>
+      </section>
+    </main>
+
+    <!-- Static, offline: ES module, no external URLs -->
+    <script type="module" src="./assets/main.js"></script>
+  </body>
+</html>
