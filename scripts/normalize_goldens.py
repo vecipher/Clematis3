@@ -1,6 +1,8 @@
 # scripts/normalize_goldens.py
 from __future__ import annotations
-import argparse, json, os, sys
+import argparse
+import json
+import sys
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -8,18 +10,30 @@ ROOTS = ["tests/golden", "tests/goldens", "tests/cli/goldens"]
 
 # Heuristics mirrored from tests/helpers/identity.py
 _PATH_KEY_NAMES = {
-    "path","file","filepath","snapshot","snapshot_path","artifact",
-    "dir","directory","logs_dir","log_file"
+    "path",
+    "file",
+    "filepath",
+    "snapshot",
+    "snapshot_path",
+    "artifact",
+    "dir",
+    "directory",
+    "logs_dir",
+    "log_file"
 }
-_PATH_KEY_SUFFIXES = ("_path","_file","_dir","_directory")
+_PATH_KEY_SUFFIXES = (
+    "_path","_file","_dir","_directory"
+)
 
 def _is_path_key(key: str) -> bool:
     lk = key.lower()
-    if lk in _PATH_KEY_NAMES: return True
+    if lk in _PATH_KEY_NAMES:
+        return True
     return any(lk.endswith(s) for s in _PATH_KEY_SUFFIXES)
 
 def _norm_path_string(s: str) -> str:
-    if not s: return s
+    if not s:
+        return s
     unc = s.startswith("\\\\") or s.startswith("//")
     s2 = s.replace("\\", "/")
     if unc:
@@ -49,7 +63,18 @@ def _iter_files() -> Iterable[Path]:
 
 def _is_probably_text(path: Path) -> bool:
     # Treat jsonl, json, md, txt, yaml, yml as text; fall back to small files
-    return path.suffix.lower() in {".jsonl",".json",".md",".txt",".yaml",".yml",".rst",".man",".help",".out"}
+    return path.suffix.lower() in {
+        ".jsonl",
+        ".json",
+        ".md",
+        ".txt",
+        ".yaml",
+        ".yml",
+        ".rst",
+        ".man",
+        ".help",
+        ".out"
+        }
 
 def normalize_file(path: Path) -> bytes | None:
     orig = path.read_bytes()
