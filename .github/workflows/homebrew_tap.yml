@@ -18,6 +18,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set vars
         id: vars
@@ -25,6 +27,7 @@ jobs:
           INPUT_TAG: ${{ github.event.release.tag_name }}
           GH_TOKEN: ${{ github.token }}
         run: |
+          set -euo pipefail
           TAG="${INPUT_TAG}"
           # If manually dispatched, pick the latest release tag.
           if [ -z "$TAG" ]; then
@@ -37,6 +40,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          set -euo pipefail
           TAG="${{ steps.vars.outputs.tag }}"
           VER="${{ steps.vars.outputs.ver }}"
           for i in {1..30}; do
@@ -53,6 +57,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          set -euo pipefail
           VER="${{ steps.vars.outputs.ver }}"
           mkdir -p _release
           # Ensure a clean slate in case of prior attempts/reruns.
@@ -63,21 +68,30 @@ jobs:
       - name: Compute SHA256
         id: sha
         run: |
+          set -euo pipefail
           VER="${{ steps.vars.outputs.ver }}"
           echo "sha=$(sha256sum _release/clematis-${VER}.tar.gz | awk '{print $1}')" >> "$GITHUB_OUTPUT"
 
       - name: Update Formula file
         run: |
+          set -euo pipefail
           TAG="${{ steps.vars.outputs.tag }}"
           VER="${{ steps.vars.outputs.ver }}"
           SHA="${{ steps.sha.outputs.sha }}"
           F="Formula/clematis.rb"
+          if [ ! -f "$F" ]; then
+            echo "Formula file not found at $F" >&2
+            exit 1
+          fi
           echo "Updating $F → tag=$TAG ver=$VER sha=$SHA"
           sed -i -E "s|^  url \".*\"|  url \"https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/clematis-${VER}.tar.gz\"|g" "$F"
           sed -i -E "s|^  sha256 \".*\"|  sha256 \"${SHA}\"|g" "$F"
           sed -i -E "s|^  version \".*\"|  version \"${VER}\"|g" "$F"
           echo "---"
           grep -E "^  (url|sha256|version)" -n "$F"
+          grep -q "url \"https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/clematis-${VER}.tar.gz\"" "$F" || { echo "URL not updated"; exit 1; }
+          grep -q "sha256 \"${SHA}\"" "$F" || { echo "SHA not updated"; exit 1; }
+          grep -q "version \"${VER}\"" "$F" || { echo "Version not updated"; exit 1; }
 
       # Use a PAT so the PR is authored by a real user and downstream CI triggers.
       - name: Create PR with updated formula (PAT)
