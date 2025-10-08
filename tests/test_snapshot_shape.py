@@ -25,7 +25,7 @@ def test_snapshot_shape_without_store(tmp_path):
     p = Path(path)
     assert p.exists(), f"snapshot file not found at {p}"
 
-    data = json.loads(p.read_text())
+    data = json.loads(p.read_text(encoding="utf-8"))
     # Stable top-level schema
     for key in ["turn", "agent", "version_etag", "applied", "deltas", "store"]:
         assert key in data

@@ -140,10 +140,10 @@ class EmbedReader:
 
             # Memory-map embeddings for chunked reading
             dt = np.float16 if sh.dtype == "fp16" else np.float32
-            mm = np.memmap(emb_path, mode="r", dtype=dt, shape=(sh.count, sh.dim))
-            norms_mm = None
+            mm: np.ndarray = np.memmap(emb_path, mode="r", dtype=dt, shape=(sh.count, sh.dim))
+            norms_mm: Optional[np.ndarray] = None
             if sh.has_norms and norms_path.exists():
-                norms_mm = np.memmap(norms_path, mode="r", dtype=np.float32, shape=(sh.count,))
+                norms_mm = np.memmap(norms_path, mode="r", dtype=np.float32, shape=(sh.count,))  # type: ignore[assignment]
 
             # Yield batches
             i = 0

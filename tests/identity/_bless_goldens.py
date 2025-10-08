@@ -8,6 +8,8 @@ Usage:
 import os
 import shutil
 import subprocess
+import sys
+import tempfile
 from pathlib import Path
 
 EXPECT = ("apply.jsonl", "t1.jsonl", "t2.jsonl", "t4.jsonl", "turn.jsonl")
@@ -30,10 +32,7 @@ def _pick_logs_dir(preferred: Path) -> Path:
 def main():
     here = Path(__file__).parent
     goldens = here / "goldens" / "disabled_path"
-    tmp = Path(os.getenv("TMPDIR", "/tmp")) / "clem_identity_golden"
-    if tmp.exists():
-        shutil.rmtree(tmp)
-    tmp.mkdir(parents=True, exist_ok=True)
+    tmp = Path(tempfile.mkdtemp(prefix="clem_identity_golden_", dir=tempfile.gettempdir()))
 
     env = os.environ.copy()
     env.update(
@@ -50,13 +49,15 @@ def main():
             # try to route logs into tmp
             "CLEMATIS_LOG_DIR": str(tmp),
             "CLEMATIS_LOGS_DIR": str(tmp),
+            "PYTHONUTF8": "1",
+            "TZ": "UTC",
         }
     )
 
     # Ensure no stale logs: remove entire directories used by the demo
     import shutil as _sh
 
-    for d in (tmp, Path(".") / ".data" / "logs", Path(".") / ".logs", Path("clematis") / ".logs"):
+    for d in (Path(".") / ".data" / "logs", Path(".") / ".logs", Path("clematis") / ".logs"):
         try:
             if d.exists():
                 _sh.rmtree(d)
@@ -78,9 +79,10 @@ def main():
     # Produce logs with short, deterministic run
     subprocess.run(
         [
-            "python",
+            sys.executable,
             "-m",
             "clematis.scripts.demo",
+            "--out", str(tmp),
             "--steps",
             "2",
             "--text",

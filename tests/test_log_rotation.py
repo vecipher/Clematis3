@@ -51,9 +51,9 @@ def test_rotate_one_cascade_with_cap(tmp_path):
     p3 = Path(str(base) + ".3")
 
     assert not base.exists()
-    assert p1.exists() and p1.read_text() == "B0\n"
-    assert p2.exists() and p2.read_text() == "B1\n"
-    assert p3.exists() and p3.read_text() == "B2\n"
+    assert p1.exists() and p1.read_text(encoding="utf-8") == "B0\n"
+    assert p2.exists() and p2.read_text(encoding="utf-8") == "B1\n"
+    assert p3.exists() and p3.read_text(encoding="utf-8") == "B2\n"
 
 
 def test_rotate_one_dry_run_changes_nothing(tmp_path):
@@ -66,8 +66,8 @@ def test_rotate_one_dry_run_changes_nothing(tmp_path):
     # Dry-run: should print planned actions but not move files
     did = mod.rotate_one(str(base), backups=2, dry_run=True)
     assert did is True  # dry-run still returns True if base exists
-    assert base.exists() and base.read_text() == "C0\n"
-    assert p1.exists() and p1.read_text() == "C1\n"
+    assert base.exists() and base.read_text(encoding="utf-8") == "C0\n"
+    assert p1.exists() and p1.read_text(encoding="utf-8") == "C1\n"
 
 
 def test_script_main_rotates_when_over_size(tmp_path, capsys):
