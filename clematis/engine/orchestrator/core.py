@@ -526,7 +526,6 @@ class Orchestrator:
                 "agent": agent_id,
                 **t1.metrics,
                 "ms": t1_ms,
-                **({"now": now} if now else {}),
             },
         )
         # --- M5 liminilas check after T1 ---
@@ -582,10 +581,6 @@ class Orchestrator:
                         },
                         "t2": {},
                         "t4": {},
-                        "slice_idx": slice_ctx["slice_idx"],
-                        "yielded": True,
-                        "yield_reason": reason,
-                        **({"now": now} if now else {}),
                     },
                 )
                 return TurnResult(line="", events=[])
@@ -628,7 +623,6 @@ class Orchestrator:
                 **({"cache_hit": cache_hit} if cm is not None else {}),
                 **({"cache_size": (cm.stats.get("size", 0))} if cm is not None else {}),
                 "ms": t2_ms,
-                **({"now": now} if now else {}),
             },
         )
         # --- M5 boundary check after T2 ---
@@ -685,10 +679,6 @@ class Orchestrator:
                             "cache_hit": bool(cache_hit),
                         },
                         "t4": {},
-                        "slice_idx": slice_ctx["slice_idx"],
-                        "yielded": True,
-                        "yield_reason": reason,
-                        **({"now": now} if now else {}),
                     },
                 )
                 return TurnResult(line="", events=[])
@@ -789,10 +779,6 @@ class Orchestrator:
                             "cache_hit": bool(cache_hit),
                         },
                         "t4": {},
-                        "slice_idx": slice_ctx["slice_idx"],
-                        "yielded": True,
-                        "yield_reason": reason,
-                        **({"now": now} if now else {}),
                     },
                 )
                 return TurnResult(line="", events=[])
@@ -1031,7 +1017,6 @@ class Orchestrator:
                     "rejected": len(getattr(t4, "rejected_ops", [])),
                     "reasons": getattr(t4, "reasons", []),
                     "ms": t4_ms,
-                    **({"now": now} if now else {}),
                 },
             )
             # PR70: in dry-run mode, record artifacts and return before Apply/Health
@@ -1126,10 +1111,6 @@ class Orchestrator:
                                 "approved": len(getattr(t4, "approved_deltas", [])),
                                 "rejected": len(getattr(t4, "rejected_ops", [])),
                             },
-                            "slice_idx": slice_ctx["slice_idx"],
-                            "yielded": True,
-                            "yield_reason": reason,
-                            **({"now": now} if now else {}),
                         },
                     )
                     return TurnResult(line=utter if 'utter' in locals() else "", events=[])
@@ -1241,7 +1222,6 @@ class Orchestrator:
                     (getattr(apply, "metrics", {}) or {}).get("cache_invalidations", 0)
                 ),
                 "ms": apply_ms,
-                **({"now": now} if now else {}),
             }
             # PR76: stabilize identity fields before logging
             if "now" in _ap:
@@ -1307,10 +1287,6 @@ class Orchestrator:
                                 "approved": len(getattr(t4, "approved_deltas", [])),
                                 "rejected": len(getattr(t4, "rejected_ops", [])),
                             },
-                            "slice_idx": slice_ctx["slice_idx"],
-                            "yielded": True,
-                            "yield_reason": reason,
-                            **({"now": now} if now else {}),
                         },
                     )
                     return TurnResult(line=utter if 'utter' in locals() else "", events=[])
@@ -1453,15 +1429,6 @@ class Orchestrator:
                     "approved": len(getattr(t4, "approved_deltas", [])),
                     "rejected": len(getattr(t4, "rejected_ops", [])),
                 },
-                **(
-                    {
-                        "slice_idx": (slice_ctx["slice_idx"] if slice_ctx is not None else None),
-                        "yielded": False,
-                    }
-                    if slice_ctx is not None
-                    else {}
-                ),
-                **({"now": now} if now else {}),
             },
         )
 

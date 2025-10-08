@@ -47,6 +47,7 @@ _IDENTITY_LOGS: set[str] = {
     "turn.jsonl",
 }
 
+_TURN_DROP_KEYS = {"yielded", "yield_reason", "slice_idx"}
 
 def normalize_for_identity(name: str, rec: Dict[str, Any]) -> Dict[str, Any]:
     """
@@ -78,17 +79,9 @@ def normalize_for_identity(name: str, rec: Dict[str, Any]) -> Dict[str, Any]:
             # Preserve scheduling context fields introduced in PR27 when a yield
             # actually occurred, but strip them in the steady path so legacy
             # identity baselines remain byte-identical.
-            yielded = out.get("yielded")
-            if yielded:
-                if "slice_idx" in out:
-                    try:
-                        out["slice_idx"] = int(out["slice_idx"])
-                    except Exception:
-                        pass
-                out["yielded"] = True
-            else:
-                out.pop("yielded", None)
-                out.pop("slice_idx", None)
+            if name == "turn.jsonl":
+                for _k in _TURN_DROP_KEYS:
+                    out.pop(_k, None)
         return out
     # All other logs: return unchanged
     return rec
