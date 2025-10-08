@@ -1,1 +1,0 @@
-{"turn": "demo-1", "agent": "AgentA", "policy_backend": "rulebased", "backend": "rulebased", "ops_counts": {"Speak": 1, "RequestRetrieve": 1}, "requested_retrieve": true, "rag_used": true, "reflection": false, "ms_deliberate": 0.031, "ms_rag": 0.079, "now": "2025-10-08T02:09:48.296145+00:00"}

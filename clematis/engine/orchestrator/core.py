@@ -1212,26 +1212,34 @@ class Orchestrator:
             apply = apply_changes(ctx, state, t4)
             apply_ms = round((time.perf_counter() - t0) * 1000.0, 3)
             _ap = {
-                "turn": turn_id,
-                "agent": agent_id,
-                "applied": apply.applied,
-                "clamps": apply.clamps,
-                "version_etag": apply.version_etag,
-                "snapshot": apply.snapshot_path,
-                "cache_invalidations": int(
-                    (getattr(apply, "metrics", {}) or {}).get("cache_invalidations", 0)
-                ),
+                "turn": str(turn_id),
+                "agent": str(agent_id),
+                "applied": int(getattr(apply, "applied", 0) or 0),
+                "clamps": int(getattr(apply, "clamps", 0) or 0),
+                "version_etag": getattr(apply, "version_etag", None),
+                "snapshot": getattr(apply, "snapshot_path", None),
+                "cache_invalidations": int(((getattr(apply, "metrics", {}) or {}).get("cache_invalidations", 0) or 0)),
                 "ms": apply_ms,
             }
-            # PR76: stabilize identity fields before logging
-            if "now" in _ap:
-                if getattr(ctx, "now_ms", None) is not None:
-                    _ap["now"] = _iso_from_ms(int(ctx.now_ms))
-                else:
-                    _ap.pop("now", None)
             if _os.environ.get("CI", "").lower() == "true":
                 _ap["ms"] = 0.0
-            _append_jsonl("apply.jsonl", _ap)
+            # Decide emission: real changes OR a real snapshot path (not empty/"None").
+            snap_val = _ap.get("snapshot")
+            snap_truthy = bool(snap_val) and str(snap_val).strip().lower() != "none"
+
+            applied_n = int(_ap.get("applied") or 0)
+            clamps_n = int(_ap.get("clamps") or 0)
+            inval_n = int(_ap.get("cache_invalidations") or 0)
+
+            _should_log_apply = (
+                applied_n > 0
+                or clamps_n > 0
+                or inval_n > 0
+                or snap_truthy
+            )
+
+            if _should_log_apply:
+                _append_jsonl("apply.jsonl", _ap)
             # --- M5 boundary check after Apply ---
             if slice_ctx is not None:
                 consumed = {

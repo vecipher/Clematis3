@@ -248,38 +248,51 @@ def _run_agents_parallel_batch(
             metrics={"counts": {"approved": len(buf["deltas"])}},
         )
         apply = apply_changes(ctx, state, t4_like)
-        apply_payload = {
-            "turn": buf["turn_id"],
-            "agent": buf["agent_id"],
-            "applied": apply.applied,
-            "clamps": apply.clamps,
-            "version_etag": apply.version_etag,
-            "snapshot": apply.snapshot_path,
-            "cache_invalidations": int((getattr(apply, "metrics", {}) or {}).get("cache_invalidations", 0)),
-            "ms": 0.0,
-        }
-        key = _get_logging_callable("default_key_for")(
-            file_path="apply.jsonl",
-            turn_id=buf["turn_id"],
-            slice_idx=int(buf.get("slice_idx", 0) or 0),
+
+        # Mirror core.py: only emit apply.jsonl when something actually changed,
+        # or when a snapshot was written this turn (identity contract).
+        cache_invals = int((getattr(apply, "metrics", {}) or {}).get("cache_invalidations", 0))
+        should_emit_apply = (
+            int(getattr(apply, "applied", 0) or 0) > 0
+            or int(getattr(apply, "clamps", 0) or 0) > 0
+            or cache_invals > 0
+            or (getattr(apply, "snapshot_path", None) is not None)
         )
-        payload = dict(apply_payload)
-        if "now" in payload:
-            if getattr(ctx, "now_ms", None) is not None:
-                payload["now"] = iso_from_ms(int(ctx.now_ms))
-            else:
-                payload.pop("now", None)
-        if _os.environ.get("CI", "").lower() == "true":
-            payload["ms"] = 0.0
-        try:
-            stager.stage("apply.jsonl", key, payload)
-        except RuntimeError as exc:
-            if str(exc) == "LOG_STAGING_BACKPRESSURE":
-                for rec in stager.drain_sorted():
-                    _append_unbuffered(rec.file_path, rec.payload)
+
+        if should_emit_apply:
+            apply_payload = {
+                "turn": buf["turn_id"],
+                "agent": buf["agent_id"],
+                "applied": apply.applied,
+                "clamps": apply.clamps,
+                "version_etag": apply.version_etag,
+                "snapshot": apply.snapshot_path,
+                "cache_invalidations": cache_invals,
+                "ms": 0.0,
+            }
+            key = _get_logging_callable("default_key_for")(
+                file_path="apply.jsonl",
+                turn_id=buf["turn_id"],
+                slice_idx=int(buf.get("slice_idx", 0) or 0),
+            )
+            payload = dict(apply_payload)
+            if "now" in payload:
+                if getattr(ctx, "now_ms", None) is not None:
+                    payload["now"] = iso_from_ms(int(ctx.now_ms))
+                else:
+                    payload.pop("now", None)
+            if _os.environ.get("CI", "").lower() == "true":
+                payload["ms"] = 0.0
+            try:
                 stager.stage("apply.jsonl", key, payload)
-            else:
-                raise
+            except RuntimeError as exc:
+                if str(exc) == "LOG_STAGING_BACKPRESSURE":
+                    for rec in stager.drain_sorted():
+                        _append_unbuffered(rec.file_path, rec.payload)
+                    stager.stage("apply.jsonl", key, payload)
+                else:
+                    raise
+
         results.append(TurnResult(line=buf["dialogue"], events=[]))
 
         # PR79: invoke reflection after Apply in parallel path (no logging/writes here)
