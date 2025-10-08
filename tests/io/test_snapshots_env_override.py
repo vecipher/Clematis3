@@ -5,7 +5,8 @@ import pytest
 def _write_one_snapshot(tmp: Path):
     # Call your public snapshot writer (whatever you use in tests elsewhere)
     from clematis.engine.snapshot import write_snapshot
-    class Ctx: pass
+    class Ctx:
+        pass
     ctx = Ctx()
     state = {}
     # Ensure a deterministic etag, or just accept what your helper produces.

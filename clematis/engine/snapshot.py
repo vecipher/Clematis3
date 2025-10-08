@@ -878,8 +878,6 @@ def _find_snapshot_file(root: str, stem: str):
         return p_zst
     return None
 
-
-from typing import Any, Dict, Optional
 # Public reader used by tests (compatible signature)
 def read_snapshot(
     root: Optional[str] = None,
