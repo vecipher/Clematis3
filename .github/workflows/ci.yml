@@ -249,9 +249,37 @@ jobs:
             tests/perf/test_perf_flags_identity_off.py::test_native_t1_params_do_not_matter_when_disabled \
             tests/perf/test_perf_shadow_logs.py
 
+  goldens_normalized_check:
+    name: Goldens normalized (LF + forward-slash paths)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          check-latest: true
+          cache: 'pip'
+          cache-dependency-path: |
+            pyproject.toml
+
+      - name: Upgrade pip
+        run: python -m pip install --upgrade pip
+
+      - name: Install deps (dev+test)
+        run: |
+          python -m pip install -U pip
+          pip install -e .[dev,test]
+
+      - name: Check golden normalization
+        run: |
+          set -euo pipefail
+          python scripts/normalize_goldens.py
+
   reproducible_build:
     name: Reproducible build (wheel + sdist)
-    needs: [test, cli_help_stability, perf_flags_identity_off]
+    needs: [test, cli_help_stability, perf_flags_identity_off, goldens_normalized_check]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
