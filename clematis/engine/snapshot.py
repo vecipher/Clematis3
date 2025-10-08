@@ -9,12 +9,18 @@ import logging
 import sys
 import time
 
+
 from clematis.io.atomic import atomic_write_text, atomic_write_bytes
+from clematis.io import paths as _paths
+from types import ModuleType
+
 
 from clematis.errors import SnapshotError
 
+# Optional zstandard codec (module object or None)
 try:
-    import zstandard as _zstd  # optional; used for .zst snapshots
+    import zstandard as _zstd_mod  # type: ignore[import-not-found]
+    _zstd: Optional[ModuleType] = _zstd_mod
 except Exception:
     _zstd = None
 
@@ -112,7 +118,7 @@ def _pick_latest_snapshot_path(directory: str) -> Optional[str]:
     return any_json[0]
 
 
-def get_latest_snapshot_info(directory: str = "./.data/snapshots") -> Optional[Dict[str, Any]]:
+def get_latest_snapshot_info(directory: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """
     Pure metadata probe for the latest snapshot file in `directory`.
     Returns a dict:
@@ -133,6 +139,7 @@ def get_latest_snapshot_info(directory: str = "./.data/snapshots") -> Optional[D
     }
     or None if no snapshot is found/readable. Never raises.
     """
+    directory = directory or str(_paths.snapshots_dir())
     path = _pick_latest_snapshot_path(directory)
     if not path:
         return None
@@ -229,7 +236,7 @@ def _get_cfg(ctx) -> Dict[str, Any]:
     """
     t4_default = {
         "snapshot_every_n_turns": 1,
-        "snapshot_dir": "./.data/snapshots",
+        "snapshot_dir": str(_paths.snapshots_dir()),
         "weight_min": -1.0,
         "weight_max": 1.0,
     }
@@ -256,7 +263,7 @@ def _get_cfg(ctx) -> Dict[str, Any]:
 
     # Coerce types
     out["snapshot_every_n_turns"] = int(out.get("snapshot_every_n_turns", 1))
-    out["snapshot_dir"] = str(out.get("snapshot_dir", "./.data/snapshots"))
+    out["snapshot_dir"] = str(out.get("snapshot_dir", _paths.snapshots_dir()))
     out["weight_min"] = float(out.get("weight_min", -1.0))
     out["weight_max"] = float(out.get("weight_max", 1.0))
     return out
@@ -869,10 +876,15 @@ def _find_snapshot_file(root: str, stem: str):
     return None
 
 
+from typing import Any, Dict, Optional
 # Public reader used by tests (compatible signature)
 def read_snapshot(
-    root: str = None, etag_to: str = None, baseline_dir: str = None, path: str = None, **kwargs
-):
+    root: Optional[str] = None,
+    etag_to: Optional[str] = None,
+    baseline_dir: Optional[str] = None,
+    path: Optional[str] = None,
+    **kwargs,
+) -> Dict[str, Any]:
     """
     Minimal PR34 reader with safe fallback:
       * If 'path' points to a snapshot, read that (supports .full/.delta, .json/.json.zst).
@@ -1039,13 +1051,13 @@ def write_snapshot_auto(
         if base is not None:
             try:
                 # Local import avoids hard dependency at import time
-                from clematis.engine.util.snapshot_delta import compute_delta  # type: ignore
+                from clematis.engine.util.snapshot_delta import compute_delta
             except Exception:
-                compute_delta = None  # type: ignore
+                compute_delta = None
             if compute_delta is not None:
                 _, base_payload = _read_header_payload(base)
                 base_obj = base_payload or {}
-                delta_blob = compute_delta(base_obj, payload)  # type: ignore[misc]
+                delta_blob = compute_delta(base_obj, payload)
                 header = {
                     "schema": "snapshot:v1",
                     "mode": "delta",

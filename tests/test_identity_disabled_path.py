@@ -245,4 +245,4 @@ def test_ci_wiring_exists_or_skip():
     wf = Path(".github/workflows/disabled_identity.yml")
     if not wf.exists():
         pytest.skip("CI workflow for disabled-path identity not present yet.")
-    assert wf.read_text().strip() != ""
+    assert wf.read_text(encoding="utf-8").strip() != ""

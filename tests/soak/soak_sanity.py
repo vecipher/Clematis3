@@ -45,7 +45,7 @@ def main():
     ap.add_argument("--schema-out", type=Path, required=True)
     args = ap.parse_args()
 
-    metrics = json.loads(args.metrics.read_text())
+    metrics = json.loads(args.metrics.read_text(encoding="utf-8"))
     rss_peak = float(metrics.get("rss_peak_mb", 0.0))
     checkpoints = metrics.get("checkpoints", [])
     assert rss_peak <= args.rss_threshold_mb, f"RSS peak {rss_peak} MiB exceeds {args.rss_threshold_mb} MiB"
