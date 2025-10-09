@@ -21,6 +21,12 @@ recursive-include man *.1
 # Docs (ship minimal markdown in sdist; wheels omit by default)
 recursive-include docs *.md
 
+# Frontend viewer: ship prebuilt static assets in sdists
+recursive-include clematis/frontend/dist *
+
+# Do not ship repo-level frontend sources (TS/Node dev tree)
+prune frontend
+
 # Do not ship repo-level examples/fixtures in sdist
 prune examples
 prune fixtures
@@ -38,4 +44,4 @@ prune dist
 prune build
 
 # Global ignores
-global-exclude __pycache__ *.py[cod] *.pyo *.so .DS_Store
+global-exclude __pycache__ *.py[cod] *.pyo *.so .DS_Store *.map
