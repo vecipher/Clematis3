@@ -7,6 +7,7 @@
     <title>Clematis v3 – Viewer (M14)</title>
     <link rel="stylesheet" href="./styles/main.css"/>
     <link rel="stylesheet" href="./styles/exp.css"/>
+    <link rel="icon" href="data:,">
   </head>
   <body>
     <header class="topbar">
@@ -47,6 +48,7 @@
       <!-- Logs -->
       <section class="panel tabpanel" data-panel="logs">
         <h2>Logs</h2>
+        <p class="hint">Select a run and a stage (T1, T2, T3, T3 Reflection, T4, Apply, Turn). Use the search box to filter entries. Perf logs are optional and off by default.</p>
         <div class="controls">
           <select id="logRunSelect"></select>
           <label>
@@ -61,11 +63,13 @@
         </div>
 
         <div class="log-tabs">
-          <button class="stagetab active" data-stage="t1">T1</button>
-          <button class="stagetab" data-stage="t2">T2</button>
-          <button class="stagetab" data-stage="t4">T4</button>
-          <button class="stagetab" data-stage="apply">Apply</button>
-          <button class="stagetab" data-stage="turn">Turn</button>
+          <button class="stagetab active" data-stage="t1" title="T1 — graph prep / indexing">T1</button>
+          <button class="stagetab" data-stage="t2" title="T2 — retrieval">T2</button>
+          <button class="stagetab" data-stage="t3" title="T3 — planner/dialogue/ops">T3</button>
+          <button class="stagetab" data-stage="t3_reflection" title="T3 — reflection">T3 Reflection</button>
+          <button class="stagetab" data-stage="t4" title="T4 — gating / filters">T4</button>
+          <button class="stagetab" data-stage="apply" title="Apply — snapshot write">Apply</button>
+          <button class="stagetab" data-stage="turn" title="Turn — timings summary">Turn</button>
         </div>
 
         <div class="log-counts" id="logCounts"></div>
