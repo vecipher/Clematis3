@@ -17,14 +17,16 @@ def sha256_file(p: pathlib.Path) -> str:
     with p.open("rb") as f:
         while True:
             b = f.read(1 << 20)
-            if not b: break
+            if not b:
+                break
             h.update(b)
     return h.hexdigest()
 
 def write_lf(src: pathlib.Path, dst: pathlib.Path) -> None:
     data = src.read_bytes().replace(b"\r\n", b"\n")
     dst.parent.mkdir(parents=True, exist_ok=True)
-    with dst.open("wb") as f: f.write(data)
+    with dst.open("wb") as f:
+        f.write(data)
 
 def copy_tree_lf(src_dir: pathlib.Path, dst_dir: pathlib.Path, exts=(".html",".js",".css",".json",".svg",".txt",".md")) -> None:
     files = [p for p in src_dir.rglob("*") if p.is_file() and p.suffix in exts]
@@ -45,13 +47,15 @@ def main() -> int:
         return 3
 
     # Clean dist
-    if DIST.exists(): shutil.rmtree(DIST)
+    if DIST.exists():
+        shutil.rmtree(DIST)
     DIST.mkdir(parents=True, exist_ok=True)
 
     # Copy index.html (LF)
     index_html = FRONTEND / "index.html"
     if not index_html.exists():
-        print("frontend/index.html missing", file=sys.stderr); return 4
+        print("frontend/index.html missing", file=sys.stderr)
+        return 4
     write_lf(index_html, DIST / "index.html")
 
     # Copy assets

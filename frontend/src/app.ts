@@ -9,8 +9,10 @@ const state: AppState = { bundle: null, showPerf: false, selectedPerfKey: null }
 
 function setPerfToggleDefault() {
   const cb = qs<HTMLInputElement>("#perf-toggle");
-  if (cb) cb.checked = false;
-  state.showPerf = false;
+  if (cb) {
+    cb.checked = false;
+    state.showPerf = false;
+  }
 }
 
 async function loadBundleFromFile(file: File): Promise<RunBundle> {
@@ -19,7 +21,6 @@ async function loadBundleFromFile(file: File): Promise<RunBundle> {
 }
 
 async function loadBundleFromURL(u: string): Promise<RunBundle> {
-  // Works when served via http(s); file:// will be blocked by fetch in most browsers.
   const res = await fetch(u, { cache: "no-store" });
   if (!res.ok) throw new Error(`fetch failed: ${res.status}`);
   return (await res.json()) as RunBundle;
@@ -27,37 +28,55 @@ async function loadBundleFromURL(u: string): Promise<RunBundle> {
 
 function renderAll() {
   if (!state.bundle) return;
-  const runsPane = qs<HTMLElement>("#pane-runs")!;
-  const snapsPane = qs<HTMLElement>("#pane-snapshots")!;
-  const logsPane = qs<HTMLElement>("#pane-logs")!;
 
-  renderRuns(runsPane, state.bundle);
-  renderSnapshots(snapsPane, state.bundle);
-  renderLogs(logsPane, state.bundle, state.showPerf, state.selectedPerfKey);
+  const runsPane = qs<HTMLElement>("#runsList");
+  const snapsPane = qs<HTMLElement>("#snapshot");
+  const logsPane = qs<HTMLElement>("#logList");
+
+  if (runsPane) renderRuns(runsPane, state.bundle);
+  if (snapsPane) renderSnapshots(snapsPane, state.bundle);
+  if (logsPane) renderLogs(logsPane, state.bundle, state.showPerf, state.selectedPerfKey);
 }
 
 function wireUI() {
-  // Tabs
-  const tabsRoot = qs<HTMLElement>("#tabs-root")!;
-  initTabs(tabsRoot);
+  // Tabs nav lives at #tabs; panels are elsewhere (handled in initTabs)
+  const tabsRoot = qs<HTMLElement>("#tabs");
+  if (tabsRoot) initTabs(tabsRoot);
 
-  // File input
-  const input = qs<HTMLInputElement>("#bundle-input")!;
-  input.addEventListener("change", async () => {
-    const f = input.files?.[0];
-    if (!f) return;
-    state.bundle = await loadBundleFromFile(f);
-    renderAll();
-  });
+  // File input + clear
+  const input = qs<HTMLInputElement>("#fileInput");
+  if (input) {
+    input.addEventListener("change", async () => {
+      const f = input.files?.[0];
+      if (!f) return;
+      state.bundle = await loadBundleFromFile(f);
+      renderAll();
+    });
+  }
+
+  const clearBtn = qs<HTMLButtonElement>("#btnClear");
+  if (clearBtn) {
+    clearBtn.addEventListener("click", () => {
+      state.bundle = null;
+      const targets = ["#runsList", "#snapshot", "#logList"];
+      for (const sel of targets) {
+        const el = qs<HTMLElement>(sel);
+        if (el) el.textContent = "—";
+      }
+      if (input) input.value = "";
+    });
+  }
 
   // Perf toggle
-  const perfToggle = qs<HTMLInputElement>("#perf-toggle")!;
-  perfToggle.addEventListener("change", () => {
-    state.showPerf = !!perfToggle.checked;
-    renderAll();
-  });
+  const perfToggle = qs<HTMLInputElement>("#perf-toggle");
+  if (perfToggle) {
+    perfToggle.addEventListener("change", () => {
+      state.showPerf = !!perfToggle.checked;
+      renderAll();
+    });
+  }
 
-  // Optional ?bundle=... for local serving
+  // Optional ?bundle=... (when served via http)
   const url = new URL(window.location.href);
   const q = url.searchParams.get("bundle");
   if (q) {
@@ -65,9 +84,7 @@ function wireUI() {
   }
 }
 
-function main() {
+document.addEventListener("DOMContentLoaded", () => {
   setPerfToggleDefault();
   wireUI();
-}
-
-document.addEventListener("DOMContentLoaded", main);
+});
