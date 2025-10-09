@@ -6,9 +6,10 @@ Clematis is a deterministic, turn‑based scaffold for agential AI. It models ag
 >
 > **License:** Apache‑2.0 — see [LICENSE](./LICENSE) & [NOTICE](./NOTICE).
 > **Support matrix:** Python **3.11–3.13**; Ubuntu, macOS, Windows. Cross‑OS identity and reproducible builds (SBOM/SLSA) enforced in CI.
-> **Changelog:** see [CHANGELOG.md](CHANGELOG.md) for **v0.10.0**.
+> **Changelog:** see [CHANGELOG.MD](CHANGELOG.MD) for **v0.10.1**.
 >
 > **M13 — Hardening & Freeze (v3):** See **[docs/m13/overview.md](docs/m13/overview.md)**.
+> **M14 — Viewer & Console (docs):** See **[docs/m14/frontend.md](docs/m14/frontend.md)**.
 >
 > **M10 — Reflection (complete):** Deterministic, gated; defaults OFF. See **[docs/m10/reflection.md](docs/m10/reflection.md)**.
 >
@@ -60,6 +61,36 @@ python -m clematis --dir ./.logs rotate-logs -- --dry-run
 # Some scripts need optional extras. See [docs/m8/packaging_cli.md](docs/m8/packaging_cli.md) (e.g., pip install "clematis[zstd]" or "clematis[lancedb]").
 ```
 
+
+### Viewer (offline) & console quick start (M14)
+
+Build the offline viewer (deterministic):
+
+```bash
+npm ci --prefix frontend
+npm run --prefix frontend build
+make frontend-build
+```
+
+Open `file://…/frontend/dist/index.html` in a browser and use **Load** to select one or more `run_bundle.json`.
+
+Produce a bundle with the console:
+
+```bash
+python -m clematis console -- status
+TZ=UTC PYTHONHASHSEED=0 SOURCE_DATE_EPOCH=315532800 CLEMATIS_NETWORK_BAN=1 \
+python -m clematis console -- step --now-ms 315532800000 --out /tmp/run.json
+python -m clematis console -- compare --a /tmp/run.json --b /tmp/run.json
+```
+
+Local reproducibility + offline checks for the viewer:
+
+```bash
+bash scripts/repro_check_local.sh --frontend
+pytest -q tests/frontend/test_offline_browser.py
+```
+
+For details, see **[docs/m14/frontend.md](docs/m14/frontend.md)**.
 
 ### Operator‑facing errors (typed)
 
