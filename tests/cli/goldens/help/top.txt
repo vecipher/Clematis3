@@ -1,6 +1,6 @@
 usage: clematis [-h] [--version]
 
-Clematis umbrella CLI (v0.10.0)
+Clematis umbrella CLI (v0.10.2)
 
 options:
   -h, --help show this help message and exit

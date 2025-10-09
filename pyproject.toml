@@ -1,6 +1,6 @@
 [project]
 name = "clematis"
-version = "0.10.0"
+version = "0.10.2"
 description = "Clematis — deterministic mind-like simulation engine (M1–M8 baseline)"
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
@@ -74,6 +74,9 @@ cli-demo = [
   'numpy>=2.1; python_version >= "3.13"',
   "pyyaml>=6.0"
 ]
+frontend = [
+  "nodeenv>=1.8.0"
+]
 
 [build-system]
 requires = ["setuptools>=77", "wheel"]
@@ -100,7 +103,7 @@ markers = [
 ]
 
 [tool.setuptools.package-data]
-clematis = ["fixtures/**/*", "examples/**/*", "VERSION"]
+clematis = ["fixtures/**/*", "examples/**/*", "VERSION", "frontend/dist/**"]
 
 [tool.setuptools.data-files]
 "share/man/man1" = ["man/*.1"]

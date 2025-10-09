@@ -49,6 +49,35 @@ Wrappers locate these via `importlib.resources`. See implementation helpers:
 - `clematis/cli/_resources.py`
 - `clematis/cli/_wrapper_common.py` → `inject_default_from_packaged_or_cwd(...)`
 
+### Frontend assets (viewer)
+The **offline viewer** is prebuilt and shipped in both sdists and wheels under:
+
+```
+<site-packages>/clematis/frontend/dist/
+```
+
+You do **not** need Node/TypeScript to use it. Maintainers who want to rebuild can opt into the optional extra:
+
+```bash
+python -m pip install "clematis[frontend]"
+# then in a repo checkout:
+npm ci --prefix frontend && npm run --prefix frontend build && make frontend-build
+```
+
+**Post-install smoke (offline viewer)**
+
+```bash
+# Produce a small bundle
+python -m clematis export-logs -- --out run_bundle.json
+
+# Print the viewer entrypoint path
+python - <<'PY'
+from importlib.resources import files
+print(files("clematis").joinpath("frontend/dist/index.html"))
+PY
+# Open the printed file:// path in your browser and drag-drop run_bundle.json
+```
+
 ---
 
 ## CLI invariants (guardrails)
@@ -284,10 +313,12 @@ Some features are optional and installed via extras:
 | `zstd`    | zstandard    | .zst helpers/tests                       |
 | `lancedb` | lancedb      | LanceDB import smoke                      |
 | `dev`     | test+linters | Local dev setup (`.[dev]`)               |
+| `frontend`| nodeenv      | Maintainer-only viewer rebuild tools         |
 
 Install examples:
 ```bash
 python -m pip install 'clematis[zstd]'
 python -m pip install 'clematis[lancedb]'
 python -m pip install 'clematis[dev]'
+python -m pip install 'clematis[frontend]'
 ```
