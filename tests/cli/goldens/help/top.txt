@@ -9,6 +9,7 @@ options:
 subcommands:
   <cmd>
   bench-t4 Delegates to scripts/bench_t4.py
+  console Deterministic local console (step/reset/status/compare)
   demo Delegates to scripts/
   export-logs Export logs + latest snapshot into a JSON bundle
   (delegates to scripts/)

@@ -34,7 +34,12 @@ SOURCE_DATE_EPOCH=315532800
 CLEMATIS_NETWORK_BAN=1
 ```
 
+
 CI sets these in identity/build jobs. Add them to your shell or workflow as needed.
+
+**Optional overrides for local runs:**
+- `CLEMATIS_LOG_DIR` — directory where stage JSONL logs are written during a step (default: a temp dir chosen by the console if unset).
+- `CLEMATIS_SNAPSHOTS_DIR` — directory to scan for the latest snapshot when `--snapshot` is not provided (default: `./.data/snapshots`).
 
 ---
 
@@ -160,5 +165,60 @@ Use the umbrella wrapper: `python -m clematis <subcmd> -- <args>`. Subcommands d
 **Q: Can I enable networked operations?**
 CI forbids network (`CLEMATIS_NETWORK_BAN=1`). For local experiments, document deviations; identity guarantees only apply under §2.
 
+
 **Q: Manpages?**
 Generated deterministically by `scripts/gen_manpages.py` into `man/`. Install via your package manager or point `MANPATH` to the repo.
+
+**Q: How do I step a run locally and compare outputs?**
+Use the local console (see §11):
+```bash
+# Status against latest snapshot (or set CLEMATIS_SNAPSHOTS_DIR)
+python -m clematis console -- status
+
+# Reset to a specific snapshot
+python -m clematis console -- reset --snapshot ./.data/snapshots/snap_000001.json
+
+# Deterministic single-step (defaults to now_ms = SOURCE_DATE_EPOCH*1000 if omitted)
+TZ=UTC PYTHONHASHSEED=0 SOURCE_DATE_EPOCH=315532800 CLEMATIS_NETWORK_BAN=1 \
+python -m clematis console -- step --now-ms 315532800000 --out ./.data/run_step.json
+
+# Compare two bundles (exit 1 on differences)
+python -m clematis console -- compare --a runA.json --b runB.json
+```
+The console prints a warning if the env in §2 is not set as recommended.
+
+
+---
+
+## 11) Local console (deterministic stepping & compare)
+
+A minimal, deterministic console for operators to drive the orchestrator locally and inspect/compare results. It is offline by default and preserves identity when the environment in §2 is set.
+
+**Subcommands**
+- `status` — prints scheduler/budgets summary (uses latest snapshot by default).
+- `reset [--snapshot PATH]` — loads a snapshot into state. If `--snapshot` is omitted, the console uses the latest from `CLEMATIS_SNAPSHOTS_DIR` (or `./.data/snapshots`).
+- `step [--now-ms N] [--out BUNDLE.json]` — runs exactly one turn. If `--now-ms` is omitted, it defaults to `SOURCE_DATE_EPOCH * 1000`.
+- `compare --a A.json --b B.json` — diffs two run bundles (counts per stage, snapshot/meta keys). **Exit 1** when differences are detected.
+
+**Determinism**
+- Set the env in §2 (`TZ=UTC`, `PYTHONHASHSEED=0`, `SOURCE_DATE_EPOCH=315532800`, `CLEMATIS_NETWORK_BAN=1`).
+- The console warns when these do not match.
+- Logs are written to `CLEMATIS_LOG_DIR` if set; otherwise the console uses a temporary directory and cleans it up.
+
+**Examples**
+```bash
+# Status (latest snapshot)
+python -m clematis console -- status
+
+# One turn with fixed time; write run bundle
+TZ=UTC PYTHONHASHSEED=0 SOURCE_DATE_EPOCH=315532800 CLEMATIS_NETWORK_BAN=1 \
+python -m clematis console -- step --now-ms 315532800000 --out ./.data/run_step.json
+
+# Diff bundles
+python -m clematis console -- compare --a runA.json --b runB.json
+```
+
+**Exit codes**
+- `0` — success / bundles equal.
+- `1` — `compare` found differences.
+- `2` — adapter or usage error (e.g., missing snapshot, orchestrator not available).

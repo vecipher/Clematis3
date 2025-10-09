@@ -119,48 +119,41 @@ def _snapshot_payload_from_info(info: dict, strict: bool) -> tuple[dict, list[st
     return snap, warnings, 0
 
 
-def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(description="Export logs + snapshot to a single JSON bundle")
-    ap.add_argument("--logs-dir", default=_default_logs_dir(), help="Directory with canonical logs")
-    ap.add_argument("--snapshots-dir", default="./.data/snapshots", help="Snapshot directory")
-    ap.add_argument("--out", required=True, help="Output bundle path (JSON)")
-    ap.add_argument("--include-perf", action="store_true", help="Include logs/perf/*-perf.jsonl files")
-    ap.add_argument("--strict", action="store_true", help="Fail (exit 2) on missing/invalid snapshot schema")
-    ap.add_argument("--pretty", action="store_true", help="Pretty-print JSON (indent=2)")
-    ap.add_argument("--no-sort-keys", action="store_true", help="Disable JSON key sorting (default: sort for determinism)")
-    ap.add_argument("--max-stage-entries", type=int, default=None, help="Cap entries per stage log (head)")
-    args = ap.parse_args(argv)
-
-    # Normalize dirs
-    logs_dir = os.path.abspath(args.logs_dir)
-    snaps_dir = os.path.abspath(args.snapshots_dir)
-    out_path = os.path.abspath(args.out)
+def build_run_bundle(
+    *,
+    logs_dir: str,
+    snapshots_dir: str,
+    include_perf: bool = False,
+    strict: bool = False,
+    max_stage_entries: int | None = None,
+) -> tuple[dict, list[str], int]:
+    """
+    Build the deterministic run bundle from disk and return (bundle, warnings, rc).
+    This allows programmatic use (e.g., from the console) without going through CLI I/O.
+    """
+    logs_dir = os.path.abspath(logs_dir)
+    snaps_dir = os.path.abspath(snapshots_dir)
 
     # Collect stage logs deterministically
     logs: dict[str, list] = {}
     for fname in STAGE_FILES:
         path = os.path.join(logs_dir, fname)
-        logs[fname.split(".")[0]] = _read_jsonl(path, args.max_stage_entries)
+        logs[fname.split(".")[0]] = _read_jsonl(path, max_stage_entries)
 
-    # Perf logs are optional and hidden by default
+    # Optional perf logs
     perf: dict[str, list] | None = None
-    if args.include_perf:
+    if include_perf:
         perf = {}
         perf_dir = os.path.join(logs_dir, "perf")
         for p in sorted(glob.glob(os.path.join(perf_dir, "*-perf.jsonl"))):
             key = os.path.basename(p)
-            perf[key] = _read_jsonl(p, args.max_stage_entries)
+            perf[key] = _read_jsonl(p, max_stage_entries)
 
-    # Snapshot: find latest, build compact payload
+    # Snapshot payload
     info = get_latest_snapshot_info(snaps_dir)
-    snap_payload, warns, snap_rc = _snapshot_payload_from_info(info, args.strict)
+    snap_payload, warns, snap_rc = _snapshot_payload_from_info(info, strict)
     if snap_rc != 0:
-        # typed, single-line operator-facing message
-        print("SnapshotError: no valid snapshot found", file=sys.stdout)
-        return 2
-    for w in warns:
-        # warnings are printed to stderr but do not change exit code unless --strict
-        print(f"[warn] {w}", file=sys.stderr, flush=True)
+        return {}, warns, 2
 
     bundle = {
         "meta": {
@@ -176,7 +169,37 @@ def main(argv=None) -> int:
     if perf is not None:
         bundle["perf"] = perf
 
+    return bundle, warns, 0
+
+
+def main(argv=None) -> int:
+    ap = argparse.ArgumentParser(description="Export logs + snapshot to a single JSON bundle")
+    ap.add_argument("--logs-dir", default=_default_logs_dir(), help="Directory with canonical logs")
+    ap.add_argument("--snapshots-dir", default="./.data/snapshots", help="Snapshot directory")
+    ap.add_argument("--out", required=True, help="Output bundle path (JSON)")
+    ap.add_argument("--include-perf", action="store_true", help="Include logs/perf/*-perf.jsonl files")
+    ap.add_argument("--strict", action="store_true", help="Fail (exit 2) on missing/invalid snapshot schema")
+    ap.add_argument("--pretty", action="store_true", help="Pretty-print JSON (indent=2)")
+    ap.add_argument("--no-sort-keys", action="store_true", help="Disable JSON key sorting (default: sort for determinism)")
+    ap.add_argument("--max-stage-entries", type=int, default=None, help="Cap entries per stage log (head)")
+    args = ap.parse_args(argv)
+
+    bundle, warns, rc = build_run_bundle(
+        logs_dir=args.logs_dir,
+        snapshots_dir=args.snapshots_dir,
+        include_perf=args.include_perf,
+        strict=args.strict,
+        max_stage_entries=args.max_stage_entries,
+    )
+    if rc != 0:
+        print("SnapshotError: no valid snapshot found", file=sys.stdout)
+        return 2
+
+    for w in warns:
+        print(f"[warn] {w}", file=sys.stderr, flush=True)
+
     # Deterministic JSON: normalize CRLF->LF on write; sorted keys by default
+    out_path = os.path.abspath(args.out)
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     sort_keys = (not args.no_sort_keys)
     if args.pretty:
