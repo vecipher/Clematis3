@@ -33,8 +33,27 @@ def _ban_network():
         return
     real_connect = socket.socket.connect
 
-    def _blocked(*args, **kwargs):
-        raise AssertionError("Network calls are banned in CI")
+    def _blocked(self, address, *args, **kwargs):
+        """
+        Block outbound network connections in CI, but allow loopback connections.
+        On Windows, asyncio/Playwright uses a localhost socketpair to bootstrap
+        the event loop / browser control channel, which must be permitted.
+        """
+        try:
+            host = None
+            # address may be a tuple like (host, port) or a str (AF_UNIX path)
+            if isinstance(address, tuple) and address:
+                host = address[0]
+            elif isinstance(address, str):
+                # Likely AF_UNIX (not on Windows); allow
+                return real_connect(self, address, *args, **kwargs)
+            # Permit loopback addresses
+            if host in ("127.0.0.1", "::1", "localhost"):
+                return real_connect(self, address, *args, **kwargs)
+        except Exception:
+            # If parsing fails, fall through to block
+            pass
+        raise AssertionError(f"Network calls are banned in CI (blocked connect to {address!r})")
 
     socket.socket.connect = _blocked
     try:
