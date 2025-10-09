@@ -321,6 +321,40 @@ jobs:
         run: |
           git clean -xfd
 
+      - name: Prepare frontend assets for packaging (build #1)
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import os, shutil, pathlib
+          sde = int(os.environ.get("SOURCE_DATE_EPOCH","315532800"))
+          src_dist = pathlib.Path("frontend/dist")
+          src_tsdist = pathlib.Path("frontend/tsdist/assets")
+          src_index = pathlib.Path("frontend/index.html")
+          dst = pathlib.Path("clematis/frontend/dist")
+
+          def reset_dst():
+              if dst.exists():
+                  shutil.rmtree(dst)
+              dst.mkdir(parents=True, exist_ok=True)
+
+          if src_dist.exists() and (src_dist/"index.html").exists():
+              reset_dst()
+              shutil.copytree(src_dist, dst, dirs_exist_ok=True)
+              mode = "copied prebuilt frontend/dist"
+          elif src_index.exists() and src_tsdist.exists():
+              reset_dst()
+              shutil.copy2(src_index, dst/"index.html")
+              shutil.copytree(src_tsdist, dst/"assets", dirs_exist_ok=True)
+              mode = "assembled from tsdist/assets"
+          else:
+              raise SystemExit("No frontend assets found (frontend/dist or tsdist). Ensure compiled assets are committed.")
+
+          for p in dst.rglob("*"):
+              if p.is_file():
+                  os.utime(p, (sde, sde))
+          print(f"Prepared {dst} ({mode})")
+          PY
+
       - name: Build #1 and record hashes
         run: |
           set -euo pipefail
@@ -405,6 +439,40 @@ jobs:
       - name: Clean tree (before build #2)
         run: |
           git clean -xfd
+
+      - name: Prepare frontend assets for packaging (build #2)
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import os, shutil, pathlib
+          sde = int(os.environ.get("SOURCE_DATE_EPOCH","315532800"))
+          src_dist = pathlib.Path("frontend/dist")
+          src_tsdist = pathlib.Path("frontend/tsdist/assets")
+          src_index = pathlib.Path("frontend/index.html")
+          dst = pathlib.Path("clematis/frontend/dist")
+
+          def reset_dst():
+              if dst.exists():
+                  shutil.rmtree(dst)
+              dst.mkdir(parents=True, exist_ok=True)
+
+          if src_dist.exists() and (src_dist/"index.html").exists():
+              reset_dst()
+              shutil.copytree(src_dist, dst, dirs_exist_ok=True)
+              mode = "copied prebuilt frontend/dist"
+          elif src_index.exists() and src_tsdist.exists():
+              reset_dst()
+              shutil.copy2(src_index, dst/"index.html")
+              shutil.copytree(src_tsdist, dst/"assets", dirs_exist_ok=True)
+              mode = "assembled from tsdist/assets"
+          else:
+              raise SystemExit("No frontend assets found (frontend/dist or tsdist). Ensure compiled assets are committed.")
+
+          for p in dst.rglob("*"):
+              if p.is_file():
+                  os.utime(p, (sde, sde))
+          print(f"Prepared {dst} ({mode})")
+          PY
 
       - name: Build #2 and record hashes (same SDE)
         run: |
