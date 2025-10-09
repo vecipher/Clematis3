@@ -19,6 +19,7 @@ from . import (
     seed_lance_demo,
     validate,
     export_logs_for_frontend,
+    console,
 )
 from ._config import discover_config_path, maybe_log_selected
 
@@ -65,6 +66,7 @@ def build_parser() -> argparse.ArgumentParser:
     validate.register(subparsers)
     demo.register(subparsers)
     export_logs_for_frontend.register(subparsers)
+    console.register(subparsers)
 
     reorder_subparsers_alphabetically(parser)
     return parser
