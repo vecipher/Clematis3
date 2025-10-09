@@ -386,6 +386,22 @@ jobs:
           # wheel paths use the data-files target path
           unzip -l dist/*.whl | grep -E 'share/examples/clematis/gel/(enabled|disabled)\.yaml'
 
+      - name: Assert viewer included in wheel
+        run: |
+          set -euo pipefail
+          echo "Verify viewer assets are present in wheel"
+          unzip -l dist/*.whl | grep -F 'clematis/frontend/dist/index.html'
+          # Print a few entries for easier debugging
+          unzip -l dist/*.whl | grep -F 'clematis/frontend/dist/' | head -n 20
+
+      - name: Assert viewer included in sdist
+        run: |
+          set -euo pipefail
+          echo "Verify viewer assets are present in sdist"
+          tar -tzf dist/*.tar.gz | grep -E '(^|/)clematis/frontend/dist/index.html$'
+          # Print a few entries for easier debugging
+          tar -tzf dist/*.tar.gz | grep -E '(^|/)clematis/frontend/dist/' | head -n 20
+
       - name: Clean tree (before build #2)
         run: |
           git clean -xfd
