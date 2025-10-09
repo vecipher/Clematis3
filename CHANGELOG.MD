@@ -10,7 +10,25 @@ All notable changes to this project will be documented in this file.
 
 
 
+
 ## [Unreleased]
+
+## [0.10.1] - 2025-10-09
+
+### M14 — Viewer & Console (docs-only; identity unchanged)
+- **Docs:** Added `docs/m14/frontend.md` — operator-grade guide for the **offline viewer** (build, file:// usage, selectors, determinism/offline guarantees, troubleshooting) and the **console** (how to produce/compare run bundles).
+- **README:** Status block now includes **M14**; added **Quick start** for viewer & console with deterministic env examples.
+- **Changelog:** This entry. (Note: file name is `CHANGELOG.MD`.)
+
+### Notes
+- **No runtime or config changes.** Identity path and goldens remain unchanged.
+- **Offline guarantee:** Viewer emits **zero** `http(s)` requests on load (Playwright test enforces across Ubuntu/macOS/Windows).
+- **Deterministic build:** Rebuild of `frontend/dist/` is bit-for-bit stable under pinned toolchain (TypeScript 5.6.3, Node 20.19.5); local repro script available: `scripts/repro_check_local.sh --frontend`.
+
+### Related PRs
+- **PR130** — TypeScript migration + perf-logs viewer (deterministic, offline).
+- **PR131** — Local console (CLI) for stepping runs.
+- **PR132** — Network-ban & reproducibility checks (CI + local).
 
 ## [0.10.0] - 2025-10-08
 
