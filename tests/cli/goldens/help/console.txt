@@ -1,0 +1,4 @@
+usage: clematis [-h] [--version]
+
+options:
+  -h, --help show this help message and exit
