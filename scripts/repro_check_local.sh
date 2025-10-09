@@ -6,11 +6,13 @@
 #
 # Usage:
 #   scripts/repro_check_local.sh [--twice] [--sde <unix_ts>] [--no-install]
+#   scripts/repro_check_local.sh --frontend
 #
 # Flags:
-#   --twice       Build twice and compare SHA256 checksums (fails on mismatch).
+#   --twice       Build Python artifacts twice and compare SHA256 checksums (fails on mismatch).
 #   --sde <ts>    Override SOURCE_DATE_EPOCH (defaults to last git commit timestamp, or 0).
 #   --no-install  Skip installing pinned build tools (use current environment as-is).
+#   --frontend    Reproducibility + offline check for the frontend: build dist twice and compare directory hashes.
 #
 # Environment overrides (optional):
 #   SDE             = unix timestamp for SOURCE_DATE_EPOCH
@@ -24,16 +26,23 @@ set -euo pipefail
 
 die() { echo "error: $*" >&2; exit 2; }
 
+usage() {
+  sed -n '1,60p' "$0"
+  exit 0
+}
+
 # --- Parse args ---
 TWICE=0
 NO_INSTALL=0
+FRONTEND=0
 SDE="${SDE:-}"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --twice) TWICE=1; shift ;;
     --no-install) NO_INSTALL=1; shift ;;
+    --frontend) FRONTEND=1; shift ;;
     --sde) shift; [[ $# -gt 0 ]] || die "--sde requires a value"; SDE="$1"; shift ;;
-    -h|--help) sed -n '1,50p' "$0"; exit 0 ;;
+    -h|--help) usage ;;
     *) die "unknown arg: $1" ;;
   esac
 done
@@ -69,6 +78,42 @@ export PYTHONIOENCODING=UTF-8
 export PYTHONHASHSEED=0
 export SOURCE_DATE_EPOCH="${SDE}"
 export PIP_DISABLE_PIP_VERSION_CHECK=1
+export LC_ALL="${LC_ALL:-C.UTF-8}"
+export CLEMATIS_NETWORK_BAN="${CLEMATIS_NETWORK_BAN:-1}"
+repro_frontend() {
+  # Deterministic env for frontend as well
+  export TZ="${TZ:-UTC}"
+  export PYTHONHASHSEED="${PYTHONHASHSEED:-0}"
+  export SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH:-315532800}"
+  export LC_ALL="${LC_ALL:-C.UTF-8}"
+  export CLEMATIS_NETWORK_BAN="${CLEMATIS_NETWORK_BAN:-1}"
+
+  # Optional: build TS assets if Node/npm present (tsdist is committed; this keeps dev honest)
+  if command -v npm >/dev/null 2>&1; then
+    ( cd frontend && npm ci && npm run build )
+  fi
+
+  # Clean, build, hash; repeat; compare
+  make frontend-clean || true
+  make frontend-build
+  H1="$(python scripts/hashdir.py frontend/dist)"
+  echo "HASH1=${H1}"
+
+  make frontend-clean
+  make frontend-build
+  H2="$(python scripts/hashdir.py frontend/dist)"
+  echo "HASH2=${H2}"
+
+  if [[ "${H1}" != "${H2}" ]]; then
+    echo "ERROR: Reproducible build check failed for frontend/dist (hash mismatch)" >&2
+    exit 2
+  fi
+
+  # Defense in depth: grep-based offline check
+  make frontend-offline-check
+  echo "OK: frontend reproducible build and offline checks passed."
+}
+
 
 # --- Install pinned toolchain (unless skipped) ---
 if [[ "${NO_INSTALL}" -eq 0 ]]; then
@@ -126,6 +171,11 @@ PY
 }
 
 # --- Run ---
+if [[ "${FRONTEND}" -eq 1 ]]; then
+  repro_frontend
+  exit 0
+fi
+
 echo "[info] Building (pass #1) ..."
 build_once
 
