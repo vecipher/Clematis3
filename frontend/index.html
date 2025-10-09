@@ -6,6 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1"/>
     <title>Clematis v3 – Viewer (M14)</title>
     <link rel="stylesheet" href="./styles/main.css"/>
+    <link rel="stylesheet" href="./styles/exp.css"/>
   </head>
   <body>
     <header class="topbar">
@@ -18,6 +19,8 @@
         <button data-tab="runs" class="tab active">Runs</button>
         <button data-tab="snapshots" class="tab">Snapshots</button>
         <button data-tab="logs" class="tab">Logs</button>
+        <button data-tab="graph" class="tab" style="display:none">Graph (exp)</button>
+        <button data-tab="memory" class="tab" style="display:none">Memory (exp)</button>
       </nav>
 
       <!-- Runs -->
@@ -50,6 +53,10 @@
             <input id="perf-toggle" type="checkbox"/>
             Show perf logs (experimental)
           </label>
+          <label>
+            <input id="exp-toggle" type="checkbox"/>
+            Experimental visuals (graph &amp; memory)
+          </label>
           <input id="logSearch" type="search" placeholder="Search (key:value or text)"/>
         </div>
 
@@ -63,6 +70,17 @@
 
         <div class="log-counts" id="logCounts"></div>
         <div id="logList" class="loglist"></div>
+      </section>
+      <!-- Experimental: Graph -->
+      <section class="panel tabpanel" data-panel="graph" style="display:none">
+        <h2>Graph (experimental)</h2>
+        <div id="graphView"></div>
+      </section>
+
+      <!-- Experimental: Memory -->
+      <section class="panel tabpanel" data-panel="memory" style="display:none">
+        <h2>Memory (experimental)</h2>
+        <div id="memoryView"></div>
       </section>
     </main>
 

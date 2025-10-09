@@ -3,6 +3,9 @@ import { qs } from "./util/dom.js";
 import { renderRuns } from "./components/runs.js";
 import { renderSnapshots } from "./components/snapshots.js";
 import { renderLogs } from "./components/logs.js";
+import { isExperimental, wireExperimentalRepaint } from "./exp/flags.js";
+import { renderGraph } from "./exp/graph.js";
+import { renderMemory } from "./exp/memory.js";
 const state = { bundle: null, showPerf: false, selectedPerfKey: null };
 function setPerfToggleDefault() {
     const cb = qs("#perf-toggle");
@@ -21,6 +24,23 @@ async function loadBundleFromURL(u) {
         throw new Error(`fetch failed: ${res.status}`);
     return (await res.json());
 }
+function toggleExperimentalTabs() {
+    const on = isExperimental();
+    const graphBtn = qs('[data-tab="graph"]');
+    const memBtn = qs('[data-tab="memory"]');
+    if (graphBtn)
+        graphBtn.style.display = on ? "" : "none";
+    if (memBtn)
+        memBtn.style.display = on ? "" : "none";
+    const graphPane = qs('[data-panel="graph"]');
+    const memPane = qs('[data-panel="memory"]');
+    if (!on) {
+        if (graphPane)
+            graphPane.style.display = "none";
+        if (memPane)
+            memPane.style.display = "none";
+    }
+}
 function renderAll() {
     if (!state.bundle)
         return;
@@ -33,13 +53,19 @@ function renderAll() {
         renderSnapshots(snapsPane, state.bundle);
     if (logsPane)
         renderLogs(logsPane, state.bundle, state.showPerf, state.selectedPerfKey);
+    if (isExperimental()) {
+        const gPane = qs('[data-panel="graph"]');
+        const mPane = qs('[data-panel="memory"]');
+        if (gPane)
+            renderGraph(gPane, state.bundle);
+        if (mPane)
+            renderMemory(mPane, state.bundle);
+    }
 }
 function wireUI() {
-    // Tabs nav lives at #tabs; panels are elsewhere (handled in initTabs)
     const tabsRoot = qs("#tabs");
     if (tabsRoot)
         initTabs(tabsRoot);
-    // File input + clear
     const input = qs("#fileInput");
     if (input) {
         input.addEventListener("change", async () => {
@@ -64,7 +90,6 @@ function wireUI() {
                 input.value = "";
         });
     }
-    // Perf toggle
     const perfToggle = qs("#perf-toggle");
     if (perfToggle) {
         perfToggle.addEventListener("change", () => {
@@ -72,7 +97,13 @@ function wireUI() {
             renderAll();
         });
     }
-    // Optional ?bundle=... (when served via http)
+    // Experimental gating (checkbox + hash flag)
+    toggleExperimentalTabs();
+    wireExperimentalRepaint(() => {
+        toggleExperimentalTabs();
+        renderAll();
+    });
+    // Optional ?bundle=...
     const url = new URL(window.location.href);
     const q = url.searchParams.get("bundle");
     if (q) {
