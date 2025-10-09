@@ -1,58 +1,79 @@
 #!/usr/bin/env python3
 import os
+import sys
+import pathlib
+import hashlib
 import shutil
 
-ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-FRONT = os.path.join(ROOT, "frontend")
-SRC = os.path.join(FRONT, "src")
-STY = os.path.join(FRONT, "styles")
-VEN = os.path.join(FRONT, "vendor")
-DIST = os.path.join(FRONT, "dist")
-ASSETS = os.path.join(DIST, "assets")
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+FRONTEND = ROOT / "frontend"
+SRC = FRONTEND / "src"
+TSDIST = FRONTEND / "tsdist" / "assets"
+DIST = FRONTEND / "dist"
+ASSETS_OUT = DIST / "assets"
 
-def ensure_dir(p):
-    os.makedirs(p, exist_ok=True)
+def sha256_file(p: pathlib.Path) -> str:
+    h = hashlib.sha256()
+    with p.open("rb") as f:
+        while True:
+            b = f.read(1 << 20)
+            if not b:
+                break
+            h.update(b)
+    return h.hexdigest()
 
-def copy_text_lf(src, dst):
-    with open(src, "rb") as f:
-        data = f.read()
-    data = data.replace(b"\r\n", b"\n")
-    os.makedirs(os.path.dirname(dst), exist_ok=True)
-    with open(dst, "wb") as w:
-        w.write(data)
+def write_lf(src: pathlib.Path, dst: pathlib.Path) -> None:
+    data = src.read_bytes().replace(b"\r\n", b"\n")
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    with dst.open("wb") as f:
+        f.write(data)
 
-def copy_tree_text_lf(src_dir, dst_dir):
-    if not os.path.isdir(src_dir):
-        return
-    for root, _, files in os.walk(src_dir):
-        rel = os.path.relpath(root, src_dir)
-        for fn in files:
-            s = os.path.join(root, fn)
-            d = os.path.join(dst_dir, rel, fn) if rel != "." else os.path.join(dst_dir, fn)
-            copy_text_lf(s, d)
+def copy_tree_lf(src_dir: pathlib.Path, dst_dir: pathlib.Path, exts=(".html",".js",".css",".json",".svg",".txt",".md")) -> None:
+    files = [p for p in src_dir.rglob("*") if p.is_file() and p.suffix in exts]
+    files.sort(key=lambda p: str(p.relative_to(src_dir)).replace(os.sep, "/"))
+    for p in files:
+        rel = p.relative_to(src_dir)
+        write_lf(p, dst_dir / rel)
 
-def copy_js_tree(src_dir, dst_dir):
-    if not os.path.isdir(src_dir):
-        return
-    for root, _, files in os.walk(src_dir):
-        for fn in files:
-            if not fn.endswith(".js"):  # only JS modules
-                continue
-            src = os.path.join(root, fn)
-            rel = os.path.relpath(src, src_dir)
-            dst = os.path.join(dst_dir, rel)
-            copy_text_lf(src, dst)
+def main() -> int:
+    if not FRONTEND.exists():
+        print("frontend/ missing", file=sys.stderr)
+        return 2
 
-def main():
-    if os.path.exists(DIST):
+    # Choose assets source: tsdist (preferred) or src fallback (for JS-only dev)
+    assets_src = TSDIST if TSDIST.exists() else (SRC if (SRC / "app.js").exists() else None)
+    if assets_src is None:
+        print("No frontend assets found. Build TS (npm ci && npm run build) or keep JS sources in frontend/src/.", file=sys.stderr)
+        return 3
+
+    # Clean dist
+    if DIST.exists():
         shutil.rmtree(DIST)
-    ensure_dir(ASSETS)
-    copy_text_lf(os.path.join(FRONT, "index.html"), os.path.join(DIST, "index.html"))
-    copy_tree_text_lf(STY, os.path.join(DIST, "styles"))
-    copy_tree_text_lf(VEN, os.path.join(DIST, "vendor"))
-    # Copy all JS modules preserving structure
-    copy_js_tree(SRC, ASSETS)
-    print("build_frontend: dist ready")
+    DIST.mkdir(parents=True, exist_ok=True)
+
+    # Copy index.html (LF)
+    index_html = FRONTEND / "index.html"
+    if not index_html.exists():
+        print("frontend/index.html missing", file=sys.stderr)
+        return 4
+    write_lf(index_html, DIST / "index.html")
+
+    # Copy assets
+    copy_tree_lf(assets_src, ASSETS_OUT)
+
+    # Optional: copy styles & vendor if they live outside assets
+    for extra in ("styles", "vendor"):
+        src_dir = FRONTEND / extra
+        if src_dir.exists():
+            copy_tree_lf(src_dir, DIST / extra)
+
+    # Print a stable summary
+    files = sorted([p for p in DIST.rglob("*") if p.is_file()], key=lambda p: str(p.relative_to(DIST)).replace(os.sep, "/"))
+    for p in files:
+        rel = p.relative_to(DIST)
+        print(f"{sha256_file(p)}  {rel}")
+
+    return 0
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

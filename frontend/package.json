@@ -3,10 +3,15 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "description": "Clematis viewer (static, offline). Dev-only TypeScript build; compiled assets are committed.",
   "engines": {
-    "node": "20.11.1"
+    "node": ">=20.11 <21",
+    "npm": ">=10.2 <11"
   },
   "scripts": {
-    "build": "echo 'No-op build (PR127 uses vanilla ES modules)'"
+    "build": "tsc -p ."
+  },
+  "devDependencies": {
+    "typescript": "5.6.3"
   }
 }
