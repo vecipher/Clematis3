@@ -22,6 +22,7 @@ os.environ["PATH"] = os.pathsep.join(segments)
 
 # CI/offline guard: ban outbound sockets when CLEMATIS_NETWORK_BAN=1
 import socket
+import ipaddress
 import pytest
 
 
@@ -33,26 +34,32 @@ def _ban_network():
         return
     real_connect = socket.socket.connect
 
+    def _is_loopback_host(h: str) -> bool:
+        try:
+            return ipaddress.ip_address(h).is_loopback
+        except Exception:
+            # Fallback for hostnames
+            return h in ("localhost",)
+
     def _blocked(self, address, *args, **kwargs):
         """
         Block outbound network connections in CI, but allow loopback connections.
         On Windows, asyncio/Playwright uses a localhost socketpair to bootstrap
-        the event loop / browser control channel, which must be permitted.
+        the event loop / browser control channel; permit those.
+        Do not mask exceptions from the real connect() for allowed hosts.
         """
-        try:
-            host = None
-            # address may be a tuple like (host, port) or a str (AF_UNIX path)
-            if isinstance(address, tuple) and address:
-                host = address[0]
-            elif isinstance(address, str):
-                # Likely AF_UNIX (not on Windows); allow
-                return real_connect(self, address, *args, **kwargs)
-            # Permit loopback addresses
-            if host in ("127.0.0.1", "::1", "localhost"):
-                return real_connect(self, address, *args, **kwargs)
-        except Exception:
-            # If parsing fails, fall through to block
-            pass
+        host = None
+        # address may be a tuple like (host, port) or a str (AF_UNIX path)
+        if isinstance(address, tuple) and address:
+            host = address[0]
+        elif isinstance(address, str):
+            # Likely AF_UNIX (not on Windows); allow
+            return real_connect(self, address, *args, **kwargs)
+
+        # Permit loopback addresses (IPv4/IPv6/hostname)
+        if isinstance(host, str) and _is_loopback_host(host):
+            return real_connect(self, address, *args, **kwargs)
+
         raise AssertionError(f"Network calls are banned in CI (blocked connect to {address!r})")
 
     socket.socket.connect = _blocked
