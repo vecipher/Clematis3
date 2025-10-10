@@ -2,6 +2,8 @@ from __future__ import annotations
 from typing import Dict, Any, List, Tuple, Callable, Optional
 
 import os
+import json
+from pathlib import Path
 
 from ...policy.json_schemas import PLANNER_V1
 from ...policy.sanitize import parse_and_validate
@@ -83,6 +85,53 @@ def make_plan_bundle(ctx, state, t1, t2) -> Dict[str, Any]:
 
 # --- PR7: Dialogue bundle (deterministic, pure)
 DIALOG_BUNDLE_VERSION = "t3-dialog-bundle-v1"
+_DEFAULT_TEMPLATE = "{style_prefix}| summary: {labels}. next: {intent}"
+_DEFAULT_IDENTITY = (
+    "You are Clematis, the knowledge gardener. Maintain this persona, remember user-provided facts accurately, and never claim to be Qwen."
+)
+_HISTORY_WINDOW = 6
+
+
+def _load_template_from_file(path_str: str) -> Optional[str]:
+    try:
+        path = Path(path_str)
+        if not path.exists():
+            return None
+        suffix = path.suffix.lower()
+        if suffix in {".json", ".jsonl"}:
+            with path.open("r", encoding="utf-8") as fh:
+                if suffix == ".jsonl":
+                    for line in fh:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        rec = json.loads(line)
+                        break
+                    else:
+                        return None
+                else:
+                    rec = json.load(fh)
+            template = rec.get("template")
+            if not template:
+                return None
+            return str(template)
+        return path.read_text(encoding="utf-8").strip()
+    except Exception:
+        return None
+
+
+def _resolve_dialogue_template(dialogue_cfg: Dict[str, Any]) -> Tuple[str, Optional[str]]:
+    template = str(dialogue_cfg.get("template", _DEFAULT_TEMPLATE))
+    template_file_cfg = dialogue_cfg.get("template_file")
+    template_file_path: Optional[str] = None
+    if template_file_cfg:
+        template_file_path = str(template_file_cfg)
+        loaded = _load_template_from_file(template_file_path)
+        if loaded:
+            template = loaded
+        else:
+            template_file_path = None
+    return template, template_file_path
 
 
 def make_dialog_bundle(ctx, state, t1, t2, plan=None) -> Dict[str, Any]:
@@ -99,8 +148,14 @@ def make_dialog_bundle(ctx, state, t1, t2, plan=None) -> Dict[str, Any]:
     dialogue_cfg = {}
     if isinstance(cfg_t3, dict):
         dialogue_cfg = cfg_t3.get("dialogue", {}) or {}
-    template = str(dialogue_cfg.get("template", "summary: {labels}. next: {intent}"))
+    template, template_file = _resolve_dialogue_template(dialogue_cfg if isinstance(dialogue_cfg, dict) else {})
     include_top_k = int(dialogue_cfg.get("include_top_k_snippets", 2) or 2)
+    identity = str(dialogue_cfg.get("identity", _DEFAULT_IDENTITY))
+    if isinstance(state, dict):
+        history_raw = list(state.get("_chat_history", []) or [])
+    else:
+        history_raw = list(getattr(state, "_chat_history", []) or [])
+    history = history_raw[-_HISTORY_WINDOW:]
 
     # Retrieved already sorted/capped by make_plan_bundle
     retrieved = list(base.get("t2", {}).get("retrieved", []) or [])
@@ -111,7 +166,13 @@ def make_dialog_bundle(ctx, state, t1, t2, plan=None) -> Dict[str, Any]:
         "agent": base["agent"],
         "text": base["text"],
         "retrieved": retrieved,
-        "dialogue": {"template": template, "include_top_k_snippets": include_top_k},
+        "dialogue": {
+            "template": template,
+            "include_top_k_snippets": include_top_k,
+            "template_file": template_file,
+            "identity": identity,
+            "history": history,
+        },
     }
 
 
@@ -239,6 +300,7 @@ def rag_once(
             "k_retrieved": 0,
             "owner": rr.get("owner") if rr else None,
             "tier_pref": rr.get("tier_pref") if rr else None,
+            "retrieved_ids": [],
         }
 
     if rr is None:
@@ -250,6 +312,7 @@ def rag_once(
             "k_retrieved": 0,
             "owner": None,
             "tier_pref": None,
+            "retrieved_ids": [],
         }
 
     payload = _normalize_rr_payload(bundle, rr)
@@ -322,6 +385,7 @@ def rag_once(
         "k_retrieved": int(k_retrieved),
         "owner": payload.get("owner"),
         "tier_pref": payload.get("tier_pref"),
+        "retrieved_ids": [h.get("id") for h in hits],
     }
     return refined, metrics
 

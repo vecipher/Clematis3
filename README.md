@@ -2,11 +2,11 @@
 
 Clematis is a deterministic, turn‑based scaffold for agential AI. It models agents with concept graphs and tiered reasoning (T1→T4), uses small LLMs where needed, and keeps runtime behavior reproducible (no hidden network calls in tests/CI).
 
-> **Status:** **v0.10.0** (2025‑10‑08) — **M13 Hardening & Freeze (frozen)**. See **[docs/m13/overview.md](docs/m13/overview.md)**. **M12 skipped** for v3. **M11 complete** ✅ (HS1/GEL substrate). Defaults unchanged; all GEL paths are **gated and OFF by default**; identity path preserved. M10 remains complete; M9 deterministic parallelism remains flag‑gated and OFF by default.
+> **Status:** **v0.10.3** (2025‑10‑09) — v3 remains frozen after **M13 Hardening & Freeze**; recent 0.10.x updates are docs/examples only. See **[docs/m13/overview.md](docs/m13/overview.md)** for the locked surface. **M12 skipped** for v3. **M11 complete** ✅ (HS1/GEL substrate). Defaults unchanged; all GEL paths are **gated and OFF by default**; identity path preserved. M10 remains complete; M9 deterministic parallelism remains flag‑gated and OFF by default.
 >
 > **License:** Apache‑2.0 — see [LICENSE](./LICENSE) & [NOTICE](./NOTICE).
 > **Support matrix:** Python **3.11–3.13**; Ubuntu, macOS, Windows. Cross‑OS identity and reproducible builds (SBOM/SLSA) enforced in CI.
-> **Changelog:** see [CHANGELOG.MD](CHANGELOG.MD) for **v0.10.1**.
+> **Changelog:** see [CHANGELOG.MD](CHANGELOG.MD) for **v0.10.3**.
 >
 > **M13 — Hardening & Freeze (v3):** See **[docs/m13/overview.md](docs/m13/overview.md)**.
 > **M14 — Viewer & Console (docs):** See **[docs/m14/frontend.md](docs/m14/frontend.md)**.
@@ -82,6 +82,7 @@ TZ=UTC PYTHONHASHSEED=0 SOURCE_DATE_EPOCH=315532800 CLEMATIS_NETWORK_BAN=1 \
 python -m clematis console -- step --now-ms 315532800000 --out /tmp/run.json
 python -m clematis console -- compare --a /tmp/run.json --b /tmp/run.json
 ```
+> ⚖️ Identity tip: Passing `--now-ms` (or exporting `SOURCE_DATE_EPOCH`) keeps T2’s `exact_recent_days` window aligned across the in-memory and LanceDB backends when replaying bundles or comparing logs.
 
 Local reproducibility + offline checks for the viewer:
 

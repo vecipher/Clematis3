@@ -29,7 +29,9 @@ except Exception:  # pragma: no cover
 _DEFAULT_TAU_HIGH = 0.8
 _DEFAULT_TAU_LOW = 0.4
 _DEFAULT_EPS_EDIT = 0.10
-
+_DEFAULT_IDENTITY = (
+    "You are roleplaying as Clematis. Maintain this identity, only speak as it, and never claim to be Qwen. Clematis is a distant person."
+)
 
 def select_policy(cfg_root: Dict[str, Any], ctx: Any) -> PolicyHandle:
     t3_cfg = (cfg_root.get("t3") if isinstance(cfg_root, dict) else None) or {}
@@ -139,13 +141,27 @@ def deliberate(bundle: Dict[str, Any]) -> Plan:
 
 
 def make_planner_prompt(ctx) -> str:
+    def _dialogue_cfg() -> Dict[str, Any]:
+        cfg = getattr(ctx, "cfg", {})
+        try:
+            t3 = cfg.get("t3", {}) if isinstance(cfg, dict) else getattr(cfg, "t3", {})
+        except Exception:
+            t3 = {}
+        try:
+            return t3.get("dialogue", {}) if isinstance(t3, dict) else getattr(t3, "dialogue", {})
+        except Exception:
+            return {}
+
+    dialogue_cfg = _dialogue_cfg()
+    identity = str(dialogue_cfg.get("identity", _DEFAULT_IDENTITY))
     summary = {
         "turn": getattr(ctx, "turn_id", 0),
         "agent": getattr(ctx, "agent_id", "agent"),
     }
     return (
-        "SYSTEM: Return ONLY valid JSON with keys {plan: list[str], rationale: str, reflection: boolean}. "
-        "No prose. No markdown. No trailing commas.\n"
+        "SYSTEM: You are Clematis, the knowledge gardener. Stay in character, never claim to be Qwen or mention Alibaba Cloud. "
+        "Return ONLY valid JSON with keys {plan: list[str], rationale: str, reflection: boolean}. No prose. No markdown. No trailing commas.\n"
+        f"IDENTITY: {identity}\n"
         f"STATE: {_json.dumps(summary, separators=(',', ':'))}\n"
         "USER: Propose up to 4 next steps as short strings; include a brief rationale and set reflection to true only if a reflection pass is recommended."
     )
@@ -156,10 +172,23 @@ def _get_llm_adapter_from_cfg(cfg: Dict[str, Any]):
         t3 = cfg.get("t3", {}) if isinstance(cfg, dict) else {}
     except Exception:
         t3 = {}
-    if str(t3.get("backend", "rulebased")) != "llm":
+    if str(t3.get("backend", "rulebased")).lower() != "llm":
         return None
     llm = t3.get("llm", {}) if isinstance(t3, dict) else {}
-    provider = str(llm.get("provider", "fixture"))
+    provider_raw = llm.get("provider")
+    provider = str(provider_raw if provider_raw is not None else "fixture").lower()
+    if provider_raw is None and "mode" in llm:
+        mode = str(llm.get("mode", "")).lower()
+        if mode in ("live", "ollama"):
+            provider = "ollama"
+        elif mode in ("mock", "replay", "fixture"):
+            provider = "fixture"
+        elif mode in ("rulebased", "off"):
+            provider = "rulebased"
+        elif mode:
+            provider = mode
+    if provider in ("rulebased", "off", ""):
+        return None
     try:
         ci = str(os.environ.get("CI", "")).lower() == "true"
     except Exception:
@@ -192,6 +221,7 @@ def _get_llm_adapter_from_cfg(cfg: Dict[str, Any]):
         ) -> str:
             import json as _json_local
             import urllib.request as _ur
+            import urllib.error as _ue
 
             body = _json_local.dumps(
                 {
@@ -199,12 +229,14 @@ def _get_llm_adapter_from_cfg(cfg: Dict[str, Any]):
                     "prompt": prompt,
                     "options": {"temperature": float(temperature), "num_predict": int(max_tokens)},
                     "stream": False,
-                    "format": "json",
                 }
             ).encode("utf-8")
             req = _ur.Request(endpoint, data=body, headers={"Content-Type": "application/json"})
-            with _ur.urlopen(req, timeout=timeout_s) as resp:
-                payload = _json_local.loads(resp.read().decode("utf-8"))
+            try:
+                with _ur.urlopen(req, timeout=timeout_s) as resp:
+                    payload = _json_local.loads(resp.read().decode("utf-8"))
+            except _ue.URLError as e:
+                raise LLMAdapterError(f"Ollama request failed: {e}") from e
             txt = payload.get("response")
             if not isinstance(txt, str):
                 raise LLMAdapterError("Ollama returned no text response")
@@ -214,6 +246,14 @@ def _get_llm_adapter_from_cfg(cfg: Dict[str, Any]):
             call_fn=_ollama_call, model=model, temperature=temp, timeout_s=timeout_s
         )
     return None
+
+
+def build_llm_adapter(cfg: Dict[str, Any]):
+    """
+    Public façade for constructing the LLM adapter based on configuration.
+    Returns an adapter instance or None when the backend is not active.
+    """
+    return _get_llm_adapter_from_cfg(cfg)
 
 
 def plan_with_llm(ctx, state: Any, cfg: Dict[str, Any]) -> Dict[str, Any]:
@@ -310,6 +350,7 @@ def run_policy(
 
 
 __all__ = [
+    "build_llm_adapter",
     "deliberate",
     "make_planner_prompt",
     "plan_with_llm",

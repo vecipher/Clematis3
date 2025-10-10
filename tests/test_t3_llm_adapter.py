@@ -74,12 +74,15 @@ def test_build_llm_prompt_contains_sorted_fields():
     db = make_dialog_bundle(ctx, {}, t1, t2, plan)
 
     prompt = build_llm_prompt(db, plan)
-    # style, intent, labels (sorted), snippets top-2 (e1, e2), and input present
-    assert "style_prefix: calm" in prompt
-    assert "intent: summary" in prompt
-    assert "labels: alpha, zeta" in prompt
-    assert "snippets: e1, e2" in prompt
-    assert "input: hello world" in prompt
+    # style, intent, labels (sorted), snippets top-2 (e1, e2), identity, and input present
+    assert "STYLE_PREFIX: calm" in prompt
+    assert "INTENT: summary" in prompt
+    assert "LABELS: alpha, zeta" in prompt
+    assert "SNIPPET_IDS: e1, e2" in prompt
+    assert "SNIPPETS:" in prompt
+    assert "1. [e1]" in prompt
+    assert "IDENTITY: " in prompt
+    assert "INPUT: hello world" in prompt
 
 
 def test_llm_speak_with_deterministic_adapter_is_stable_and_capped():

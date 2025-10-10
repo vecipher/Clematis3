@@ -202,7 +202,17 @@ def t1_propagate(ctx, state, text: str) -> T1Result:
     def _t1_one_graph(gid: str):
         # Returns (deltas_for_gid, per_graph_metrics)
         g = store.get_graph(gid)
-        labels = [(n.id, n.label) for n in g.nodes.values()]
+        labels: List[Tuple[str, str]] = []
+        for n in g.nodes.values():
+            if getattr(n, "label", None):
+                labels.append((n.id, n.label))
+            try:
+                tags = list(getattr(n, "attrs", {}).get("tags", []))
+            except Exception:
+                tags = []
+            for kw in tags:
+                if isinstance(kw, str) and kw:
+                    labels.append((n.id, kw))
         seeds = _match_keywords(text, labels)
         if not seeds:
             return [], {

@@ -3,6 +3,10 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from ...types import Plan, SpeakOp
 
+_DEFAULT_IDENTITY = (
+    "You are roleplaying as Clematis. Maintain this identity, only speak as it, and never claim to be Qwen. Clematis is a distant person."
+)
+
 
 def _dedupe_sort_list(xs: List[str]) -> List[str]:
     return sorted({str(x) for x in (xs or [])})
@@ -17,6 +21,27 @@ def _top_snippet_ids(dialog_bundle: Dict[str, Any]) -> List[str]:
     hits = dialog_bundle.get("retrieved", []) or []
     ids = [str(h.get("id")) for h in hits if isinstance(h, dict) and h.get("id")]
     return ids[: max(n, 0)]
+
+
+def _top_snippets(dialog_bundle: Dict[str, Any]) -> List[Dict[str, Any]]:
+    n = int(dialog_bundle.get("dialogue", {}).get("include_top_k_snippets", 2) or 2)
+    hits = []
+    for entry in dialog_bundle.get("retrieved", []) or []:
+        if not isinstance(entry, dict):
+            continue
+        rid = entry.get("id")
+        if not rid:
+            continue
+        hits.append(
+            {
+                "id": str(rid),
+                "owner": str(entry.get("owner", "any")),
+                "score": float(entry.get("score", 0.0) or 0.0),
+                "text": str(entry.get("text", "")),
+                "speaker": str(entry.get("speaker", "")) if entry.get("speaker") else None,
+            }
+        )
+    return hits[: max(n, 0)]
 
 
 def _tokenize(s: str) -> List[str]:
@@ -52,15 +77,22 @@ def speak(dialog_bundle: Dict[str, Any], plan: Plan) -> Tuple[str, Dict[str, Any
     template = str(
         dialog_bundle.get("dialogue", {}).get("template", "summary: {labels}. next: {intent}")
     )
+    identity = str(dialog_bundle.get("dialogue", {}).get("identity", _DEFAULT_IDENTITY))
 
     snippet_ids = _top_snippet_ids(dialog_bundle)
+    snippets_rich = _top_snippets(dialog_bundle)
     snippets_str = ", ".join(snippet_ids)
+    snippets_text = "; ".join(
+        [f"{s['id']}: {s['text']}" for s in snippets_rich if s.get("text")]
+    )
 
     fmt_vars = {
         "labels": _format_labels(labels_sorted),
         "intent": intent,
         "snippets": snippets_str,
+        "snippets_text": snippets_text,
         "style_prefix": style_prefix,
+        "identity": identity,
     }
 
     try:
@@ -109,16 +141,46 @@ def build_llm_prompt(dialog_bundle: Dict[str, Any], plan: Plan) -> str:
     style_prefix = str(dialog_bundle.get("agent", {}).get("style_prefix", ""))
     input_text = str(dialog_bundle.get("text", {}).get("input", ""))
     snippet_ids = _top_snippet_ids(dialog_bundle)
-
+    identity = str(dialog_bundle.get("dialogue", {}).get("identity", _DEFAULT_IDENTITY))
+    safety = (
+        "SYSTEM: You are speaking as Clematis. Stay in the given identity, cite retrieved memories when relevant, "
+        "and never claim to be Qwen or reference Alibaba Cloud."
+    )
+    guardrails = (
+        "POLICY: Answer the user's question first, reference known user facts (such as names) accurately, "
+        "mention your own name at most once, keep replies concise (<=3 sentences), remain respectful, and use retrieval snippets only when they help. "
+        "If uncertain, acknowledge limits or ask for clarification."
+    )
     lines = [
-        f"now: {dialog_bundle.get('now', '')}",
-        f"style_prefix: {style_prefix}",
-        f"intent: {intent}",
-        f"labels: {', '.join(labels)}",
-        f"snippets: {', '.join(snippet_ids)}",
-        "instruction: Compose a concise utterance that reflects the intent and labels. Do not exceed the token budget.",
-        f"input: {input_text}",
+        safety,
+        guardrails,
+        f"IDENTITY: {identity}",
+        f"NOW: {dialog_bundle.get('now', '')}",
+        f"STYLE_PREFIX: {style_prefix}",
+        f"INTENT: {intent}",
+        f"LABELS: {', '.join(labels)}",
+        f"SNIPPET_IDS: {', '.join(snippet_ids)}",
     ]
+    history = dialog_bundle.get("dialogue", {}).get("history", [])
+    snippet_records = _top_snippets(dialog_bundle)
+    if history:
+        lines.append("HISTORY:")
+        for entry in history:
+            role = str(entry.get("role", ""))
+            text = str(entry.get("text", ""))
+            lines.append(f"{role}: {text}")
+    if snippet_records:
+        lines.append("SNIPPETS:")
+        for idx, rec in enumerate(snippet_records, start=1):
+            snippet_text = rec.get("text") or "(no text)"
+            owner = rec.get("owner", "any")
+            speaker = rec.get("speaker") or owner
+            score = rec.get("score", 0.0)
+            lines.append(
+                f"{idx}. [{rec['id']}] speaker={speaker} owner={owner} score={score:.3f}: {snippet_text}"
+            )
+    lines.append("INSTRUCTION: Compose a short, concise utterance that reflects the intent, identity, labels, and relevant history without exceeding the token budget.")
+    lines.append(f"INPUT: {input_text}")
     return "\n".join(lines).strip()
 
 
@@ -154,7 +216,7 @@ def llm_speak(dialog_bundle: Dict[str, Any], plan: Plan, adapter: Any) -> Tuple[
         if truncated_llm is None and isinstance(result, dict):
             truncated_llm = bool(result.get("truncated", False))
     except Exception:
-        text, tokens, truncated_llm = "[llm:error]", 0, True
+        text, tokens, truncated_llm = "Brainfart, sorry, please repeat.", 0, True
 
     if style_prefix and not (text or "").startswith(f"{style_prefix}|"):
         text = f"{style_prefix}| {text}".strip()

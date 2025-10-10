@@ -74,6 +74,7 @@ def test_one_shot_blocked_returns_unchanged_plan_and_metrics():
     assert asdict(p2) == asdict(p), "Plan must be unchanged when already_used=True"
     assert m["rag_used"] is False and m["rag_blocked"] is True
     assert m["pre_s_max"] == m["post_s_max"] == 0.2
+    assert m["retrieved_ids"] == []
 
 
 def test_refinement_improves_intent_and_keeps_ops_capped():
@@ -110,6 +111,7 @@ def test_refinement_improves_intent_and_keeps_ops_capped():
     assert m["rag_used"] is True and m["rag_blocked"] is False
     assert m["pre_s_max"] == 0.2 and m["post_s_max"] == 0.85
     assert m["k_retrieved"] == 2
+    assert m["retrieved_ids"] == ["x2", "x1"]
     # Payload sanity
     assert seen.get("query") == "hello world"
     assert seen.get("owner") in ("agent", "world", "any")
@@ -131,6 +133,7 @@ def test_no_improvement_intent_stays_question():
     ]
     assert speak_intents[0] == "question"
     assert m["post_s_max"] == pytest.approx(0.25)
+    assert m["retrieved_ids"] == ["x"]
 
 
 def test_optional_editgraph_added_when_evidence_sufficient_and_absent():
@@ -175,3 +178,4 @@ def test_noop_when_no_rr_in_plan():
     p2, m = rag_once(b, plan, fake_retrieve)
     assert asdict(p2) == asdict(plan)
     assert m["rag_used"] is False and m["rag_blocked"] is False and m["k_retrieved"] == 0
+    assert m["retrieved_ids"] == []

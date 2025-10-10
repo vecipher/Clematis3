@@ -5,7 +5,7 @@ from .core import t3_pipeline
 from .dialogue import build_llm_prompt, llm_speak, speak
 from .metrics import finalize as finalize_metrics
 finalize = finalize_metrics
-from .policy import run_policy, select_policy
+from .policy import run_policy, select_policy, build_llm_adapter
 from .trace import emit_trace
 from .reflect import ReflectionBundle, ReflectionResult, reflect, FixtureMissingError
 from .legacy import (
@@ -29,6 +29,7 @@ __all__ = [
     "make_planner_prompt",
     "plan_with_llm",
     "rag_once",
+    "build_llm_adapter",
     "run_policy",
     "select_policy",
     "speak",

@@ -14,6 +14,12 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- **T2 / LanceDB:** exact-semantic recency filters now honour the orchestrator-provided `hints["now"]` timestamp before falling back to wall-clock UTC, keeping Lance replay results aligned with the in-memory backend during deterministic replays.
+
+### Docs
+- Documented the LanceDB recency behaviour and the console `--now-ms` requirement for identity runs (README, operator guide, `docs/m3/lance.md`).
+
 ## [0.10.3] - 2025-10-09
 
 ### M14 — Examples & fixtures (viewer/console)

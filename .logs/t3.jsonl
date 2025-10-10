@@ -1,1 +1,1 @@
-{"turn": "demo-1", "agent": "AgentA", "backend": "rulebased", "ops_counts": {"Speak": 1, "RequestRetrieve": 1}, "requested_retrieve": true, "rag_used": true, "ms_plan": 0.042, "ms_rag": 0.066, "ms_speak": 0.034, "now": "2025-10-10T02:07:37.100667+00:00"}
+{"turn": "demo-1", "agent": "AgentA", "backend": "rulebased", "ops_counts": {"Speak": 1, "RequestRetrieve": 1}, "requested_retrieve": true, "rag_used": true, "ms_plan": 0.032, "ms_rag": 0.055, "ms_speak": 0.038, "now": "2025-10-10T07:36:38.090531+00:00"}
