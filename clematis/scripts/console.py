@@ -335,7 +335,8 @@ def write_json(path: str, obj: Any) -> None:
         return o
     data = json.dumps(canonical(obj), indent=2, ensure_ascii=False)
     p = pathlib.Path(path)
-    p.parent.mkdir(parents=True, exist_ok=True); p.write_text(data + "\n", encoding="utf-8")
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(data + "\n", encoding="utf-8")
 
 def load_json(path: str) -> Dict[str, Any]:
     with open(path, "r", encoding="utf-8") as f:
