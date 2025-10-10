@@ -32,6 +32,8 @@ try:
 except Exception:
     # Best-effort; fall back to user-provided PYTHONPATH or editable install
     pass
+
+from clematis.errors import ConfigError
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 # ------------------------------ imports ------------------------------------
@@ -138,7 +140,7 @@ def _run_example(
     cfg = _load_yaml(path)
     try:
         normalized, warnings = validate_config_verbose(cfg)
-    except ValueError as e:
+    except ConfigError as e:
         return False, f"validation errors: {str(e)}"
     cfg = normalized
 

@@ -28,18 +28,13 @@ class ClematisError(Exception):
 
 
 
-# NOTE(backcompat): For v3 we also inherit from ValueError so older tests/consumers
-# that catch ValueError keep working.
-# TODO(v4): Drop ValueError parent and migrate callers to catch ConfigError/ClematisError.
-class ConfigError(ClematisError, ValueError):
+# Typed errors no longer inherit from ValueError; callers should catch the specific subclasses.
+class ConfigError(ClematisError):
     """Configuration invalid, unknown keys, wrong version, etc."""
     pass
 
 
-
-# NOTE(backcompat): For v3 we also inherit from ValueError for legacy callers/tests.
-# TODO(v4): Drop ValueError parent and migrate callers to catch SnapshotError/ClematisError.
-class SnapshotError(ClematisError, ValueError):
+class SnapshotError(ClematisError):
     """Snapshot missing schema, mismatched version, corrupted header, etc."""
     pass
 

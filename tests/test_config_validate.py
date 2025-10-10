@@ -1,6 +1,7 @@
 import pytest
 
 from configs.validate import validate_config, validate_config_verbose
+from clematis.errors import ConfigError
 
 
 def test_validate_happy_defaults():
@@ -25,7 +26,7 @@ def test_validate_happy_defaults():
     ],
 )
 def test_validate_raises_on_bad_values(bad_cfg, needle):
-    with pytest.raises(ValueError) as ei:
+    with pytest.raises(ConfigError) as ei:
         validate_config(bad_cfg)
     msg = str(ei.value)
     assert needle in msg
@@ -41,7 +42,7 @@ def test_t4_cache_ttl_alias_and_priority():
 
 
 def test_t4_cache_namespaces_must_be_list_of_str():
-    with pytest.raises(ValueError) as ei:
+    with pytest.raises(ConfigError) as ei:
         validate_config({"t4": {"cache": {"namespaces": "oops"}}})
     assert "t4.cache.namespaces" in str(ei.value)
 
@@ -73,7 +74,7 @@ def test_t2_backend_enum_and_threshold():
     out = validate_config({"t2": {"backend": "inmemory", "sim_threshold": 0.0}})
     assert out["t2"]["backend"] == "inmemory"
     # bad backend
-    with pytest.raises(ValueError) as ei:
+    with pytest.raises(ConfigError) as ei:
         validate_config({"t2": {"backend": "duckdb"}})
     assert "t2.backend" in str(ei.value)
 
@@ -83,7 +84,7 @@ def test_t4_cooldowns_nonnegative_and_string_keys():
     out = validate_config({"t4": {"cooldowns": {"EditGraph": 2, "CreateGraph": 0}}})
     assert out["t4"]["cooldowns"]["EditGraph"] == 2
     # negative value
-    with pytest.raises(ValueError) as ei:
+    with pytest.raises(ConfigError) as ei:
         validate_config({"t4": {"cooldowns": {"EditGraph": -1}}})
     assert "t4.cooldowns[EditGraph]" in str(ei.value)
 
@@ -92,7 +93,7 @@ def test_t4_cooldowns_nonnegative_and_string_keys():
 def test_unknown_key_suggestion():
     # Typo should raise with a suggestion in the error message
     bad = {"t2": {"backnd": "inmemory"}}
-    with pytest.raises(ValueError) as ei:
+    with pytest.raises(ConfigError) as ei:
         validate_config(bad)
     msg = str(ei.value)
     assert "t2.backnd" in msg
@@ -123,7 +124,7 @@ def test_duplicate_cache_namespace_warns_in_verbose():
 def test_t4_cache_namespace_membership():
     # Invalid namespace should error with allowed set indicated
     cfg = {"t4": {"cache": {"namespaces": ["t2:semantics"]}}}
-    with pytest.raises(ValueError) as ei:
+    with pytest.raises(ConfigError) as ei:
         validate_config(cfg)
     msg = str(ei.value)
     assert "t4.cache.namespaces[t2:semantics]" in msg
@@ -133,14 +134,14 @@ def test_t4_cache_namespace_membership():
 @pytest.mark.parametrize("bad", [1.2, -1.2])
 def test_t2_sim_threshold_bounds(bad):
     cfg = {"t2": {"sim_threshold": bad}}
-    with pytest.raises(ValueError) as ei:
+    with pytest.raises(ConfigError) as ei:
         validate_config(cfg)
     assert "t2.sim_threshold" in str(ei.value)
 
 
 def test_snapshot_every_n_turns_must_be_positive():
     cfg = {"t4": {"snapshot_every_n_turns": 0, "cache": {"namespaces": ["t2:semantic"]}}}
-    with pytest.raises(ValueError) as ei:
+    with pytest.raises(ConfigError) as ei:
         validate_config(cfg)
     assert "t4.snapshot_every_n_turns" in str(ei.value)
 
@@ -163,19 +164,19 @@ def test_graph_merge_defaults_and_bounds():
 
 def test_graph_merge_invalid_values():
     # min_size < 2
-    with pytest.raises(ValueError) as ei:
+    with pytest.raises(ConfigError) as ei:
         validate_config({"graph": {"merge": {"min_size": 1}}})
     assert "graph.merge.min_size" in str(ei.value)
     # min_avg_w out of range
-    with pytest.raises(ValueError) as ei:
+    with pytest.raises(ConfigError) as ei:
         validate_config({"graph": {"merge": {"min_avg_w": 1.5}}})
     assert "graph.merge.min_avg_w" in str(ei.value)
     # max_diameter < 1
-    with pytest.raises(ValueError) as ei:
+    with pytest.raises(ConfigError) as ei:
         validate_config({"graph": {"merge": {"max_diameter": 0}}})
     assert "graph.merge.max_diameter" in str(ei.value)
     # cap_per_turn negative
-    with pytest.raises(ValueError) as ei:
+    with pytest.raises(ConfigError) as ei:
         validate_config({"graph": {"merge": {"cap_per_turn": -1}}})
     assert "graph.merge.cap_per_turn" in str(ei.value)
 
@@ -191,15 +192,15 @@ def test_graph_split_defaults_and_bounds():
 
 def test_graph_split_invalid_values():
     # weak_edge_thresh out of range
-    with pytest.raises(ValueError) as ei:
+    with pytest.raises(ConfigError) as ei:
         validate_config({"graph": {"split": {"weak_edge_thresh": -0.1}}})
     assert "graph.split.weak_edge_thresh" in str(ei.value)
     # min_component_size < 2
-    with pytest.raises(ValueError) as ei:
+    with pytest.raises(ConfigError) as ei:
         validate_config({"graph": {"split": {"min_component_size": 1}}})
     assert "graph.split.min_component_size" in str(ei.value)
     # cap_per_turn negative
-    with pytest.raises(ValueError) as ei:
+    with pytest.raises(ConfigError) as ei:
         validate_config({"graph": {"split": {"cap_per_turn": -2}}})
     assert "graph.split.cap_per_turn" in str(ei.value)
 
@@ -216,19 +217,19 @@ def test_graph_promotion_defaults_and_bounds():
 
 def test_graph_promotion_invalid_values():
     # bad label_mode
-    with pytest.raises(ValueError) as ei:
+    with pytest.raises(ConfigError) as ei:
         validate_config({"graph": {"promotion": {"label_mode": "weird"}}})
     assert "graph.promotion.label_mode" in str(ei.value)
     # topk_label_ids < 1
-    with pytest.raises(ValueError) as ei:
+    with pytest.raises(ConfigError) as ei:
         validate_config({"graph": {"promotion": {"topk_label_ids": 0}}})
     assert "graph.promotion.topk_label_ids" in str(ei.value)
     # attach_weight out of range
-    with pytest.raises(ValueError) as ei:
+    with pytest.raises(ConfigError) as ei:
         validate_config({"graph": {"promotion": {"attach_weight": 2}}})
     assert "graph.promotion.attach_weight" in str(ei.value)
     # cap_per_turn negative
-    with pytest.raises(ValueError) as ei:
+    with pytest.raises(ConfigError) as ei:
         validate_config({"graph": {"promotion": {"cap_per_turn": -1}}})
     assert "graph.promotion.cap_per_turn" in str(ei.value)
 
@@ -241,7 +242,7 @@ def test_graph_cross_field_consistency():
             "split": {"weak_edge_thresh": 0.50},
         }
     }
-    with pytest.raises(ValueError) as ei:
+    with pytest.raises(ConfigError) as ei:
         validate_config(bad)
     msg = str(ei.value)
     assert "graph.split.weak_edge_thresh" in msg
@@ -250,7 +251,7 @@ def test_graph_cross_field_consistency():
 
 def test_graph_unknown_keys_under_promotion():
     bad = {"graph": {"promotion": {"speed": 1}}}
-    with pytest.raises(ValueError) as ei:
+    with pytest.raises(ConfigError) as ei:
         validate_config(bad)
     msg = str(ei.value)
     assert "graph.promotion.speed" in msg

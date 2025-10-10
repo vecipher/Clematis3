@@ -4,6 +4,7 @@ import copy
 import pytest
 
 import importlib
+from clematis.errors import ConfigError
 _val_mod = importlib.import_module("configs.validate")
 for _name in ("validate", "validate_and_normalize", "validate_config", "validate_cfg"):
     if hasattr(_val_mod, _name):
@@ -76,7 +77,7 @@ def test_types_enforced_and_nonneg_ints():
 def test_ops_reflection_negative_raises():
     cfg = base_cfg()
     cfg["scheduler"]["budgets"]["ops_reflection"] = -1
-    with pytest.raises(ValueError):
+    with pytest.raises(ConfigError):
         _validate(copy.deepcopy(cfg))
 
 @pytest.mark.parametrize("coerce_in", ["5", 3.14])
@@ -101,12 +102,12 @@ def test_unknown_key_rejected_in_reflection():
             "surprise": 42,  # not allowed
         },
     }
-    with pytest.raises(ValueError):
+    with pytest.raises(ConfigError):
         _validate(copy.deepcopy(cfg))
 
 
 def test_backend_choice_restricted():
     cfg = base_cfg()
     cfg["t3"] = {"allow_reflection": True, "reflection": {"backend": "nope"}}
-    with pytest.raises(ValueError):
+    with pytest.raises(ConfigError):
         _validate(copy.deepcopy(cfg))

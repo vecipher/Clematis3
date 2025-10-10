@@ -1,6 +1,7 @@
 import pytest
 
 from configs.validate import validate_config
+from clematis.errors import ConfigError
 
 
 def test_llm_requires_fixtures_enabled():
@@ -18,7 +19,7 @@ def test_llm_requires_fixtures_enabled():
         },
         "scheduler": {"budgets": {"time_ms_reflection": 6000, "ops_reflection": 5}},
     }
-    with pytest.raises(ValueError):
+    with pytest.raises(ConfigError):
         validate_config(cfg)
 
 
@@ -37,5 +38,5 @@ def test_llm_requires_path_when_enabled():
         },
         "scheduler": {"budgets": {"time_ms_reflection": 6000, "ops_reflection": 5}},
     }
-    with pytest.raises(ValueError):
+    with pytest.raises(ConfigError):
         validate_config(cfg)

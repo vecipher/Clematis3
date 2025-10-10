@@ -6,6 +6,7 @@ from configs.validate import (
     validate_config,
     validate_config_verbose,
 )
+from clematis.errors import ConfigError
 
 
 def _expect_valid(user_cfg):
@@ -16,8 +17,8 @@ def _expect_valid(user_cfg):
 
 
 def _expect_error(user_cfg, substr: str):
-    """Validate and expect a ValueError mentioning substr."""
-    with pytest.raises(ValueError) as ei:
+    """Validate and expect a ConfigError mentioning substr."""
+    with pytest.raises(ConfigError) as ei:
         validate_config(user_cfg)
     msg = str(ei.value)
     assert substr in msg, f"Expected error message to contain '{substr}', got: {msg}"

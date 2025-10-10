@@ -1,10 +1,10 @@
 
 
 from __future__ import annotations
-
 import pytest
 
 from configs.validate import validate_config, CONFIG_VERSION
+from clematis.errors import ConfigError
 
 
 def _base_cfg() -> dict:
@@ -28,7 +28,7 @@ def test_accepts_v1_version():
 def test_rejects_wrong_version():
   cfg = _base_cfg()
   cfg["version"] = "v999"
-  with pytest.raises(ValueError) as e:
+  with pytest.raises(ConfigError) as e:
     validate_config(cfg)
   # Message should be explicit but avoid overfitting exact text
   assert "must be" in str(e.value)
@@ -37,5 +37,5 @@ def test_rejects_wrong_version():
 def test_rejects_unknown_top_level_keys():
   cfg = _base_cfg()
   cfg["whaaat"] = {}
-  with pytest.raises(ValueError):
+  with pytest.raises(ConfigError):
     validate_config(cfg)

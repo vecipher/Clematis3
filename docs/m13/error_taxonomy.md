@@ -44,3 +44,4 @@ When an error has an empty message, `format_error(e)` renders only the class nam
 **Notes**
 - Error messages are deterministic and concise; avoid stack traces in operator paths.
 - Identity is preserved in v3; enabling quality/perf/reflection features may change behavior and should remain off by default.
+- Typed errors inherit only from `ClematisError`; update callers to catch the specific subclasses instead of `ValueError`.

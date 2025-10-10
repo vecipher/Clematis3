@@ -1,3 +1,4 @@
+version: "v1"
 k_surface: 32
 surface_method: PCA
 t1:
@@ -48,10 +49,10 @@ t3:
   tokens: 256
   temp: 0.2
   max_ops_per_turn: 3
-  allow_reflection: true
-  backend: llm
+  allow_reflection: false
+  backend: rulebased
   reflection:
-    backend: llm        # deterministic summariser; "llm" requires fixtures (see PR84)
+    backend: rulebased        # deterministic summariser; switch to "llm" via overlay
     summary_tokens: 128       # whitespace-tokenised cap
     embed: true               # embed the reflection summary deterministically
     log: true                 # write t3_reflection.jsonl (not part of identity logs)
@@ -65,15 +66,15 @@ t3:
     epsilon_edit: 0.10
   llm:
     # M3-07 LLM adapter scaffolding — defaults OFF and fixture-driven in CI
-    provider: ollama           # "fixture" | "ollama"
+    provider: fixture          # "fixture" | "ollama"
     model: qwen3:4b-instruct
     endpoint: http://localhost:11434/api/generate
     max_tokens: 256
     temp: 0.2
     timeout_ms: 10000
     fixtures:
-      enabled: true            # fixtures-only mode for deterministic LLM reflection
-      path: tests/fixtures/llm_cassettes/reflection.jsonl
+      enabled: false           # enable in overlays/examples; requires non-empty path
+      path: null
 t4:
   enabled: true
   delta_norm_cap_l2: 1.5
@@ -94,7 +95,9 @@ t4:
     ttl_sec: 600
 # budgets: ...
 budgets: {time_ms: 1000, ops: 1000, tokens: 1024, time_ms_reflection: 6000}
-flags: {enable_world_memory: true, allow_reflection: true}
+flags:
+  enable_world_memory: false
+  allow_reflection: false
 
 # -----------------------------------------------------------------------------
 # M9 Deterministic Parallelism (defaults OFF)

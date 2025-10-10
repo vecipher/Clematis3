@@ -289,7 +289,7 @@ class Config:
         }
     )
     flags: Dict[str, Any] = field(
-        default_factory=lambda: {"enable_world_memory": True, "allow_reflection": True}
+        default_factory=lambda: {"enable_world_memory": False, "allow_reflection": False}
     )
 
     # M5: scheduler config (feature-flagged; defaults merged by validate.py)

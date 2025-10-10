@@ -31,6 +31,8 @@ ROOT = os.path.abspath(os.path.join(HERE, ".."))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
+from clematis.errors import ConfigError
+
 
 def _load_validator():
     """Import the configs.validate module lazily to avoid circular imports.
@@ -135,8 +137,8 @@ def main(argv: list[str]) -> int:
         else:
             normalized = validate_config_func(cfg)
             warnings = []
-    except ValueError as ve:
-        print("CONFIG INVALID\n" + str(ve))
+    except ConfigError as err:
+        print("CONFIG INVALID\n" + str(err))
         return 1
 
     # --strict: treat warnings as errors

@@ -1,4 +1,5 @@
 import pytest
+from clematis.errors import ConfigError
 
 try:
     from configs.validate import validate_config, validate_config_verbose
@@ -34,7 +35,7 @@ def test_rejects_bad_level_and_codec():
             },
         }
     }
-    with pytest.raises(ValueError) as e:
+    with pytest.raises(ConfigError) as e:
         validate_config(cfg)
     msg = str(e.value).lower()
     assert "perf.snapshots.compression" in msg or "compression" in msg
