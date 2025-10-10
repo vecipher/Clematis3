@@ -129,19 +129,42 @@ def extract_t2_retrieved(t2: Any, k_retrieval: int) -> List[Dict[str, Any]]:
     out: List[Dict[str, Any]] = []
     retrieved = getattr(t2, "retrieved", [])
     for record in retrieved or []:
+        speaker = None
         if isinstance(record, dict):
             rid = str(record.get("id"))
             score = float(record.get("_score", record.get("score", 0.0)) or 0.0)
             owner = str(record.get("owner", "any"))
             quarter = str(record.get("quarter", ""))
+            text = record.get("text")
+            tags = record.get("tags")
+            speaker = record.get("speaker")
         else:
             rid = str(getattr(record, "id", ""))
             score = float(getattr(record, "score", 0.0) or 0.0)
             owner = str(getattr(record, "owner", "any"))
             quarter = str(getattr(record, "quarter", ""))
+            text = getattr(record, "text", None)
+            tags = getattr(record, "tags", None)
+            speaker = getattr(record, "speaker", None)
         if not rid:
             continue
-        out.append({"id": rid, "score": score, "owner": owner, "quarter": quarter})
+        tags_list = list(tags) if isinstance(tags, list) else None
+        if speaker is None and tags_list:
+            for t in tags_list:
+                if isinstance(t, str) and t.startswith("speaker:"):
+                    speaker = t.split(":", 1)[1] or None
+                    break
+        out.append(
+            {
+                "id": rid,
+                "score": score,
+                "owner": owner,
+                "quarter": quarter,
+                **({"text": str(text)} if text else {}),
+                **({"tags": tags_list} if tags_list else {}),
+                **({"speaker": str(speaker)} if speaker else {}),
+            }
+        )
     out.sort(key=lambda e: (-float(e.get("score", 0.0)), str(e.get("id", ""))))
     return out[: max(int(k_retrieval), 0)]
 

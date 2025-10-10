@@ -12,6 +12,7 @@ env:
   PYTHONUTF8: "1"
   PYTHONHASHSEED: "0"
   LC_ALL: C.UTF-8
+  LANG: C.UTF-8
   SOURCE_DATE_EPOCH: "315532800"
 
 jobs:
@@ -98,6 +99,8 @@ jobs:
           pip install -e .[dev,test]
           # Ensure PyYAML is present (not included in extras)
           pip install pyyaml
+          # Ensure deterministic completions output
+          python -m pip install "shtab==1.7.1"
 
       - name: Sanity imports
         continue-on-error: true
@@ -157,6 +160,8 @@ jobs:
           CI: "true"
           PYTHONHASHSEED: "0"
           COLUMNS: "80"
+          LINES: "25"
+          LANG: "C.UTF-8"
         run: |
           set -euo pipefail
           pytest -q -m "not manual"
@@ -199,6 +204,8 @@ jobs:
           pip install -e ".[test,dev]"
           # Fallback in case extras not defined on forks
           pip install pytest || true
+          # Ensure deterministic completions output
+          python -m pip install "shtab==1.7.1"
 
       - name: Run CLI help stability tests
         env:
@@ -206,6 +213,8 @@ jobs:
           CI: "true"
           PYTHONHASHSEED: "0"
           COLUMNS: "80"
+          LINES: "25"
+          LANG: "C.UTF-8"
         run: |
           pytest -q tests/cli/test_help_stability.py
 

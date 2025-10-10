@@ -20,6 +20,7 @@ from . import (
     validate,
     export_logs_for_frontend,
     console,
+    chat,
 )
 from ._config import discover_config_path, maybe_log_selected
 
@@ -67,6 +68,7 @@ def build_parser() -> argparse.ArgumentParser:
     demo.register(subparsers)
     export_logs_for_frontend.register(subparsers)
     console.register(subparsers)
+    chat.register(subparsers)
 
     reorder_subparsers_alphabetically(parser)
     return parser

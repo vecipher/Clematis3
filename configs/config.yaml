@@ -15,7 +15,7 @@ t1:
     max_entries: 512
     ttl_s: 300
 t2:
-  backend: inmemory
+  backend: lancedb
   k_retrieval: 64
   sim_threshold: 0.3
   tiers: [exact_semantic, cluster_semantic, archive]
@@ -46,12 +46,12 @@ t3:
   apply_ops: false
   max_rag_loops: 1
   tokens: 256
-  temp: 0.7
+  temp: 0.2
   max_ops_per_turn: 3
   allow_reflection: true
-  backend: rulebased
+  backend: llm
   reflection:
-    backend: rulebased        # deterministic summariser; "llm" requires fixtures (see PR84)
+    backend: llm        # deterministic summariser; "llm" requires fixtures (see PR84)
     summary_tokens: 128       # whitespace-tokenised cap
     embed: true               # embed the reflection summary deterministically
     log: true                 # write t3_reflection.jsonl (not part of identity logs)
@@ -65,15 +65,15 @@ t3:
     epsilon_edit: 0.10
   llm:
     # M3-07 LLM adapter scaffolding — defaults OFF and fixture-driven in CI
-    provider: fixture           # "fixture" | "ollama"
-    model: qwen3:4b-instruct-q4_K_M
+    provider: ollama           # "fixture" | "ollama"
+    model: qwen3:4b-instruct
     endpoint: http://localhost:11434/api/generate
     max_tokens: 256
     temp: 0.2
     timeout_ms: 10000
     fixtures:
-      enabled: false            # fixtures-only mode for deterministic LLM reflection
-      path: null                # set to fixture file path when enabled
+      enabled: true            # fixtures-only mode for deterministic LLM reflection
+      path: tests/fixtures/llm_cassettes/reflection.jsonl
 t4:
   enabled: true
   delta_norm_cap_l2: 1.5

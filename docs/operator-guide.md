@@ -204,6 +204,7 @@ A minimal, deterministic console for operators to drive the orchestrator locally
 - Set the env in §2 (`TZ=UTC`, `PYTHONHASHSEED=0`, `SOURCE_DATE_EPOCH=315532800`, `CLEMATIS_NETWORK_BAN=1`).
 - The console warns when these do not match.
 - Logs are written to `CLEMATIS_LOG_DIR` if set; otherwise the console uses a temporary directory and cleans it up.
+- T2’s exact-semantic recency window (controlled by `t2.exact_recent_days`) uses the orchestrator’s notion of “now”. Supplying `--now-ms` (or exporting `SOURCE_DATE_EPOCH`) keeps the in-memory and LanceDB backends aligned for log replays and golden comparisons.
 
 **Examples**
 ```bash

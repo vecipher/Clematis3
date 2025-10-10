@@ -1,11 +1,12 @@
 from __future__ import annotations
-from typing import Any, Dict
+from typing import Any, Dict, List
 import time
 from datetime import datetime, timezone
 import os as _os
 import sys as _sys
 import importlib
 from dataclasses import asdict, is_dataclass
+import re
 
 
 def _iso_from_ms(ms: int) -> str:
@@ -26,6 +27,7 @@ from ..stages.t3 import (
     speak,
     llm_speak,
     build_llm_prompt,
+    build_llm_adapter,
     emit_trace,
     reflect,
     ReflectionBundle,
@@ -68,6 +70,56 @@ def _truthy(value: Any) -> bool:
         if v in {"true", "1", "yes", "on"}:
             return True
     return bool(value)
+
+
+_UTTER_SANITIZE_RULES: List[tuple[str, re.Pattern[str], str]] = [
+    (
+        "identity:qwen",
+        re.compile(r"\bi\s*(?:am|'m)\s+qwen\b", re.IGNORECASE),
+        "[FILTERED]",
+    ),
+    (
+        "vendor:alibaba_cloud",
+        re.compile(r"large language model developed by alibaba cloud", re.IGNORECASE),
+        "[FILTERED]",
+    ),
+    (
+        "memory:seeded_disclaimer",
+        re.compile(r"\bi\s+do\s+not\s+store\s+or\s+retain\s+seeded\s+memories\b", re.IGNORECASE),
+        "[FILTERED]",
+    ),
+    (
+        "identity:repeat",
+        re.compile(r"(?:\bI am Clematis\b[\.,!?\s]*){3,}", re.IGNORECASE),
+        "I am Clematis.",
+    ),
+]
+
+
+def _sanitize_utterance(ctx: Any, agent_id: str, backend_used: str, utter: str) -> tuple[str, Dict[str, Any] | None]:
+    if not utter:
+        return utter, None
+    sanitized = utter
+    triggered: List[str] = []
+    for tag, pattern, repl in _UTTER_SANITIZE_RULES:
+        if pattern.search(sanitized):
+            sanitized = pattern.sub(repl, sanitized)
+            triggered.append(tag)
+    sanitized = sanitized.strip()
+    if sanitized == utter:
+        return sanitized, None
+    meta = {
+        "turn": getattr(ctx, "turn_id", "-"),
+        "agent": agent_id,
+        "backend": backend_used,
+        "patterns": triggered,
+        "original": utter,
+        "sanitized": sanitized,
+    }
+    now = getattr(ctx, "now", None)
+    if now:
+        meta["now"] = now
+    return sanitized, meta
 
 
 # --- T3 enablement helper (default ON unless explicitly denied) ---
@@ -773,6 +825,7 @@ class Orchestrator:
             "k_retrieved": 0,
             "owner": None,
             "tier_pref": None,
+            "retrieved_ids": [],
         }
 
         if t3_enabled and not _dry_run:
@@ -895,6 +948,15 @@ class Orchestrator:
                 t0_rag = time.perf_counter()
                 plan, rag_metrics = rag_once(bundle, plan, _retrieve_fn, already_used=False)
                 rag_ms = round((time.perf_counter() - t0_rag) * 1000.0, 3)
+                retrieved_ids = rag_metrics.get("retrieved_ids", [])
+                if retrieved_ids:
+                    if isinstance(state, dict):
+                        state["_chat_last_retrieved"] = list(retrieved_ids)
+                    else:
+                        try:
+                            setattr(state, "_chat_last_retrieved", list(retrieved_ids))
+                        except Exception:
+                            pass
 
             # Dialogue synthesis (rule-based vs optional LLM backend)
             t0 = time.perf_counter()
@@ -961,16 +1023,61 @@ class Orchestrator:
                     speak_metrics = {}
                 backend_used = "patched"
             else:
-                if backend_cfg == "llm" and adapter is not None:
-                    utter, speak_metrics = llm_speak(dialog_bundle, plan, adapter)
-                    backend_used = "llm"
+                adapter_error: Exception | None = None
+                if backend_cfg == "llm":
+                    if adapter is None:
+                        try:
+                            adapter = build_llm_adapter(cfg)
+                            if adapter is not None:
+                                if isinstance(state, dict):
+                                    state["llm_adapter"] = adapter
+                                else:
+                                    setattr(state, "llm_adapter", adapter)
+                                try:
+                                    setattr(ctx, "llm_adapter", adapter)
+                                except Exception:
+                                    pass
+                        except Exception as e:
+                            adapter_error = e
+                            try:
+                                logs = getattr(state, "logs", None)
+                                if logs is None and isinstance(state, dict):
+                                    logs = state.get("logs")
+                                if isinstance(logs, list):
+                                    prov = str((llm_cfg or {}).get("provider", "unknown"))
+                                    ci = str(_os.environ.get("CI", ""))
+                                    logs.append(
+                                        {
+                                            "llm_adapter_error": str(e),
+                                            "provider": prov,
+                                            "ci": ci,
+                                        }
+                                    )
+                            except Exception:
+                                pass
+                    if adapter is not None:
+                        utter, speak_metrics = llm_speak(dialog_bundle, plan, adapter)
+                        backend_used = "llm"
+                    else:
+                        utter, speak_metrics = speak(dialog_bundle, plan)
+                        backend_used = "rulebased"
+                        backend_fallback = "rulebased"
+                        if fallback_reason is None:
+                            fallback_reason = (
+                                f"adapter_error:{type(adapter_error).__name__}"
+                                if adapter_error is not None
+                                else "no_adapter"
+                            )
                 else:
                     utter, speak_metrics = speak(dialog_bundle, plan)
                     backend_used = "rulebased"
-                    if backend_cfg == "llm" and adapter is None:
-                        backend_fallback, fallback_reason = "rulebased", "no_adapter"
-                    elif backend_cfg not in ("rulebased", "llm"):
+                    if backend_cfg not in ("rulebased", "llm"):
                         backend_fallback, fallback_reason = "rulebased", "invalid_backend"
+
+            utter, filter_meta = _sanitize_utterance(ctx, agent_id, backend_used, utter)
+            if filter_meta:
+                speak_metrics["filtered"] = True
+                _append_jsonl("t3_filter.jsonl", filter_meta)
 
             speak_ms = round((time.perf_counter() - t0) * 1000.0, 3)
 

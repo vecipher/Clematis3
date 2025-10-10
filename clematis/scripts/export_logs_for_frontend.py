@@ -42,9 +42,16 @@ except Exception:
 
 
 STAGE_FILES = [
-    "t1.jsonl", "t2.jsonl",
-    "t3.jsonl", "t3_plan.jsonl", "t3_dialogue.jsonl", "t3_reflection.jsonl",
-    "t4.jsonl", "apply.jsonl", "turn.jsonl",
+    "t1.jsonl",
+    "t2.jsonl",
+    "t3.jsonl",
+    "t3_plan.jsonl",
+    "t3_dialogue.jsonl",
+    "t3_reflection.jsonl",
+    "t3_filter.jsonl",
+    "t4.jsonl",
+    "apply.jsonl",
+    "turn.jsonl",
 ]
 
 

@@ -27,6 +27,9 @@ recursive-include docs *.md
 # Frontend viewer: ship prebuilt static assets in sdists
 recursive-include clematis/frontend/dist *
 
+# Prompt templates for demos/LLM scaffolding
+recursive-include configs/prompts *.txt
+
 # Do not ship repo-level frontend sources (TS/Node dev tree)
 prune frontend
 

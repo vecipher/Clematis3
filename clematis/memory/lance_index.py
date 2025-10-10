@@ -261,7 +261,16 @@ class LanceIndex:
         if tier == "exact_semantic":
             recent_days = hints.get("recent_days")
             if isinstance(recent_days, (int, float)) and recent_days > 0:
-                cutoff = datetime.now(timezone.utc) - timedelta(days=float(recent_days))
+                now_hint = hints.get("now")
+                base_now: Optional[datetime] = None
+                if isinstance(now_hint, str) and now_hint.strip():
+                    try:
+                        base_now = _parse_iso8601(now_hint.strip())
+                    except Exception:
+                        base_now = None
+                if base_now is None:
+                    base_now = datetime.now(timezone.utc)
+                cutoff = base_now - timedelta(days=float(recent_days))
                 eps = [e for e in eps if e["_dt"] >= cutoff]
         elif tier == "archive":
             qset = hints.get("archive_quarters")

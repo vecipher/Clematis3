@@ -38,7 +38,11 @@ def _init_index_from_cfg(state: dict, cfg_t2: dict):
             from clematis.memory.lance_index import LanceIndex  # type: ignore
 
             lcfg = cfg_t2.get("lancedb", {}) or {}
-            idx = LanceIndex(lcfg)
+            uri = str(lcfg.get("uri", "./.data/lancedb"))
+            table = str(lcfg.get("table", "episodes"))
+            meta_table = str(lcfg.get("meta_table", "meta"))
+            create_ok = bool(lcfg.get("create_ok", True))
+            idx = LanceIndex(uri=uri, table=table, meta_table=meta_table, create_ok=create_ok)
         except Exception as e:  # noqa: BLE001 — we intentionally swallow here and fall back
             idx = InMemoryIndex()
             fallback_reason = f"lancedb_unavailable: {type(e).__name__}"

@@ -10,7 +10,7 @@ except Exception:  # pragma: no cover — fallback when not executed as package
 try:  # pragma: no cover — allow shim fallback when package missing
     from clematis.scripts.bench_t4 import main as _impl_main
     _IMPORT_ERROR = None
-except ModuleNotFoundError as exc:  # pragma: no cover
+except ModuleNotFoundError as exc:  # pragma: no coverm yeag
     _impl_main = None  # type: ignore[assignment]
     _IMPORT_ERROR = exc
 

@@ -55,6 +55,8 @@ site/
 # Caches & scratch
 .cache/
 .ipynb_checkpoints/
+.lancedb/
+lancedb/
 
 # Logs & artifacts (non-identity; keep tests' goldens intact)
 logs/

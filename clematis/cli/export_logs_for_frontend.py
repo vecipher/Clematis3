@@ -67,7 +67,7 @@ def _run(ns: argparse.Namespace) -> int:
 def register(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
     help_text = "Export logs + latest snapshot into a JSON bundle (delegates to scripts/)"
     epilog = (
-        "Arguments after an optional '--' are forwarded verbatim to "
+        "Arguments after an optional '--' are forwarded verbatim to\n"
         "scripts/export_logs_for_frontend.py"
     )
     p = subparsers.add_parser(
