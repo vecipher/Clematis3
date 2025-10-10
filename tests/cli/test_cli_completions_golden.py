@@ -6,7 +6,7 @@ import platform
 
 try:
     import shtab  # type: ignore
-except Exception:  # pragma: no cover
+except Exception:  # pragma: no cover yeah
     shtab = None
 
 
