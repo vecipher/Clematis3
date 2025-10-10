@@ -3,7 +3,17 @@ from __future__ import annotations
 from typing import Optional
 
 # Reuse the single implementation that lives in scripts/console.py
-from scripts.console import main as _console_main
+try:  # prefer packaged location
+    from clematis.scripts.console import main as _console_main
+except Exception:  # dev fallback when running from repo root
+    try:
+        from scripts.console import main as _console_main
+    except Exception as e:  # helpful error if neither path is available
+        raise ModuleNotFoundError(
+            "Unable to import console implementation. Expected 'clematis.scripts.console' "
+            "when installed, or 'scripts.console' in a source checkout. If you're in 'dist/', "
+            "run from the repo root or install the package."
+        ) from e
 
 
 def register(subparsers) -> None:

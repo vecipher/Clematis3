@@ -5,11 +5,14 @@ include LICENSE
 include NOTICE
 include clematis/VERSION
 
+recursive-include clematis/scripts *.py
+
 # Package sources and data (only real file types present)
 recursive-include clematis *.py *.json *.jsonl
 
-# Packaged examples for post-install defaults
-recursive-include clematis/examples *
+# Examples: ship only docs and deterministic demo bundle (PR135)
+recursive-include clematis/examples *.json *.md
+include clematis/examples/run_bundles/run_demo_bundle.json
 # Dotfiles are not guaranteed by generic globs; include explicitly
 include clematis/examples/logs/.placeholder
 

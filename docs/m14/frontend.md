@@ -80,7 +80,26 @@ file://…/frontend/dist/index.html
 
 Then **Load** one or more `run_bundle.json` files via the **Runs** tab file picker (`#fileInput`).
 
+
 **Where do bundles come from?** From the console (next section).
+
+```markdown
+### Quick path: use the packaged demo bundle
+
+If you have **clematis** installed, the viewer and a tiny demo bundle are packaged with it. Print their paths and open them directly:
+
+```bash
+python - <<'PY'
+from importlib.resources import files
+print("viewer:", files("clematis").joinpath("frontend/dist/index.html"))
+print("bundle:", files("clematis").joinpath("examples/run_bundles/run_demo_bundle.json"))
+PY
+```
+
+Open the printed **viewer** path in your browser and use **Load** to select the printed **bundle**. The demo is deterministic and loads fully offline.
+
+See also: `clematis/examples/README_frontend.md` for details and a deterministic regeneration recipe.
+```
 
 ---
 
@@ -158,5 +177,6 @@ python -m clematis console -- compare --a /tmp/run.json --b /tmp/run.json
 - Viewer sources: `frontend/index.html`, `frontend/src`, `frontend/tsdist/assets`, `frontend/styles/*`.
 - Build helper: `scripts/build_frontend.py`.
 - Repro: `scripts/repro_check_local.sh --frontend`.
-- Tests: `tests/frontend/test_viewer_smoke.py`, `tests/frontend/test_offline_browser.py`, `tests/frontend/test_console_identity.py`.
+- Examples: `clematis/examples/README_frontend.md` (demo bundle + how to regenerate).
+- Tests: `tests/frontend/test_viewer_smoke.py`, `tests/frontend/test_offline_browser.py`, `tests/frontend/test_console_identity.py`, `tests/frontend/test_example_bundle.py`.
 - Related PRs: PR130 (TS viewer), PR131 (console), PR132 (offline & reproducibility).

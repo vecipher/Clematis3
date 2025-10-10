@@ -273,6 +273,7 @@ ALLOWED_T3 = {
     "tokens",
     "temp",
     "allow_reflection",
+    "apply_ops",
     "dialogue",
     "policy",
     "llm",
@@ -281,6 +282,8 @@ ALLOWED_T3 = {
 ALLOWED_T3_LLM = {"provider", "model", "endpoint", "max_tokens", "temp", "timeout_ms", "fixtures"}
 ALLOWED_T3_LLM_FIXTURES = {"enabled", "path"}
 ALLOWED_T3_REFLECTION = {"backend", "summary_tokens", "embed", "log", "topk_snippets"}
+ALLOWED_T3_DIALOGUE = {"template", "include_top_k_snippets"}
+ALLOWED_T3_POLICY = {"tau_high", "tau_low", "epsilon_edit"}
 ALLOWED_T4 = {
     "enabled",
     "delta_norm_cap_l2",
@@ -461,6 +464,8 @@ def _validate_config_normalize_impl(cfg: Dict[str, Any]) -> Dict[str, Any]:
     raw_t3_llm = _ensure_dict(raw_t3.get("llm"))
     raw_t3_llm_fixtures = _ensure_dict(raw_t3_llm.get("fixtures"))
     raw_t3_reflection = _ensure_dict(raw_t3.get("reflection"))
+    raw_t3_dialogue = _ensure_dict(raw_t3.get("dialogue"))
+    raw_t3_policy = _ensure_dict(raw_t3.get("policy"))
     raw_t4 = _ensure_dict(cfg_in.get("t4"))
     raw_t1_cache = _ensure_dict(raw_t1.get("cache"))
     raw_t2_cache = _ensure_dict(raw_t2.get("cache"))
@@ -542,6 +547,18 @@ def _validate_config_normalize_impl(cfg: Dict[str, Any]) -> Dict[str, Any]:
             sug = _suggest_key(k, ALLOWED_T3_REFLECTION)
             hint = f" (did you mean '{sug}')" if sug else ""
             _err(errors, f"t3.reflection.{k}", f"unknown key{hint}")
+
+    for k in raw_t3_dialogue.keys():
+        if k not in ALLOWED_T3_DIALOGUE:
+            sug = _suggest_key(k, ALLOWED_T3_DIALOGUE)
+            hint = f" (did you mean '{sug}')" if sug else ""
+            _err(errors, f"t3.dialogue.{k}", f"unknown key{hint}")
+
+    for k in raw_t3_policy.keys():
+        if k not in ALLOWED_T3_POLICY:
+            sug = _suggest_key(k, ALLOWED_T3_POLICY)
+            hint = f" (did you mean '{sug}')" if sug else ""
+            _err(errors, f"t3.policy.{k}", f"unknown key{hint}")
 
     for k in raw_t4.keys():
         if k not in ALLOWED_T4:
@@ -919,6 +936,57 @@ def _validate_config_normalize_impl(cfg: Dict[str, Any]) -> Dict[str, Any]:
         t3_backend = "rulebased"
     t3["backend"] = t3_backend
     t3["allow_reflection"] = _coerce_bool(t3.get("allow_reflection", False))
+
+    # optional gate: whether to apply ops from the T3 plan (defaults False for M14)
+    t3["apply_ops"] = _coerce_bool(t3.get("apply_ops", False))
+
+    # top-level dialogue sampling controls (separate from llm.* which configures the adapter)
+    t3["tokens"] = _coerce_int(t3.get("tokens", 256))
+    if t3["tokens"] < 1:
+        _err(errors, "t3.tokens", "must be >= 1")
+    t3["temp"] = _coerce_float(t3.get("temp", 0.7))
+    if not (0.0 <= t3["temp"] <= 1.0):
+        _err(errors, "t3.temp", "must be in [0,1]")
+
+    # dialogue sub-block (template and snippet controls)
+    dlg = _ensure_subdict(t3, "dialogue")
+    if "template" in raw_t3_dialogue:
+        tpl = raw_t3_dialogue.get("template")
+        if not isinstance(tpl, str) or not tpl:
+            _err(errors, "t3.dialogue.template", "must be a non-empty string")
+        else:
+            dlg["template"] = tpl
+    if "include_top_k_snippets" in raw_t3_dialogue:
+        itks = _coerce_int(raw_t3_dialogue.get("include_top_k_snippets"))
+        if itks < 0:
+            _err(errors, "t3.dialogue.include_top_k_snippets", "must be >= 0")
+        else:
+            dlg["include_top_k_snippets"] = itks
+    t3["dialogue"] = dlg
+
+    # policy sub-block (thresholds)
+    pol = _ensure_subdict(t3, "policy")
+    if "tau_high" in raw_t3_policy:
+        pol["tau_high"] = _coerce_float(raw_t3_policy.get("tau_high"))
+        if not (0.0 <= pol["tau_high"] <= 1.0):
+            _err(errors, "t3.policy.tau_high", "must be in [0,1]")
+    if "tau_low" in raw_t3_policy:
+        pol["tau_low"] = _coerce_float(raw_t3_policy.get("tau_low"))
+        if not (0.0 <= pol["tau_low"] <= 1.0):
+            _err(errors, "t3.policy.tau_low", "must be in [0,1]")
+    if "epsilon_edit" in raw_t3_policy:
+        pol["epsilon_edit"] = _coerce_float(raw_t3_policy.get("epsilon_edit"))
+        if not (0.0 <= pol["epsilon_edit"] <= 1.0):
+            _err(errors, "t3.policy.epsilon_edit", "must be in [0,1]")
+    # cross-field sanity: tau_high >= tau_low when both present
+    try:
+        th = pol.get("tau_high")
+        tl = pol.get("tau_low")
+        if th is not None and tl is not None and th < tl:
+            _err(errors, "t3.policy", "tau_high should be >= tau_low")
+    except Exception:
+        pass
+    t3["policy"] = pol
 
     # t3.reflection normalization (PR77)
     rfl = _ensure_subdict(t3, "reflection")
