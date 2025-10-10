@@ -205,6 +205,44 @@ class LanceIndex:
         # Bump version counter
         self._bump_version()
 
+    def clear(self) -> None:
+        """Drop all stored episodes and reset the version counter."""
+        # Drop the episodes table if it exists (ignore failures).
+        try:
+            drop = getattr(self._db, "drop_table", None)
+            if callable(drop) and self._episodes is not None:
+                drop(self._table_name)
+        except Exception:
+            # As a fallback, delete every row individually.
+            try:
+                rows = [row.get("id") for row in self._read_all_rows()]
+                for eid in rows:
+                    if eid is None:
+                        continue
+                    try:
+                        self._episodes.delete(f"id == '{eid}'")  # type: ignore[union-attr]
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+        finally:
+            self._episodes = None
+
+        # Reset meta table back to the initial counter state.
+        try:
+            drop = getattr(self._db, "drop_table", None)
+            if callable(drop):
+                drop(self._meta_name)
+        except Exception:
+            try:
+                if self._meta is not None:
+                    self._meta.delete("key == 'counter'")  # type: ignore[union-attr]
+            except Exception:
+                pass
+
+        self._meta = self._open_or_create_meta()
+        self._version_cache = 0
+
     def search_tiered(
         self,
         owner: Optional[str],

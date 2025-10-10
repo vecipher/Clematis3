@@ -592,9 +592,17 @@ def _seed_memories(
     state["_chat_seeded_memories"] = True
 
 
-def _wipe_memories(state: Dict[str, Any]) -> None:
-    state["mem_index"] = InMemoryIndex()
-    state["mem_backend"] = "inmemory"
+def _wipe_memories(state: Dict[str, Any], cfg_t2: Dict[str, Any]) -> None:
+    idx = state.get("mem_index")
+    if idx is not None:
+        clear = getattr(idx, "clear", None)
+        if callable(clear):
+            try:
+                clear()
+            except Exception as exc:  # pragma: no cover - defensive logging path
+                print(f"[chat] WARNING: failed to clear memory index: {exc}", file=sys.stderr)
+    state.pop("mem_index", None)
+    state.pop("mem_backend", None)
     state.pop("mem_backend_fallback_reason", None)
     state["_chat_seeded_memories"] = False
     state["_chat_memory_ids"] = []
@@ -613,6 +621,13 @@ def _wipe_memories(state: Dict[str, Any]) -> None:
     state["active_graphs"] = [DEFAULT_GRAPH_ID]
     state["_chat_seeded_graph"] = False
     _ensure_store(state)
+    # Recreate the configured index so subsequent seeds write to the persistent store.
+    try:
+        _ensure_index(state, cfg_t2)
+    except Exception as exc:  # pragma: no cover - defensive logging
+        print(f"[chat] WARNING: failed to reinitialise memory index after wipe: {exc}", file=sys.stderr)
+        state["mem_index"] = InMemoryIndex()
+        state["mem_backend"] = "inmemory"
 
 
 def _apply_llm_mode(cfg: Dict[str, Any], args: argparse.Namespace) -> None:
@@ -785,7 +800,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             print("[reset] state reloaded.")
             continue
         if lowered in {"[wipe]", "/wipe"}:
-            _wipe_memories(state)
+            _wipe_memories(state, cfg_t2)
             print("[wipe] memories cleared.")
             if not args.no_seed:
                 print("  (use [seed] to restore demo memories.)")

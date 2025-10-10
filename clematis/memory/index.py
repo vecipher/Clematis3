@@ -12,6 +12,11 @@ class InMemoryIndex:
         self._eps: List[Dict[str, Any]] = []
         self._ver: int = 0
 
+    def clear(self) -> None:
+        """Remove all episodes and reset version counter."""
+        self._eps.clear()
+        self._ver = 0
+
     def add(self, ep: Dict[str, Any]) -> None:
         self._eps.append(ep)
         self._ver += 1
