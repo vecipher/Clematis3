@@ -1,5 +1,6 @@
 # Deterministic frontend scaffolding (M14 / PR127)
 .PHONY: frontend-build frontend-clean frontend-checksum frontend-offline-check frontend-stage frontend-repro demo-bundle
+.ONESHELL:
 
 FRONTEND_DIST := frontend/dist
 PKG_FRONTEND_DIST := clematis/frontend/dist
@@ -20,8 +21,9 @@ frontend-offline-check:
 
 # Mirror built assets into the Python package path for packaging/tests
 frontend-stage:
+	@rm -rf $(PKG_FRONTEND_DIST)
 	@mkdir -p $(PKG_FRONTEND_DIST)
-	@rsync -a --delete $(FRONTEND_DIST)/ $(PKG_FRONTEND_DIST)/
+	@cp -R $(FRONTEND_DIST)/* $(PKG_FRONTEND_DIST)/
 
 # Wrap local reproducibility check for the viewer
 frontend-repro:
