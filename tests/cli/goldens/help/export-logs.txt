@@ -5,5 +5,4 @@ Export logs + latest snapshot into a JSON bundle (delegates to scripts/)
 options:
   -h, --help show this help message and exit
 
-Arguments after an optional '--' are forwarded verbatim to
-scripts/export_logs_for_frontend.py
+Arguments after an optional '--' are forwarded verbatim to scripts/export_logs_for_frontend.py
