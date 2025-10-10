@@ -25,6 +25,15 @@ try:
 except Exception:  # PyYAML optional
     yaml = None  # type: ignore
 
+try:
+    from clematis.errors import ConfigError
+except ModuleNotFoundError:
+    HERE = os.path.abspath(os.path.dirname(__file__))
+    ROOT = os.path.abspath(os.path.join(HERE, ".."))
+    if ROOT not in sys.path:
+        sys.path.insert(0, ROOT)
+    from clematis.errors import ConfigError
+
 # Ensure the project root (parent of scripts/) is importable when run directly
 try:
     from configs.validate import validate_config_verbose, validate_config  # type: ignore
@@ -127,8 +136,8 @@ def main(argv: list[str]) -> int:
         else:
             normalized = validate_config(cfg)
             warnings = []
-    except ValueError as ve:
-        print("CONFIG INVALID\n" + str(ve))
+    except ConfigError as err:
+        print("CONFIG INVALID\n" + str(err))
         return 1
 
     # --strict: treat warnings as errors

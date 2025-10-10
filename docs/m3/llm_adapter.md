@@ -145,7 +145,7 @@ pytest -q
   Ensure each line is valid JSON; no trailing commas; UTF‑8 encoding.
 - **`LLMAdapterError: No fixture for prompt hash`**
   The prompt string used at runtime must match the one hashed in the JSONL (after newline normalization).
-- **Config validation failures (ValueError)**
+- **Config validation failures (ConfigError)**
   - `t3.llm.provider` must be one of `{fixture, ollama}`
   - `t3.llm.temp` in `[0, 1]`
   - `t3.llm.max_tokens ≥ 1`

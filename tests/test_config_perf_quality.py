@@ -6,6 +6,8 @@ from pathlib import Path
 
 import pytest
 
+from clematis.errors import ConfigError
+
 # Import the validator(s) under test
 from configs.validate import validate_config, validate_config_verbose
 
@@ -87,7 +89,7 @@ def test_quality_prep_inert_variations():
 
 def test_perf_validation_bounds_and_types():
     """
-    perf.* accepts only bounded values; invalid settings raise ValueError with precise paths.
+    perf.* accepts only bounded values; invalid settings raise ConfigError with precise paths.
     """
     bads = [
         ({"perf": {"t1": {"queue_cap": 0}}}, "perf.t1.queue_cap"),
@@ -101,7 +103,7 @@ def test_perf_validation_bounds_and_types():
         ({"perf": {"snapshots": {"every_n_turns": 0}}}, "perf.snapshots.every_n_turns"),
     ]
     for cfg, needle in bads:
-        with pytest.raises(ValueError) as ei:
+        with pytest.raises(ConfigError) as ei:
             validate_config(cfg)
         assert needle in str(ei.value)
 
@@ -124,7 +126,7 @@ def test_warnings_fp16_without_norms_and_kfinal_gt_k():
 
 def test_quality_value_bounds_and_types_errors():
     """
-    Certain invalid values in quality subkeys should raise validation errors even if enabled:false.
+    Certain invalid values in quality subkeys should raise ConfigError even if enabled:false.
     (Bounds/type checks are independent of wiring.)
     """
     bads = [
@@ -145,7 +147,7 @@ def test_quality_value_bounds_and_types_errors():
         ({"t2": {"quality": {"mmr": {"k_final": 0}}}}, "t2.quality.mmr.k_final"),
     ]
     for cfg, needle in bads:
-        with pytest.raises(ValueError) as ei:
+        with pytest.raises(ConfigError) as ei:
             validate_config(cfg)
         assert needle in str(ei.value)
 
