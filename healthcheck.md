@@ -17,6 +17,7 @@
 - Identity marker suite verified (`pytest -q -m identity`), and full test suite passes locally (`pytest -q`).
 - Built wheels into `dist_local/` and captured deterministic hashes via `shasum -a 256 dist_local/* | sort` as part of the packaging parity check.
 - Removed `ValueError` inheritance from typed errors, updated validators/scripts/tests to catch `ConfigError`/`SnapshotError`, and refreshed docs to match the cleaned taxonomy.
+- Chat CLI `[wipe]` now purges the configured LanceDB store (when enabled) and reinitialises the memory index so subsequent `[seed]` runs repopulate the persistent backend with fresh embeddings.
 
 ## Recommended Next Actions
 - Re-run the identity and packaging matrices once the version/doc alignment is settled, ensuring the refreshed defaults keep byte-identical outputs.
