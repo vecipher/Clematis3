@@ -43,7 +43,6 @@ t2:
     trace_dir: "logs/quality"
     redact: true
 t3:
-  enabled: true
   apply_ops: false
   max_rag_loops: 1
   tokens: 256

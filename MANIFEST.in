@@ -5,6 +5,8 @@ include LICENSE
 include NOTICE
 include clematis/VERSION
 
+recursive-include clematis/scripts *.py
+
 # Package sources and data (only real file types present)
 recursive-include clematis *.py *.json *.jsonl
 

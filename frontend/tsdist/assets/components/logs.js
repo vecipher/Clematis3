@@ -28,16 +28,16 @@ export function renderLogs(container, bundle, showPerf, selectedPerfKey) {
         runSel.value = String(idx);
     }
     // Stage selection via chips
-    const stages = ["t1", "t2", "t4", "apply", "turn"];
+    const stages = ["t1", "t2", "t3", "t3_reflection", "t4", "apply", "turn"];
     const chips = Array.from(document.querySelectorAll(".log-tabs .stagetab"));
     const activeChip = chips.find(b => b.classList.contains("active"));
     let selectedStage = activeChip?.dataset.stage || "t1";
     // Search box
     const searchBox = document.querySelector("#logSearch");
-    const q = searchBox?.value?.trim() ?? "";
     // Counts header
     const countsPane = document.querySelector("#logCounts");
     function filterEntries(arr) {
+        const q = searchBox?.value?.trim() ?? "";
         if (!q)
             return arr;
         const needle = q.toLowerCase();

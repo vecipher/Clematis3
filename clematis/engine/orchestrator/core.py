@@ -70,6 +70,36 @@ def _truthy(value: Any) -> bool:
     return bool(value)
 
 
+# --- T3 enablement helper (default ON unless explicitly denied) ---
+def _t3_is_enabled(cfg: Dict[str, Any]) -> bool:
+    """Decide if T3 is enabled.
+    Precedence: env deny > env allow > config (enabled/allow) > default-ON for v3 identity.
+    """
+    # Hard overrides from environment
+    if _truthy(_os.environ.get("CLEMATIS_T3_DENY", "0")):
+        return False
+    if _truthy(_os.environ.get("CLEMATIS_T3_ALLOW", "0")):
+        return True
+    # Config path
+    try:
+        t3 = (cfg.get("t3") if isinstance(cfg, dict) else {}) or {}
+    except Exception:
+        t3 = {}
+    if isinstance(t3, dict):
+        if "enabled" in t3:
+            try:
+                return bool(t3.get("enabled"))
+            except Exception:
+                return True
+        if "allow" in t3:
+            try:
+                return bool(t3.get("allow"))
+            except Exception:
+                return True
+    # Default ON to preserve v3 identity semantics
+    return True
+
+
 from typing import TypedDict
 
 _sched_next_turn = None
@@ -723,11 +753,8 @@ class Orchestrator:
         # --- T3 (deliberation → optional one-shot RAG → dialogue) --- (GATED) ---
         # Ensure plan/utter exist even when T3 is disabled (T4 expects them).
         cfg = _get_cfg(ctx)
-        t3cfg = cfg.get("t3", {}) if isinstance(cfg, dict) else {}
-        t3_enabled = (
-            bool(t3cfg.get("enabled", t3cfg.get("allow", False)))
-            or _truthy(_os.environ.get("CLEMATIS_T3_ALLOW", "0"))
-        )
+        t3_enabled = _t3_is_enabled(cfg)
+        t3cfg = (cfg.get("t3") or {}) if isinstance(cfg, dict) else {}
 
         # Defaults / placeholders when T3 is disabled
         plan = SimpleNamespace(ops=[], reflection=False)
@@ -1507,7 +1534,10 @@ class Orchestrator:
             },
         )
 
-        return TurnResult(line=utter, events=[])
+        _final_line = utter if isinstance(utter, str) else ""
+        if not _final_line:
+            _final_line = (str(input_text or "")).strip() or "…"
+        return TurnResult(line=_final_line, events=[])
 
 
 def run_smoke_turn(cfg: Dict[str, Any] | None = None, log_dir: str | None = None, input_text: str = "") -> TurnResult:
