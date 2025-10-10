@@ -26,6 +26,7 @@ jobs:
     env:
       CI: "true"
       TZ: "UTC"
+      LANG: "C.UTF-8"
       PYTHONUTF8: "1"
       PYTHONHASHSEED: "0"
       LC_ALL: "C.UTF-8"
@@ -33,6 +34,7 @@ jobs:
       CLEMATIS_NETWORK_BAN: "1"
       PYTHONDONTWRITEBYTECODE: "1"
       COLUMNS: "80"
+      LINES: "25"
 
     steps:
       - name: Checkout
@@ -67,6 +69,8 @@ jobs:
           else
             python -m pip install pytest hypothesis
           fi
+          # Ensure deterministic completions output
+          python -m pip install "shtab==1.7.1"
 
       - name: Pre-check (version/help)
         shell: bash
