@@ -43,12 +43,11 @@ t2:
     trace_dir: "logs/quality"
     redact: true
 t3:
-  apply_ops: false
   max_rag_loops: 1
   tokens: 256
   temp: 0.7
   max_ops_per_turn: 3
-  allow_reflection: true
+  allow_reflection: false
   backend: rulebased
   reflection:
     backend: rulebased        # deterministic summariser; "llm" requires fixtures (see PR84)

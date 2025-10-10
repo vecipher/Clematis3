@@ -7,14 +7,12 @@
     <title>Clematis v3 – Viewer (M14)</title>
     <link rel="stylesheet" href="./styles/main.css"/>
     <link rel="stylesheet" href="./styles/exp.css"/>
-    <link rel="icon" href="data:,">
   </head>
   <body>
     <header class="topbar">
       <h1>Clematis v3 — Viewer (M14)</h1>
       <div class="status" id="status">offline • static</div>
     </header>
-    <noscript><div class="noscript">This viewer requires JavaScript. Please enable it and reload.</div></noscript>
 
     <main class="container">
       <nav class="tabs" id="tabs">
@@ -29,8 +27,8 @@
       <section class="panel tabpanel active" data-panel="runs">
         <h2>Runs</h2>
         <p>Load one or more <code>run_bundle.json</code> files:</p>
-        <div class="loader" data-dropzone="true">
-          <input id="fileInput" type="file" accept=".json" multiple aria-label="Load run bundle JSON files" />
+        <div class="loader">
+          <input id="fileInput" type="file" accept=".json" multiple />
           <button id="btnClear" type="button">Clear</button>
         </div>
         <div class="runs-list" id="runsList"></div>
@@ -49,7 +47,6 @@
       <!-- Logs -->
       <section class="panel tabpanel" data-panel="logs">
         <h2>Logs</h2>
-        <p class="hint">Select a run and a stage (T1, T2, T3, T3 Reflection, T4, Apply, Turn). Use the search box to filter entries. Perf logs are optional and off by default.</p>
         <div class="controls">
           <select id="logRunSelect"></select>
           <label>
@@ -60,17 +57,15 @@
             <input id="exp-toggle" type="checkbox"/>
             Experimental visuals (graph &amp; memory)
           </label>
-          <input id="logSearch" type="search" placeholder="Search (key:value or text)" autocomplete="off" spellcheck="false"/>
+          <input id="logSearch" type="search" placeholder="Search (key:value or text)"/>
         </div>
 
         <div class="log-tabs">
-          <button class="stagetab active" data-stage="t1" data-testid="stage-t1" aria-pressed="true" title="T1 — graph prep / indexing">T1</button>
-          <button class="stagetab" data-stage="t2" data-testid="stage-t2" aria-pressed="false" title="T2 — retrieval">T2</button>
-          <button class="stagetab" data-stage="t3" data-testid="stage-t3" aria-pressed="false" title="T3 — planner/dialogue/ops">T3</button>
-          <button class="stagetab" data-stage="t3_reflection" data-testid="stage-t3-reflection" aria-pressed="false" title="T3 — reflection">T3 Reflection</button>
-          <button class="stagetab" data-stage="t4" data-testid="stage-t4" aria-pressed="false" title="T4 — gating / filters">T4</button>
-          <button class="stagetab" data-stage="apply" data-testid="stage-apply" aria-pressed="false" title="Apply — snapshot write">Apply</button>
-          <button class="stagetab" data-stage="turn" data-testid="stage-turn" aria-pressed="false" title="Turn — timings summary">Turn</button>
+          <button class="stagetab active" data-stage="t1">T1</button>
+          <button class="stagetab" data-stage="t2">T2</button>
+          <button class="stagetab" data-stage="t4">T4</button>
+          <button class="stagetab" data-stage="apply">Apply</button>
+          <button class="stagetab" data-stage="turn">Turn</button>
         </div>
 
         <div class="log-counts" id="logCounts"></div>

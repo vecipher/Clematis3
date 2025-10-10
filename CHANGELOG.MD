@@ -11,22 +11,7 @@ All notable changes to this project will be documented in this file.
 
 
 
-
 ## [Unreleased]
-
-## [0.10.3] - 2025-10-09
-
-### M14 — Examples & fixtures (viewer/console)
-- **Examples:** Added a tiny, deterministic demo bundle at `clematis/examples/run_bundles/run_demo_bundle.json` and a HOWTO at `clematis/examples/README_frontend.md`.
-- **Makefile:** `demo-bundle` target regenerates the demo deterministically (fixed env + clock).
-- **Viewer smoke:** `tests/frontend/test_example_bundle.py` opens the viewer over `file://` and loads the committed demo bundle via the file input; asserts snapshot panel renders; **no network**.
-- **Docs:** `docs/m14/frontend.md` now includes a *Quick path* to open the packaged viewer and demo bundle using `importlib.resources.files(...)`.
-- **CI:** Reproducible build workflow asserts the demo bundle ships in both artifacts (wheel & sdist).
-
-### Notes
-- No runtime behavior changes; identity path unchanged. All additions are docs/examples/tests only.
-
-
 
 ## [0.10.1] - 2025-10-09
 

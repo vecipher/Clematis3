@@ -41,11 +41,7 @@ except Exception:
     from clematis.io.paths import logs_dir as _default_logs_dir  # type: ignore
 
 
-STAGE_FILES = [
-    "t1.jsonl", "t2.jsonl",
-    "t3.jsonl", "t3_plan.jsonl", "t3_dialogue.jsonl", "t3_reflection.jsonl",
-    "t4.jsonl", "apply.jsonl", "turn.jsonl",
-]
+STAGE_FILES = ("t1.jsonl", "t2.jsonl", "t4.jsonl", "apply.jsonl", "turn.jsonl")
 
 
 def _read_jsonl(path: str, max_entries: int | None = None):

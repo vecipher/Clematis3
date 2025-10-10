@@ -70,36 +70,6 @@ def _truthy(value: Any) -> bool:
     return bool(value)
 
 
-# --- T3 enablement helper (default ON unless explicitly denied) ---
-def _t3_is_enabled(cfg: Dict[str, Any]) -> bool:
-    """Decide if T3 is enabled.
-    Precedence: env deny > env allow > config (enabled/allow) > default-ON for v3 identity.
-    """
-    # Hard overrides from environment
-    if _truthy(_os.environ.get("CLEMATIS_T3_DENY", "0")):
-        return False
-    if _truthy(_os.environ.get("CLEMATIS_T3_ALLOW", "0")):
-        return True
-    # Config path
-    try:
-        t3 = (cfg.get("t3") if isinstance(cfg, dict) else {}) or {}
-    except Exception:
-        t3 = {}
-    if isinstance(t3, dict):
-        if "enabled" in t3:
-            try:
-                return bool(t3.get("enabled"))
-            except Exception:
-                return True
-        if "allow" in t3:
-            try:
-                return bool(t3.get("allow"))
-            except Exception:
-                return True
-    # Default ON to preserve v3 identity semantics
-    return True
-
-
 from typing import TypedDict
 
 _sched_next_turn = None
@@ -750,21 +720,121 @@ class Orchestrator:
                 },
             )
 
-        # --- T3 (deliberation → optional one-shot RAG → dialogue) --- (GATED) ---
-        # Ensure plan/utter exist even when T3 is disabled (T4 expects them).
-        cfg = _get_cfg(ctx)
-        t3_enabled = _t3_is_enabled(cfg)
-        t3cfg = (cfg.get("t3") or {}) if isinstance(cfg, dict) else {}
+        # --- T3 (deliberation → optional one-shot RAG → dialogue) ---
+        # All pure stage functions; only logging here does I/O.
+        t0 = time.perf_counter()
+        bundle = make_plan_bundle(ctx, state, t1, t2)
+        # Allow tests to monkeypatch via clematis.engine.orchestrator.t3_deliberate
+        orch_module = _sys.modules.get("clematis.engine.orchestrator")
+        delib_fn = None
+        if orch_module is not None:
+            delib_fn = getattr(orch_module, "t3_deliberate", None)
+        if delib_fn is None:
+            delib_fn = globals().get("t3_deliberate")
+        if callable(delib_fn):
+            plan = delib_fn(ctx, state, bundle)
+        else:
+            plan = deliberate(bundle)
+        plan_ms = round((time.perf_counter() - t0) * 1000.0, 3)
+        # --- M5 boundary check after T3 (plan) ---
+        if slice_ctx is not None:
+            consumed = {
+                "ms": int(round((time.perf_counter() - total_t0) * 1000.0)),
+            }
+            try:
+                ops_count = sum(1 for _ in (getattr(plan, "ops", []) or []))
+                consumed["t3_ops"] = int(ops_count)
+            except Exception:
+                pass
+            reason = _should_yield(slice_ctx, consumed)
+            if reason:
+                event = {
+                    "turn": turn_id,
+                    "slice": slice_ctx["slice_idx"],
+                    "agent": agent_id,
+                    "policy": (_get_cfg(ctx).get("scheduler") or {}).get("policy", "round_robin"),
+                    **({"pick_reason": _get_pick_reason(ctx)} if _get_pick_reason(ctx) else {}),
+                    "reason": reason,
+                    "enforced": True,
+                    "stage_end": "T3",
+                    "quantum_ms": slice_ctx["budgets"].get("quantum_ms"),
+                    "wall_ms": slice_ctx["budgets"].get("wall_ms"),
+                    "budgets": {k: v for k, v in slice_ctx["budgets"].items() if k != "quantum_ms"},
+                    "consumed": consumed,
+                    "queued": [],
+                    "ms": 0,
+                }
+                _write_or_capture_scheduler_event(ctx, event)
+                total_ms_now = round((time.perf_counter() - total_t0) * 1000.0, 3)
+                _append_jsonl(
+                    "turn.jsonl",
+                    {
+                        "turn": turn_id,
+                        "agent": agent_id,
+                        "durations_ms": {
+                            "t1": t1_ms,
+                            "t2": t2_ms,
+                            "t4": 0.0,
+                            "apply": 0.0,
+                            "total": total_ms_now,
+                        },
+                        "t1": {
+                            "pops": t1.metrics.get("pops"),
+                            "iters": t1.metrics.get("iters"),
+                            "graphs_touched": t1.metrics.get("graphs_touched"),
+                        },
+                        "t2": {
+                            "k_returned": t2.metrics.get("k_returned"),
+                            "k_used": t2.metrics.get("k_used"),
+                            "cache_hit": bool(cache_hit),
+                        },
+                        "t4": {},
+                        "slice_idx": slice_ctx["slice_idx"],
+                        "yielded": True,
+                        "yield_reason": reason,
+                        **({"now": now} if now else {}),
+                    },
+                )
+                return TurnResult(line="", events=[])
 
-        # Defaults / placeholders when T3 is disabled
-        plan = SimpleNamespace(ops=[], reflection=False)
-        utter = ""
-        plan_ms = 0.0
-        rag_ms = 0.0
-        requested_retrieve = False
-        backend_used = "disabled"
-        backend_fallback = None
-        fallback_reason = None
+        # RAG: allow at most one refinement if both requested and enabled by config
+        cfg = _get_cfg(ctx)
+        t3cfg = cfg.get("t3", {}) if isinstance(cfg, dict) else {}
+        max_rag_loops = int(t3cfg.get("max_rag_loops", 1)) if isinstance(t3cfg, dict) else 1
+
+        def _retrieve_fn(payload: Dict[str, Any]) -> Dict[str, Any]:
+            # Deterministic wrapper around T2: re-run with the provided query; map to the shape rag_once expects.
+            q = str(payload.get("query") or input_text)
+            t2_alt = _get_stage_callable("t2_semantic", t2_semantic)(ctx, state, q, t1)
+            # Normalize retrieved to list[dict]
+            hits = []
+            for r in getattr(t2_alt, "retrieved", []) or []:
+                if isinstance(r, dict):
+                    hits.append(
+                        {
+                            "id": str(r.get("id")),
+                            "score": float(r.get("_score", r.get("score", 0.0)) or 0.0),
+                            "owner": str(r.get("owner", "any")),
+                            "quarter": str(r.get("quarter", "")),
+                        }
+                    )
+                else:
+                    rid = str(getattr(r, "id", ""))
+                    if not rid:
+                        continue
+                    hits.append(
+                        {
+                            "id": rid,
+                            "score": float(getattr(r, "score", 0.0) or 0.0),
+                            "owner": str(getattr(r, "owner", "any")),
+                            "quarter": str(getattr(r, "quarter", "")),
+                        }
+                    )
+            return {"retrieved": hits, "metrics": getattr(t2_alt, "metrics", {})}
+
+        requested_retrieve = any(
+            getattr(op, "kind", None) == "RequestRetrieve" for op in getattr(plan, "ops", []) or []
+        )
         rag_metrics = {
             "rag_used": False,
             "rag_blocked": False,
@@ -774,309 +844,170 @@ class Orchestrator:
             "owner": None,
             "tier_pref": None,
         }
+        if requested_retrieve and max_rag_loops >= 1:
+            t0_rag = time.perf_counter()
+            plan, rag_metrics = rag_once(bundle, plan, _retrieve_fn, already_used=False)
+            rag_ms = round((time.perf_counter() - t0_rag) * 1000.0, 3)
+        else:
+            rag_ms = 0.0
 
-        if t3_enabled and not _dry_run:
-            # All pure stage functions; only _append_jsonl performs I/O.
-            t0 = time.perf_counter()
-            bundle = make_plan_bundle(ctx, state, t1, t2)
+        # Dialogue synthesis (rule-based vs optional LLM backend)
+        t0 = time.perf_counter()
+        dialog_bundle = make_dialog_bundle(ctx, state, t1, t2, plan)
 
-            # Allow tests to monkeypatch via clematis.engine.orchestrator.t3_deliberate
-            orch_module = _sys.modules.get("clematis.engine.orchestrator")
-            delib_fn = None
-            if orch_module is not None:
-                delib_fn = getattr(orch_module, "t3_deliberate", None)
-            if delib_fn is None:
-                delib_fn = globals().get("t3_deliberate")
+        prompt_text = build_llm_prompt(dialog_bundle, plan)
 
-            if callable(delib_fn):
-                plan = delib_fn(ctx, state, bundle)
-            else:
-                plan = deliberate(bundle)
-            plan_ms = round((time.perf_counter() - t0) * 1000.0, 3)
-
-            # --- M5 boundary check after T3 (plan) ---
-            if slice_ctx is not None:
-                consumed = {
-                    "ms": int(round((time.perf_counter() - total_t0) * 1000.0)),
-                }
+        trace_meta: Dict[str, Any] = {}
+        state_logs = None
+        if isinstance(state, dict):
+            state_logs = state.get("logs")
+            if not isinstance(state_logs, list):
+                state_logs = []
+                state["logs"] = state_logs
+        else:
+            state_logs = getattr(state, "logs", None)
+            if not isinstance(state_logs, list):
                 try:
-                    ops_count = sum(1 for _ in (getattr(plan, "ops", []) or []))
-                    consumed["t3_ops"] = int(ops_count)
-                except Exception:
-                    pass
-                reason = _should_yield(slice_ctx, consumed)
-                if reason:
-                    event = {
-                        "turn": turn_id,
-                        "slice": slice_ctx["slice_idx"],
-                        "agent": agent_id,
-                        "policy": (_get_cfg(ctx).get("scheduler") or {}).get("policy", "round_robin"),
-                        **({"pick_reason": _get_pick_reason(ctx)} if _get_pick_reason(ctx) else {}),
-                        "reason": reason,
-                        "enforced": True,
-                        "stage_end": "T3",
-                        "quantum_ms": slice_ctx["budgets"].get("quantum_ms"),
-                        "wall_ms": slice_ctx["budgets"].get("wall_ms"),
-                        "budgets": {k: v for k, v in slice_ctx["budgets"].items() if k != "quantum_ms"},
-                        "consumed": consumed,
-                        "queued": [],
-                        "ms": 0,
-                    }
-                    _write_or_capture_scheduler_event(ctx, event)
-                    total_ms_now = round((time.perf_counter() - total_t0) * 1000.0, 3)
-                    _append_jsonl(
-                        "turn.jsonl",
-                        {
-                            "turn": turn_id,
-                            "agent": agent_id,
-                            "durations_ms": {
-                                "t1": t1_ms,
-                                "t2": t2_ms,
-                                "t4": 0.0,
-                                "apply": 0.0,
-                                "total": total_ms_now,
-                            },
-                            "t1": {
-                                "pops": t1.metrics.get("pops"),
-                                "iters": t1.metrics.get("iters"),
-                                "graphs_touched": t1.metrics.get("graphs_touched"),
-                            },
-                            "t2": {
-                                "k_returned": t2.metrics.get("k_returned"),
-                                "k_used": t2.metrics.get("k_used"),
-                                "cache_hit": bool(cache_hit),
-                            },
-                            "t4": {},
-                            "slice_idx": slice_ctx["slice_idx"],
-                            "yielded": True,
-                            "yield_reason": reason,
-                            **({"now": now} if now else {}),
-                        },
-                    )
-                    return TurnResult(line=utter, events=[])
-
-            # RAG: allow at most one refinement if both requested and enabled by config
-            max_rag_loops = int(t3cfg.get("max_rag_loops", 1)) if isinstance(t3cfg, dict) else 1
-
-            def _retrieve_fn(payload: Dict[str, Any]) -> Dict[str, Any]:
-                # Deterministic wrapper around T2: re-run with the provided query; map to the shape rag_once expects.
-                q = str(payload.get("query") or input_text)
-                t2_alt = _get_stage_callable("t2_semantic", t2_semantic)(ctx, state, q, t1)
-                # Normalize retrieved to list[dict]
-                hits = []
-                for r in getattr(t2_alt, "retrieved", []) or []:
-                    if isinstance(r, dict):
-                        hits.append(
-                            {
-                                "id": str(r.get("id")),
-                                "score": float(r.get("_score", r.get("score", 0.0)) or 0.0),
-                                "owner": str(r.get("owner", "any")),
-                                "quarter": str(r.get("quarter", "")),
-                            }
-                        )
-                    else:
-                        rid = str(getattr(r, "id", ""))
-                        if not rid:
-                            continue
-                        hits.append(
-                            {
-                                "id": rid,
-                                "score": float(getattr(r, "score", 0.0) or 0.0),
-                                "owner": str(getattr(r, "owner", "any")),
-                                "quarter": str(getattr(r, "quarter", "")),
-                            }
-                        )
-                return {"retrieved": hits, "metrics": getattr(t2_alt, "metrics", {})}
-
-            requested_retrieve = any(
-                getattr(op, "kind", None) == "RequestRetrieve" for op in getattr(plan, "ops", []) or []
-            )
-            if requested_retrieve and max_rag_loops >= 1:
-                t0_rag = time.perf_counter()
-                plan, rag_metrics = rag_once(bundle, plan, _retrieve_fn, already_used=False)
-                rag_ms = round((time.perf_counter() - t0_rag) * 1000.0, 3)
-
-            # Dialogue synthesis (rule-based vs optional LLM backend)
-            t0 = time.perf_counter()
-            dialog_bundle = make_dialog_bundle(ctx, state, t1, t2, plan)
-            prompt_text = build_llm_prompt(dialog_bundle, plan)
-
-            trace_meta: Dict[str, Any] = {}
-            state_logs = None
-            if isinstance(state, dict):
-                state_logs = state.get("logs")
-                if not isinstance(state_logs, list):
                     state_logs = []
-                    state["logs"] = state_logs
-            else:
-                state_logs = getattr(state, "logs", None)
-                if not isinstance(state_logs, list):
-                    try:
-                        state_logs = []
-                        setattr(state, "logs", state_logs)
-                    except Exception:
-                        state_logs = None
-            if isinstance(state_logs, list):
-                trace_meta["state_logs"] = state_logs
-
-            trace_reason = getattr(ctx, "trace_reason", None)
-            if trace_reason is None and isinstance(ctx, dict):
-                trace_reason = ctx.get("trace_reason")
-            if trace_reason is not None:
-                trace_meta["trace_reason"] = trace_reason
-
-            emit_trace(dialog_bundle.get("cfg", {}), prompt_text, dialog_bundle, trace_meta)
-
-            # Backend selection
-            backend_cfg = (
-                str(t3cfg.get("backend", "rulebased")) if isinstance(t3cfg, dict) else "rulebased"
-            )
-            llm_cfg = t3cfg.get("llm", {}) if isinstance(t3cfg, dict) else {}
-            adapter = (
-                state.get("llm_adapter", None)
-                if isinstance(state, dict)
-                else getattr(state, "llm_adapter", None)
-            ) or getattr(ctx, "llm_adapter", None)
-
-            # let tests monkeypatch a module-level t3_dialogue with flexible signatures
-            dlg_fn = None
-            if orch_module is not None:
-                dlg_fn = getattr(orch_module, "t3_dialogue", None)
-            if dlg_fn is None:
-                dlg_fn = globals().get("t3_dialogue")
-
-            if callable(dlg_fn):
-                try:
-                    # preferred sig: (dialog_bundle, plan)
-                    res = dlg_fn(dialog_bundle, plan)
-                except TypeError:
-                    # fallback sig used by some tests: (ctx, state, dialog_bundle)
-                    res = dlg_fn(ctx, state, dialog_bundle)
-                # normalization: support returning just a string or (utter, metrics)
-                if isinstance(res, tuple):
-                    utter = res[0]
-                    speak_metrics = res[1] if len(res) > 1 and isinstance(res[1], dict) else {}
-                else:
-                    utter = res
-                    speak_metrics = {}
-                backend_used = "patched"
-            else:
-                if backend_cfg == "llm" and adapter is not None:
-                    utter, speak_metrics = llm_speak(dialog_bundle, plan, adapter)
-                    backend_used = "llm"
-                else:
-                    utter, speak_metrics = speak(dialog_bundle, plan)
-                    backend_used = "rulebased"
-                    if backend_cfg == "llm" and adapter is None:
-                        backend_fallback, fallback_reason = "rulebased", "no_adapter"
-                    elif backend_cfg not in ("rulebased", "llm"):
-                        backend_fallback, fallback_reason = "rulebased", "invalid_backend"
-
-            speak_ms = round((time.perf_counter() - t0) * 1000.0, 3)
-
-            # Plan logging
-            ops_counts: Dict[str, int] = {}
-            for op in getattr(plan, "ops", []) or []:
-                k = getattr(op, "kind", None)
-                ops_counts[k] = ops_counts.get(k, 0) + 1
-
-            policy_backend = (
-                str(t3cfg.get("backend", "rulebased")) if isinstance(t3cfg, dict) else "rulebased"
-            )
-            # Compute reflection flag for logging: Plan.reflection or stashed planner flag
-            _plan_reflection_flag = bool(getattr(plan, "reflection", False))
-            if not _plan_reflection_flag:
-                try:
-                    if isinstance(state, dict):
-                        _plan_reflection_flag = bool(state.get("_planner_reflection_flag", False))
-                    else:
-                        _plan_reflection_flag = bool(getattr(state, "_planner_reflection_flag", False))
+                    setattr(state, "logs", state_logs)
                 except Exception:
-                    _plan_reflection_flag = False
+                    state_logs = None
+        if isinstance(state_logs, list):
+            trace_meta["state_logs"] = state_logs
 
-            # Summary row (t3.jsonl)
-            _append_jsonl(
-                "t3.jsonl",
-                {
-                    "turn": turn_id,
-                    "agent": agent_id,
-                    "backend": backend_used,
-                    **(
-                        {"backend_fallback": backend_fallback, "fallback_reason": fallback_reason}
-                        if backend_fallback
-                        else {}
-                    ),
-                    "ops_counts": ops_counts,
-                    "requested_retrieve": bool(requested_retrieve),
-                    "rag_used": bool(rag_metrics.get("rag_used", False)),
-                    "ms_plan": plan_ms,
-                    "ms_rag": rag_ms,
-                    "ms_speak": speak_ms,
-                    **({"now": now} if now else {}),
-                },
-            )
+        trace_reason = getattr(ctx, "trace_reason", None)
+        if trace_reason is None and isinstance(ctx, dict):
+            trace_reason = ctx.get("trace_reason")
+        if trace_reason is not None:
+            trace_meta["trace_reason"] = trace_reason
 
-            # Detailed plan log
-            _append_jsonl(
-                "t3_plan.jsonl",
-                {
-                    "turn": turn_id,
-                    "agent": agent_id,
-                    "policy_backend": policy_backend,
-                    "backend": backend_used,
-                    **(
-                        {"backend_fallback": backend_fallback, "fallback_reason": fallback_reason}
-                        if backend_fallback
-                        else {}
-                    ),
-                    "ops_counts": ops_counts,
-                    "requested_retrieve": bool(requested_retrieve),
-                    "rag_used": bool(rag_metrics.get("rag_used", False)),
-                    "reflection": _plan_reflection_flag,
-                    "ms_deliberate": plan_ms,
-                    "ms_rag": rag_ms,
-                    **({"now": now} if now else {}),
-                },
-            )
+        emit_trace(dialog_bundle.get("cfg", {}), prompt_text, dialog_bundle, trace_meta)
 
-            # Dialogue logging
-            dlg_extra = {}
-            if backend_used == "llm":
-                adapter_name = getattr(
-                    adapter,
-                    "name",
-                    adapter.__class__.__name__ if hasattr(adapter, "__class__") else "Unknown",
-                )
-                model = str(llm_cfg.get("model", ""))
-                temperature = float(llm_cfg.get("temperature", 0.2))
-                dlg_extra.update(
-                    {
-                        "backend": "llm",
-                        "adapter": adapter_name,
-                        "model": model,
-                        "temperature": temperature,
-                    }
-                )
-            elif backend_used == "patched":
-                dlg_extra.update({"backend": "patched"})
+        # Backend selection
+        backend_cfg = (
+            str(t3cfg.get("backend", "rulebased")) if isinstance(t3cfg, dict) else "rulebased"
+        )
+        llm_cfg = t3cfg.get("llm", {}) if isinstance(t3cfg, dict) else {}
+        adapter = (
+            state.get("llm_adapter", None)
+            if isinstance(state, dict)
+            else getattr(state, "llm_adapter", None)
+        ) or getattr(ctx, "llm_adapter", None)
+
+        backend_used = "rulebased"
+        backend_fallback = None
+        fallback_reason = None
+
+        # let tests monkeypatch a module-level t3_dialogue with flexible signatures for speed and laziness.
+        dlg_fn = None
+        if orch_module is not None:
+            dlg_fn = getattr(orch_module, "t3_dialogue", None)
+        if dlg_fn is None:
+            dlg_fn = globals().get("t3_dialogue")
+        if callable(dlg_fn):
+            try:
+                # pref sig: (dialog_bundle, plan)
+                res = dlg_fn(dialog_bundle, plan)
+            except TypeError:
+                # Fallback signature used by some tests: (ctx, state, dialog_bundle)
+                res = dlg_fn(ctx, state, dialog_bundle)
+            # normaliaztion: support returning just a string or (utter, metrics)
+            if isinstance(res, tuple):
+                utter = res[0]
+                speak_metrics = res[1] if len(res) > 1 and isinstance(res[1], dict) else {}
             else:
-                dlg_extra.update({"backend": "rulebased"})
+                utter = res
+                speak_metrics = {}
+            backend_used = "patched"
+        else:
+            if backend_cfg == "llm" and adapter is not None:
+                utter, speak_metrics = llm_speak(dialog_bundle, plan, adapter)
+                backend_used = "llm"
+            else:
+                utter, speak_metrics = speak(dialog_bundle, plan)
+                if backend_cfg == "llm" and adapter is None:
+                    backend_fallback, fallback_reason = "rulebased", "no_adapter"
+                elif backend_cfg not in ("rulebased", "llm"):
+                    backend_fallback, fallback_reason = "rulebased", "invalid_backend"
 
-            _append_jsonl(
-                "t3_dialogue.jsonl",
-                {
-                    "turn": turn_id,
-                    "agent": agent_id,
-                    "tokens": int(speak_metrics.get("tokens", 0)),
-                    "truncated": bool(speak_metrics.get("truncated", False)),
-                    "style_prefix_used": bool(speak_metrics.get("style_prefix_used", False)),
-                    "snippet_count": int(speak_metrics.get("snippet_count", 0)),
-                    "ms": speak_ms,
-                    **dlg_extra,
-                    **({"now": now} if now else {}),
-                },
+        speak_ms = round((time.perf_counter() - t0) * 1000.0, 3)
+
+        # Plan logging
+        ops_counts: Dict[str, int] = {}
+        for op in getattr(plan, "ops", []) or []:
+            k = getattr(op, "kind", None)
+            ops_counts[k] = ops_counts.get(k, 0) + 1
+
+        policy_backend = (
+            str(t3cfg.get("backend", "rulebased")) if isinstance(t3cfg, dict) else "rulebased"
+        )
+        # Compute reflection flag for logging: Plan.reflection or stashed planner flag
+        _plan_reflection_flag = bool(getattr(plan, "reflection", False))
+        if not _plan_reflection_flag:
+            try:
+                if isinstance(state, dict):
+                    _plan_reflection_flag = bool(state.get("_planner_reflection_flag", False))
+                else:
+                    _plan_reflection_flag = bool(getattr(state, "_planner_reflection_flag", False))
+            except Exception:
+                _plan_reflection_flag = False
+        _append_jsonl(
+            "t3_plan.jsonl",
+            {
+                "turn": turn_id,
+                "agent": agent_id,
+                "policy_backend": policy_backend,
+                "backend": backend_used,
+                **(
+                    {"backend_fallback": backend_fallback, "fallback_reason": fallback_reason}
+                    if backend_fallback
+                    else {}
+                ),
+                "ops_counts": ops_counts,
+                "requested_retrieve": bool(requested_retrieve),
+                "rag_used": bool(rag_metrics.get("rag_used", False)),
+                "reflection": _plan_reflection_flag,
+                "ms_deliberate": plan_ms,
+                "ms_rag": rag_ms,
+                **({"now": now} if now else {}),
+            },
+        )
+
+        # Dialogue logging
+        dlg_extra = {}
+        if backend_used == "llm":
+            adapter_name = getattr(
+                adapter,
+                "name",
+                adapter.__class__.__name__ if hasattr(adapter, "__class__") else "Unknown",
             )
-        # (end gated T3)
+            model = str(llm_cfg.get("model", ""))
+            temperature = float(llm_cfg.get("temperature", 0.2))
+            dlg_extra.update(
+                {
+                    "backend": "llm",
+                    "adapter": adapter_name,
+                    "model": model,
+                    "temperature": temperature,
+                }
+            )
+        else:
+            dlg_extra.update({"backend": "rulebased"})
+
+        _append_jsonl(
+            "t3_dialogue.jsonl",
+            {
+                "turn": turn_id,
+                "agent": agent_id,
+                "tokens": int(speak_metrics.get("tokens", 0)),
+                "truncated": bool(speak_metrics.get("truncated", False)),
+                "style_prefix_used": bool(speak_metrics.get("style_prefix_used", False)),
+                "snippet_count": int(speak_metrics.get("snippet_count", 0)),
+                "ms": speak_ms,
+                **dlg_extra,
+                **({"now": now} if now else {}),
+            },
+        )
 
         # the kill switch (t4.enabled). Default True if unspecified.
         t4_cfg_full = (_get_cfg(ctx).get("t4") if isinstance(_get_cfg(ctx), dict) else {}) or {}
@@ -1534,10 +1465,7 @@ class Orchestrator:
             },
         )
 
-        _final_line = utter if isinstance(utter, str) else ""
-        if not _final_line:
-            _final_line = (str(input_text or "")).strip() or "…"
-        return TurnResult(line=_final_line, events=[])
+        return TurnResult(line=utter, events=[])
 
 
 def run_smoke_turn(cfg: Dict[str, Any] | None = None, log_dir: str | None = None, input_text: str = "") -> TurnResult:

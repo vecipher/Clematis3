@@ -420,15 +420,6 @@ jobs:
           # wheel paths use the data-files target path
           unzip -l dist/*.whl | grep -E 'share/examples/clematis/gel/(enabled|disabled)\.yaml'
 
-      - name: Verify demo run bundle included in artifacts
-        run: |
-          set -euo pipefail
-          echo "Verify demo bundle is present in sdist and wheel"
-          # sdist paths include a top-level project dir (e.g., name-version/)
-          tar -tzf dist/*.tar.gz | grep -E '(^|/)clematis/examples/run_bundles/run_demo_bundle\.json$'
-          # wheel paths are under the package directory
-          unzip -l dist/*.whl | grep -F 'clematis/examples/run_bundles/run_demo_bundle.json'
-
       - name: Assert viewer included in wheel
         run: |
           set -euo pipefail

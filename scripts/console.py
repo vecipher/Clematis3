@@ -141,52 +141,10 @@ def adapter_step(state: dict, now_ms: int, input_text: str):
     # Prepare deterministic context
     try:
         from types import SimpleNamespace
-        # Build a small t3 config from environment flags so orchestrator can pick it up
-        _t3_allow = (os.environ.get("CLEMATIS_T3_ALLOW") == "1")
-        _t3_apply = (os.environ.get("CLEMATIS_T3_APPLY_OPS") == "1")
-        _llm_mode = os.environ.get("CLEMATIS_LLM_MODE", "mock")
-        _llm_cassette = os.environ.get("CLEMATIS_LLM_CASSETTE")
-        _backend = "rulebased" if _llm_mode == "rulebased" else "llm"
-
-        cfg_ns = SimpleNamespace(
-            t1={},
-            t2={},
-            t3={
-                "enabled": _t3_allow,
-                "allow": _t3_allow,          # alias accepted by orchestrator
-                "apply_ops": _t3_apply,
-                "backend": _backend,
-                "llm": {"mode": _llm_mode, "cassette": _llm_cassette},
-                "max_rag_loops": 1,
-            },
-            scheduler={},
-        )
+        # Stages (e.g., t1) access ctx.cfg.t1 and expect a dict there.
+        # Provide empty sections; orchestrator will derive budgets on the fly.
+        cfg_ns = SimpleNamespace(t1={}, t2={}, t3={}, scheduler={})
         ctx = SimpleNamespace(now_ms=now_ms, turn_id="1", agent_id="console", cfg=cfg_ns)
-
-        # Best-effort: attach an adapter if available for mock/replay/live; silently skip if not present
-        try:
-            if _backend == "llm":
-                if _llm_mode == "mock":
-                    try:
-                        from clematis.adapters.llm import FixtureLLMAdapter  # type: ignore
-                        ctx.llm_adapter = FixtureLLMAdapter()
-                    except Exception:
-                        pass
-                elif _llm_mode == "replay" and _llm_cassette:
-                    try:
-                        from clematis.adapters.llm import ReplayLLMAdapter  # type: ignore
-                        ctx.llm_adapter = ReplayLLMAdapter(_llm_cassette)
-                    except Exception:
-                        pass
-                elif _llm_mode == "live":
-                    try:
-                        from clematis.adapters.llm import LiveOpenAIAdapter  # type: ignore
-                        ctx.llm_adapter = LiveOpenAIAdapter.from_env()  # may raise; ok to skip
-                    except Exception:
-                        pass
-        except Exception:
-            # never let adapter wiring break deterministic runs
-            pass
     except Exception:
         # Fallback (shouldn't happen): minimal mapping shape
         ctx = {"now_ms": now_ms, "cfg": {"t1": {}, "t2": {}, "t3": {}, "scheduler": {}}}
@@ -334,9 +292,7 @@ def write_json(path: str, obj: Any) -> None:
             return [canonical(x) for x in o]
         return o
     data = json.dumps(canonical(obj), indent=2, ensure_ascii=False)
-    p = pathlib.Path(path)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(data + "\n", encoding="utf-8")
+    pathlib.Path(path).write_text(data + "\n", encoding="utf-8")
 
 def load_json(path: str) -> Dict[str, Any]:
     with open(path, "r", encoding="utf-8") as f:
@@ -344,7 +300,7 @@ def load_json(path: str) -> Dict[str, Any]:
 
 def summarize_bundle(bundle: Dict[str, Any]) -> Dict[str, Any]:
     logs = bundle.get("logs") or {}
-    stages = ("t1", "t2", "t3", "t3_reflection", "t4", "apply", "turn")
+    stages = ("t1", "t2", "t4", "apply", "turn")
     counts = {k: len(logs.get(k, [])) for k in stages}
     snaps_list = bundle.get("snapshots")
     if isinstance(snaps_list, list):
@@ -396,15 +352,6 @@ def cmd_step(args: argparse.Namespace) -> int:
     warn_nondeterminism()
     st = adapter_reset(args.snapshot) if args.snapshot else adapter_reset(None)
     now_ms = args.now_ms if args.now_ms is not None else DEFAULT_NOW_MS
-    # Propagate T3/LLM flags via env so the orchestrator gate can see them
-    if getattr(args, "t3", False):
-        os.environ["CLEMATIS_T3_ALLOW"] = "1"
-    if getattr(args, "t3_apply_ops", False):
-        os.environ["CLEMATIS_T3_APPLY_OPS"] = "1"
-    if getattr(args, "llm_mode", None):
-        os.environ["CLEMATIS_LLM_MODE"] = args.llm_mode
-    if getattr(args, "llm_cassette", None):
-        os.environ["CLEMATIS_LLM_CASSETTE"] = args.llm_cassette
     st2, logs = adapter_step(st, now_ms=now_ms, input_text=(args.input or ""))
     if args.out:
         write_json(args.out, logs)
@@ -433,21 +380,6 @@ def build_parser() -> argparse.ArgumentParser:
     p_step.add_argument("--snapshot", type=str, default=None, help="snapshot .json path (default: latest)")
     p_step.add_argument("--now-ms", type=int, default=None, help=f"logical time (default: {DEFAULT_NOW_MS})")
     p_step.add_argument("--input", type=str, default="", help="input text for the turn")
-    # T3 / LLM gating
-    p_step.add_argument("--t3", action="store_true", help="enable T3 (planner/dialogue/ops)")
-    p_step.add_argument("--t3-apply-ops", action="store_true", help="apply T3 ops to state (off by default)")
-    p_step.add_argument(
-        "--llm-mode",
-        choices=["mock", "replay", "live", "rulebased"],
-        default=os.environ.get("CLEMATIS_LLM_MODE", "mock"),
-        help="LLM backend mode (default: mock). 'rulebased' forces non-LLM speak",
-    )
-    p_step.add_argument(
-        "--llm-cassette",
-        type=str,
-        default=os.environ.get("CLEMATIS_LLM_CASSETTE"),
-        help="Path to replay cassette when --llm-mode=replay",
-    )
     p_step.add_argument("--out", type=str, default=None, help="write logs to file (default: stdout)")
     p_step.set_defaults(fn=cmd_step)
 
