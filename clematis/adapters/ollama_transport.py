@@ -1,6 +1,7 @@
 # clematis/adapters/ollama_transport.py
 from __future__ import annotations
-import json, urllib.request
+import json
+import urllib.request
 
 def generate_with_ollama(prompt: str, *, model: str, max_tokens: int, temperature: float, timeout_s: float) -> str:
     body = {
